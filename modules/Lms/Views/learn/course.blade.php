@@ -522,27 +522,181 @@
 </section>
 
 {{-- ========== EXAM (GV-4) ========== --}}
+<style>
+    /* NHCH là dữ liệu đồng bộ từ Import đề; không tạo/sửa thủ công trong LMS. */
+    [data-panel="exam"] form[action*="exam-banks.store"],
+    [data-panel="exam"] form[action*="exam-questions.store"],
+    [data-panel="exam"] form[action*="exam-questions.update"],
+    [data-panel="exam"] form[action*="exam-questions.move"],
+    [data-panel="exam"] form[action*="exam-questions.destroy"] { display:none !important; }
+    [data-panel="exam"] #manual-bank-form { display:none !important; }
+    [data-panel="exam"] #bank-import-form { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.35fr) auto; align-items:start; gap:12px; padding:15px; border:1px solid #cce9e4; border-radius:16px; background:linear-gradient(135deg,#f5fcfb,#ffffff); box-shadow:0 7px 18px rgba(15,118,110,.06); }
+    [data-panel="exam"] #bank-import-form .import-field { display:flex; min-width:0; flex-direction:column; gap:6px; }
+    [data-panel="exam"] #bank-import-form .import-label { color:#164e63; font-size:12px; font-weight:800; }
+    [data-panel="exam"] #bank-import-form select,
+    [data-panel="exam"] #bank-import-form input[type="file"] { min-height:44px; border:1px solid #cbdedb; border-radius:10px; background:#fff; color:#334155; }
+    [data-panel="exam"] #bank-import-form input[type="file"] { padding:9px 10px; font-size:12px; }
+    [data-panel="exam"] #bank-import-form input[type="file"]::file-selector-button { margin-right:8px; border:0; border-radius:7px; background:#e0f2f1; color:#0f766e; padding:6px 9px; font-weight:700; cursor:pointer; }
+    [data-panel="exam"] #bank-import-form button { min-height:44px; border:0; border-radius:10px; background:#0f9588; color:#fff; padding:0 18px; font-weight:700; white-space:nowrap; box-shadow:0 6px 14px rgba(15,149,136,.16); transition:background .15s,transform .15s; }
+    [data-panel="exam"] #bank-import-form > button { align-self:end; }
+    [data-panel="exam"] #bank-import-form button:hover { background:#087c72; transform:translateY(-1px); }
+     [data-panel="exam"] #bank-import-form .import-help { grid-column:1/-1; margin-top:-2px; color:#64748b; font-size:11px; }
+     [data-panel="exam"] .bank-actions { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+     [data-panel="exam"] .bank-actions form { margin:0; }
+     [data-panel="exam"] .bank-action { display:inline-flex; min-height:34px; align-items:center; gap:6px; border:1px solid transparent; border-radius:9px; padding:0 11px; font-size:12px; font-weight:700; line-height:1; transition:background .15s, border-color .15s, transform .15s; }
+     [data-panel="exam"] .bank-action:hover { transform:translateY(-1px); }
+     [data-panel="exam"] .bank-action-submit { border-color:#bfdbfe; background:#eff6ff; color:#1d4ed8; }
+     [data-panel="exam"] .bank-action-submit:hover { background:#dbeafe; }
+     [data-panel="exam"] .bank-action-approve { border-color:#a7f3d0; background:#ecfdf5; color:#047857; }
+     [data-panel="exam"] .bank-action-approve:hover { background:#d1fae5; }
+     [data-panel="exam"] .bank-action-delete { border-color:#fecdd3; background:#fff1f2; color:#e11d48; }
+     [data-panel="exam"] .bank-action-delete:hover { background:#ffe4e6; }
+     [data-panel="exam"] .lms-card > .border.border-slate-100.rounded-xl form.mb-2 { display:inline-block; margin:0 6px 10px 0; }
+     [data-panel="exam"] .lms-card > .border.border-slate-100.rounded-xl form.mb-2 button { display:inline-flex; min-height:36px; align-items:center; justify-content:center; gap:.4rem; border:1px solid #0f766e; border-radius:.65rem; background:#0d9488; color:#fff; padding:.55rem 1rem; font-size:.875rem; font-weight:600; line-height:1; cursor:pointer; transition:box-shadow .25s ease, background .2s ease, border-color .2s ease, color .2s ease; }
+     [data-panel="exam"] .lms-card > .border.border-slate-100.rounded-xl form.mb-2 button:hover { background:#0f766e; box-shadow:0 0 0 1px rgba(13,148,136,.18), 0 0 12px rgba(13,148,136,.16); }
+     [data-panel="exam"] .lms-card > .border.border-slate-100.rounded-xl form.mb-2 + form.mb-2 button { border-color:#be123c; background:#e11d48; color:#fff; }
+     [data-panel="exam"] .lms-card > .border.border-slate-100.rounded-xl form.mb-2 + form.mb-2 button:hover { background:#be123c; box-shadow:0 0 0 1px rgba(244,63,94,.25), 0 0 12px rgba(244,63,94,.2); }
+     [data-panel="exam"] .bank-questions-collapsible { margin-top:10px; border-top:1px solid #e2e8f0; }
+     [data-panel="exam"] .bank-questions-collapsible > summary { display:flex; align-items:center; gap:7px; padding:10px 2px; color:#0f766e; font-size:12px; font-weight:700; cursor:pointer; list-style:none; }
+     [data-panel="exam"] .bank-questions-collapsible > summary::-webkit-details-marker { display:none; }
+     [data-panel="exam"] .bank-questions-collapsible > summary::after { content:'+'; margin-left:auto; color:#64748b; font-size:18px; font-weight:400; line-height:1; }
+     [data-panel="exam"] .bank-questions-collapsible[open] > summary::after { content:'−'; }
+     [data-panel="exam"] .bank-questions-count { color:#94a3b8; font-weight:500; }
+     [data-panel="exam"] #teach-exam-create-form > .rounded-lg.border-blue-100,
+     [data-panel="exam"] #teach-exam-create-form > .rounded-xl.border-slate-100 { display:none; }
+      [data-panel="exam"] #teach-exam-create-form #exam-lesson-rows { display:none; }
+     [data-panel="exam"] #exam-lesson-rows-all { display:none; }
+     [data-panel="exam"] .exam-lesson-details > summary { display:flex; align-items:center; gap:10px; padding:11px 10px; cursor:pointer; list-style:none; }
+     [data-panel="exam"] .exam-lesson-details > summary::-webkit-details-marker { display:none; }
+     [data-panel="exam"] .exam-lesson-details > summary::after { content:'+'; margin-left:auto; color:#64748b; font-size:18px; line-height:1; }
+     [data-panel="exam"] .exam-lesson-details[open] > summary::after { content:'−'; }
+     [data-panel="exam"] .exam-lesson-title { min-width:0; flex:1; color:#0f766e; font-weight:700; }
+     [data-panel="exam"] .exam-lesson-available { color:#64748b; white-space:nowrap; }
+     [data-panel="exam"] .exam-lesson-request { display:inline-flex; align-items:center; gap:6px; color:#334155; font-size:11px; white-space:nowrap; }
+     [data-panel="exam"] .exam-lesson-request input { width:68px; border:1px solid #cbd5e1; border-radius:8px; padding:5px 6px; text-align:center; font-size:13px; }
+     [data-panel="exam"] .exam-lesson-question-list { max-height:230px; overflow-y:auto; border-top:1px solid #e2e8f0; background:#f8fafc; padding:4px 10px; }
+     [data-panel="exam"] .exam-lesson-question { display:flex; align-items:flex-start; gap:8px; border-bottom:1px solid #e2e8f0; padding:8px 2px; font-size:11px; }
+     [data-panel="exam"] .exam-lesson-question:last-child { border-bottom:0; }
+     [data-panel="exam"] .exam-answer-label { margin-left:auto; flex:0 0 auto; border-radius:999px; background:#ccfbf1; color:#0f766e; padding:2px 7px; font-weight:700; }
+     [data-panel="exam"] .bank-lesson-group { border:1px solid #e2e8f0; border-radius:10px; background:#fff; margin-bottom:6px; overflow:hidden; }
+     [data-panel="exam"] .bank-lesson-group > summary { display:flex; align-items:center; gap:8px; padding:10px 11px; cursor:pointer; list-style:none; color:#0f766e; font-size:12px; font-weight:700; }
+     [data-panel="exam"] .bank-lesson-group > summary::-webkit-details-marker { display:none; }
+     [data-panel="exam"] .bank-lesson-group > summary::before { content:'›'; color:#94a3b8; font-size:18px; line-height:12px; transition:transform .15s; }
+     [data-panel="exam"] .bank-lesson-group[open] > summary::before { transform:rotate(90deg); }
+     [data-panel="exam"] .bank-lesson-name { min-width:0; flex:1; }
+     [data-panel="exam"] .bank-lesson-count { color:#64748b; font-weight:600; white-space:nowrap; }
+     [data-panel="exam"] .bank-lesson-question-list { max-height:230px; overflow-y:auto; border-top:1px solid #e2e8f0; background:#f8fafc; padding:3px 10px; }
+     [data-panel="exam"] .bank-lesson-question { display:flex; align-items:flex-start; gap:8px; border-bottom:1px solid #e2e8f0; padding:8px 2px; font-size:11px; }
+     [data-panel="exam"] .bank-lesson-question:last-child { border-bottom:0; }
+      [data-panel="exam"] .bank-answer-label { margin-left:auto; flex:0 0 auto; border-radius:999px; background:#ccfbf1; color:#0f766e; padding:2px 7px; font-weight:700; }
+      [data-panel="exam"] .exam-field-label { display:flex; min-width:0; flex-direction:column; gap:5px; color:#475569; font-size:11px; font-weight:700; }
+      [data-panel="exam"] .exam-field-label input { width:100%; }
+      [data-panel="exam"] .bank-lesson-groups ~ ul.divide-y.divide-slate-50 { display:none; }
+     [data-panel="exam"] .border.border-slate-100.rounded-xl table:has(+ .bank-lesson-groups) { display:none; }
+     [data-panel="exam"] .border.border-slate-100.rounded-xl > div:has(+ .bank-questions-collapsible) { display:none; }
+     [data-panel="exam"] .lms-card.overflow-hidden li > .flex.flex-wrap.gap-1 { flex-wrap:nowrap; white-space:nowrap; overflow-x:auto; padding-bottom:2px; }
+     [data-panel="exam"] .lms-card.overflow-hidden li > .flex.flex-wrap.gap-1 form { flex:0 0 auto; }
+     @media (max-width:640px) { [data-panel="exam"] .exam-lesson-details > summary { flex-wrap:wrap; } [data-panel="exam"] .exam-lesson-title { flex-basis:100%; } }
+     [data-panel="exam"] #exam-lesson-plan table th { white-space:nowrap; }
+     [data-panel="exam"] #exam-lesson-plan .exam-lesson-count:focus { border-color:#0d9488; outline:2px solid rgba(13,148,136,.15); }
+     @media (max-width:800px) { [data-panel="exam"] #bank-import-form { grid-template-columns:1fr; } [data-panel="exam"] #bank-import-form button { width:100%; } }
+</style>
 <section class="lms-panel {{ $activeTab === 'exam' ? 'is-active' : '' }}" data-panel="exam">
     <div class="grid lg:grid-cols-2 gap-4">
         {{-- NHCH --}}
         <div class="space-y-4">
             <div class="lms-card p-4">
                 <div class="font-semibold text-slate-800 mb-3"><i class="bi bi-collection text-teal-700"></i> Ngân hàng câu hỏi</div>
-                <form method="POST" action="{{ route('lms.teach.exam-banks.store', $course) }}" class="flex flex-wrap gap-2 mb-3" data-turbo="false">
+                <form id="manual-bank-form" method="POST" action="{{ route('lms.teach.exam-banks.store', $course) }}" class="flex flex-wrap gap-2 mb-3" data-turbo="false">
                     @csrf
                     <input name="title" required maxlength="200" placeholder="Tên NHCH *"
                            class="flex-1 min-w-[10rem] border border-slate-200 rounded-lg text-sm px-3 py-2">
                     <button class="lms-btn-solid text-sm" style="padding:0.45rem 0.9rem">Tạo NHCH</button>
                 </form>
-                @forelse($questionBanks as $bank)
+                <div class="mb-2 flex items-start gap-2">
+                    <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-teal-100 text-teal-700"><i class="bi bi-cloud-arrow-up"></i></div>
+                    <div><div class="text-sm font-bold text-slate-800">Import ngân hàng trắc nghiệm</div><div class="text-xs text-slate-500">Chọn bài học và tải file câu hỏi. Lớp, môn đã lấy theo khóa học này.</div></div>
+                </div>
+                <form id="bank-import-form" method="POST" action="{{ route('lms.teach.exam-banks.import', $course) }}" enctype="multipart/form-data" class="mb-3" data-turbo="false">
+                    @csrf
+                    <div class="import-field"><label class="import-label" for="bank-import-lesson"><span class="mr-1 text-teal-600">01</span> Chọn bài học</label><select id="bank-import-lesson" name="lms_lesson_id" required data-native-select="1"><option value="">Chọn một bài học *</option>@foreach($course->lessons as $lesson)<option value="{{ $lesson->id }}">{{ $lesson->sort_order }}. {{ $lesson->title }}</option>@endforeach</select></div>
+                    <div class="import-field"><label class="import-label" for="bank-import-file"><span class="mr-1 text-teal-600">02</span> File câu hỏi</label><input id="bank-import-file" type="file" name="file" required accept=".txt,.csv,.tsv,.doc,.docx"></div>
+                    <button type="submit"><i class="bi bi-upload mr-1"></i> Import câu hỏi</button>
+                    <div class="import-help"><i class="bi bi-info-circle mr-1"></i> Hỗ trợ .DOC, .DOCX, .TXT, .CSV, .TSV · File gồm câu hỏi A-D và dòng ANSWER: A/B/C/D · Ngân hàng sẽ ở trạng thái bản nháp để kiểm tra và gửi duyệt.</div>
+                </form>
+                @php
+                    $approvedQuestions = $questionBanks->where('status', 'APPROVED')->flatMap(fn ($approvedBank) => $approvedBank->questions);
+                @endphp
+                @if($approvedQuestions->isNotEmpty())
+                    <div class="border border-emerald-200 bg-emerald-50/40 rounded-xl p-3 mb-3">
+                        <div class="flex items-center justify-between mb-2">
+                            <div class="font-semibold text-emerald-800">Ngân hàng trắc nghiệm đã duyệt</div>
+                            <span class="text-xs text-emerald-700">{{ $approvedQuestions->count() }} câu</span>
+                        </div>
+                        <details class="bank-questions-collapsible" open>
+                            <summary><i class="bi bi-list-check"></i><span>Xem toàn bộ câu hỏi đã duyệt</span><span class="bank-questions-count">{{ $approvedQuestions->count() }} câu</span></summary>
+                            <div class="bank-lesson-groups">
+                            @foreach($approvedQuestions->groupBy('lms_lesson_id')->sortBy(fn ($lessonQuestions) => $lessonQuestions->first()->lesson?->sort_order ?? $course->lessons->firstWhere('id', $lessonQuestions->first()->lms_lesson_id)?->sort_order ?? PHP_INT_MAX) as $lessonId => $lessonQuestions)
+                                @php $approvedLesson = $lessonQuestions->first()->lesson ?: $course->lessons->firstWhere('id', $lessonId); @endphp
+                                <details class="bank-lesson-group">
+                                    <summary><span class="bank-lesson-name">{{ $approvedLesson?->title ?? 'Chưa gắn bài' }}</span><span class="bank-lesson-count">{{ $lessonQuestions->count() }} câu</span></summary>
+                                    <div class="bank-lesson-question-list">
+                                    @foreach($lessonQuestions as $approvedQuestion)
+                                        <div class="bank-lesson-question"><span class="font-mono text-slate-400">#{{ $loop->iteration }}</span><span class="min-w-0 flex-1 text-slate-700">{{ \Illuminate\Support\Str::limit($approvedQuestion->stem, 180) }}</span><span class="bank-answer-label">{{ $approvedQuestion->correctAnswerLabel() }}</span></div>
+                                    @endforeach
+                                    </div>
+                                </details>
+                            @endforeach
+                            </div>
+                        </details>
+                    </div>
+                @endif
+                <div class="pt-2 mb-2 flex items-center justify-between gap-2">
+                    <div class="text-xs font-bold uppercase tracking-wide text-amber-700">Bảng đề / ngân hàng đang chờ duyệt</div>
+                    @if($questionBanks->contains(fn ($bank) => in_array($bank->status, ['DRAFT', 'RETURNED'], true) && $bank->questions_count > 0))
+                        <form method="POST" action="{{ route('lms.teach.exam-banks.submit-pending', $course) }}" data-turbo="false">
+                            @csrf
+                            <button type="submit" class="lms-btn-solid text-xs" style="padding:.4rem .7rem">Gửi tất cả đi duyệt</button>
+                        </form>
+                    @endif
+                </div>
+                @php $lastBankGroup = 'pending'; @endphp
+                @forelse($questionBanks->reject(fn ($bank) => $bank->status === 'APPROVED') as $bank)
+                    @php $bankGroup = 'pending'; @endphp
+                    @if($lastBankGroup !== $bankGroup)
+                        <div class="pt-2 mb-2 text-xs font-bold uppercase tracking-wide {{ $bankGroup === 'approved' ? 'text-emerald-700' : 'text-amber-700' }}">
+                            {{ $bankGroup === 'approved' ? 'Ngân hàng câu hỏi đã duyệt' : 'Bảng đề / ngân hàng đang chờ duyệt' }}
+                        </div>
+                        @php $lastBankGroup = $bankGroup; @endphp
+                    @endif
                     <div class="border border-slate-100 rounded-xl p-3 mb-3">
                         <div class="font-medium text-slate-900 text-sm mb-2">
                             {{ $bank->title }}
-                            <span class="text-xs text-slate-400 font-normal">({{ $bank->questions_count }} câu)</span>
                         </div>
-
+                        @if($bank->status === 'PENDING_DEPT' && auth()->user()->hasAnyRole(['department-head','head-of-department','faculty-manager','super-admin']))
+                            <form method="POST" action="{{ route('lms.teach.exam-banks.approve', [$course, $bank]) }}" class="mb-2" data-turbo="false">@csrf<button class="text-xs text-emerald-700 hover:underline">Duyệt cấp khoa → khảo thí</button></form>
+                        @elseif($bank->status === 'PENDING_EXAM_OFFICE' && auth()->user()->hasAnyRole(['exam-manager','exam-office','testing-office','training-office-manager','super-admin']))
+                            <form method="POST" action="{{ route('lms.teach.exam-banks.approve', [$course, $bank]) }}" class="mb-2" data-turbo="false">@csrf<button class="text-xs text-emerald-700 hover:underline">Khảo thí duyệt ngân hàng</button></form>
+                        @elseif($bank->status === 'PENDING_BGH' && auth()->user()->hasAnyRole(['bgh','board-of-management','ban giám hiệu','super-admin']))
+                            <form method="POST" action="{{ route('lms.teach.exam-banks.approve', [$course, $bank]) }}" class="mb-2" data-turbo="false">@csrf<button class="text-xs text-emerald-700 hover:underline">Ban Giám hiệu duyệt ngân hàng</button></form>
+                        @elseif($bank->status !== 'PENDING_DEPT' && $bank->status !== 'PENDING_EXAM_OFFICE' && $bank->status !== 'APPROVED')
+                            <form method="POST" action="{{ route('lms.teach.exam-banks.submit', [$course, $bank]) }}" class="mb-2" data-turbo="false">@csrf<button class="text-xs text-blue-700 hover:underline">Gửi ngân hàng đi duyệt</button></form>
+                            <form method="POST" action="{{ route('lms.teach.exam-banks.destroy', [$course, $bank]) }}" class="mb-2" data-turbo="false" onsubmit="return confirm('Xóa ngân hàng này và toàn bộ câu hỏi?')">@csrf @method('DELETE')<button class="text-xs text-rose-600 hover:underline">Xóa ngân hàng</button></form>
+                        @else
+                            <div class="text-xs {{ $bank->status === 'APPROVED' ? 'text-emerald-700' : 'text-amber-700' }} mb-2">
+                                @switch($bank->status)
+                                    @case('APPROVED') Đã duyệt @break
+                                    @case('PENDING_EXAM_OFFICE') Đang chờ khảo thí duyệt @break
+                                    @case('PENDING_BGH') Đang chờ Ban Giám hiệu duyệt @break
+                                    @case('PENDING_DEPT') Đang chờ chủ nhiệm khoa duyệt @break
+                                    @default Bản nháp — chưa gửi duyệt
+                                @endswitch
+                            </div>
+                        @endif
                         {{-- Danh sách câu: sửa / xóa / reorder (G2) --}}
-                        <ul class="divide-y divide-slate-50 mb-3 max-h-72 overflow-y-auto">
+                         <details class="bank-questions-collapsible" open>
+                             <summary><i class="bi bi-list-check"></i><span>Xem danh sách câu hỏi</span></summary>
+                         <ul class="divide-y divide-slate-50 mb-3 max-h-72 overflow-y-auto">
                             @forelse($bank->questions as $qi => $q)
                                 @php
                                     $optsText = is_array($q->options) ? implode("\n", $q->options) : '';
@@ -551,10 +705,8 @@
                                     <div class="flex flex-wrap gap-1 justify-between items-start">
                                         <div class="min-w-0 flex-1 pr-2">
                                             <span class="text-slate-400 font-mono">#{{ $qi + 1 }}</span>
-                                            <span class="font-semibold text-teal-800 uppercase">{{ $q->type }}</span>
-                                            <span class="text-slate-400">· {{ $q->points }}đ</span>
                                             <div class="text-slate-800 mt-0.5 whitespace-pre-wrap">{{ \Illuminate\Support\Str::limit($q->stem, 120) }}</div>
-                                            <div class="text-slate-400 mt-0.5">Đáp án: <code>{{ $q->correct_answer }}</code></div>
+                                            <div class="text-slate-400 mt-0.5">Đáp án: <code>{{ $q->correctAnswerLabel() }}</code></div>
                                         </div>
                                         <div class="flex flex-wrap gap-0.5">
                                             <form method="POST" action="{{ route('lms.teach.exam-questions.move', [$course, $bank, $q]) }}" data-turbo="false">
@@ -588,7 +740,7 @@
                                             </select>
                                             <textarea name="stem" required rows="2" class="w-full border rounded-lg text-sm px-2 py-1.5">{{ $q->stem }}</textarea>
                                             <textarea name="options" rows="2" class="w-full border rounded-lg text-sm px-2 py-1.5" placeholder="MCQ: mỗi dòng 1 PA">{{ $optsText }}</textarea>
-                                            <input name="correct_answer" required value="{{ $q->correct_answer }}"
+                                            <input name="correct_answer" required value="{{ $q->correctAnswerLabel() }}"
                                                    class="w-full border rounded-lg text-sm px-2 py-1.5" placeholder="Đáp án">
                                             <div class="flex gap-2 items-center">
                                                 <input type="number" step="0.1" name="points" value="{{ $q->points }}" min="0"
@@ -601,7 +753,8 @@
                             @empty
                                 <li class="py-3 text-center text-slate-400">Chưa có câu — thêm form bên dưới.</li>
                             @endforelse
-                        </ul>
+                         </ul>
+                         </details>
 
                         <form method="POST" action="{{ route('lms.teach.exam-questions.store', [$course, $bank]) }}" class="space-y-2" data-turbo="false">
                             @csrf
@@ -616,7 +769,7 @@
                             <textarea name="options" rows="3" placeholder="MCQ: mỗi dòng 1 phương án"
                                       class="w-full border rounded-lg text-sm px-3 py-2"></textarea>
                             <input name="correct_answer" required
-                                   placeholder="Đáp án: index MCQ (0,1,…) / true|false / text"
+                                   placeholder="Đáp án: A/B/C/D / true|false / text"
                                    class="w-full border rounded-lg text-sm px-3 py-2">
                             <div class="flex flex-wrap gap-2 items-center">
                                 <input type="number" step="0.1" name="points" value="1" min="0"
@@ -639,28 +792,29 @@
                     @csrf
                     <input name="title" required maxlength="255" placeholder="Tên bài thi *"
                            class="w-full border rounded-lg text-sm px-3 py-2">
-                    <select name="bank_id" id="exam-bank-pick" class="tom-select w-full" data-tom-select>
-                        <option value="">— Lọc theo NHCH (tuỳ chọn) —</option>
-                        @foreach($questionBanks as $bank)
-                            <option value="{{ $bank->id }}">{{ $bank->title }} ({{ $bank->questions_count }} câu)</option>
-                        @endforeach
-                    </select>
-                    <div class="rounded-xl border border-slate-100 p-3 max-h-48 overflow-y-auto bg-slate-50/50">
-                        <div class="text-[11px] font-semibold text-slate-500 mb-2">G1 · Chọn câu lẻ (tick). Để trống + chọn NHCH = lấy cả bank.</div>
-                        @php $allQs = $questionBanks->flatMap(fn ($b) => $b->questions->map(fn ($q) => [$b, $q])); @endphp
-                        @forelse($allQs as [$b, $q])
-                            <label class="flex gap-2 items-start text-xs py-1 border-b border-slate-100/80 last:border-0 cursor-pointer hover:bg-white/80 rounded px-1"
-                                   data-bank-id="{{ $b->id }}">
-                                <input type="checkbox" name="question_ids[]" value="{{ $q->id }}" class="mt-0.5 exam-q-pick">
-                                <span>
-                                    <span class="text-teal-800 font-semibold">{{ $b->title }}</span>
-                                    <span class="text-slate-400">· {{ $q->type }} · {{ $q->points }}đ</span>
-                                    <span class="block text-slate-700">{{ \Illuminate\Support\Str::limit($q->stem, 80) }}</span>
-                                </span>
-                            </label>
-                        @empty
-                            <p class="text-xs text-slate-400 text-center py-3">Chưa có câu trong NHCH.</p>
-                        @endforelse
+                    @php $approvedQuestionsForExam = $questionBanks->where('status', 'APPROVED')->flatMap(fn ($bank) => $bank->questions); @endphp
+                    <div id="exam-lesson-plan" class="rounded-xl border border-teal-100 bg-teal-50/40 p-3">
+                        <div class="mb-2 flex items-center justify-between gap-2">
+                            <div class="text-sm font-semibold text-teal-900">Phân bổ số câu theo bài</div>
+                            <div class="text-sm font-bold text-teal-700">Tổng chọn: <span id="exam-selected-total">0</span> câu</div>
+                        </div>
+                        <div class="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+                            <table class="w-full text-xs"><thead class="bg-slate-50"><tr><th class="p-2 text-left">STT · Bài học</th><th class="p-2 text-center">Hiện có</th><th class="p-2 text-center">Số câu đề nghị</th></tr></thead>
+                            <tbody id="exam-lesson-groups">
+                            @foreach($approvedQuestionsForExam->groupBy('lms_lesson_id')->sortBy(fn ($lessonQuestions) => $lessonQuestions->first()->lesson?->sort_order ?? $course->lessons->firstWhere('id', $lessonQuestions->first()->lms_lesson_id)?->sort_order ?? PHP_INT_MAX) as $lessonId => $lessonQuestions)
+                                @php $lesson = $lessonQuestions->first()->lesson ?: $course->lessons->firstWhere('id', $lessonId); @endphp
+                                <tr class="exam-lesson-row"><td colspan="3" class="p-0"><details class="exam-lesson-details"><summary><span class="exam-lesson-title">{{ $lesson?->sort_order ?? '-' }} · {{ $lesson?->title ?? 'Chưa gắn bài' }}</span><span class="exam-lesson-available">{{ $lessonQuestions->count() }} câu hiện có</span><label class="exam-lesson-request">Số câu đề nghị <input type="number" name="lesson_counts[{{ $lessonId }}]" value="0" min="0" max="{{ $lessonQuestions->count() }}" class="exam-lesson-count" data-available="{{ $lessonQuestions->count() }}" onclick="event.stopPropagation()"></label></summary>
+                                    <div class="exam-lesson-question-list">@foreach($lessonQuestions as $question)<div class="exam-lesson-question"><span class="font-mono text-slate-400">#{{ $loop->iteration }}</span><span class="text-slate-700">{{ \Illuminate\Support\Str::limit($question->stem, 180) }}</span><span class="exam-answer-label">{{ $question->correctAnswerLabel() }}</span></div>@endforeach</div>
+                                </details></td></tr>
+                            @endforeach
+                            </tbody></table>
+                        </div>
+                        <p class="mt-2 text-xs text-slate-500"><i class="bi bi-shuffle mr-1"></i>Mỗi bài sẽ được bốc ngẫu nhiên đúng số câu đề nghị.</p>
+                    </div>
+                    <div class="rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm">
+                        <label class="font-semibold text-blue-900">Rút ngẫu nhiên toàn bộ ngân hàng (tùy chọn)</label>
+                        <input type="number" name="random_count" min="1" max="200" placeholder="Số câu cần rút" class="mt-1 w-full border rounded-lg px-3 py-2">
+                        <p class="text-xs text-blue-700 mt-1">Dùng mục này khi muốn rút tổng số câu, không chia theo bài.</p>
                     </div>
                     <div class="grid grid-cols-2 gap-2">
                         <input type="number" name="duration_minutes" value="{{ \Modules\Lms\Support\LmsSettings::examDurationMinutes() }}" min="5" max="480"
@@ -734,6 +888,17 @@
                                     </form>
                                 </div>
                             </div>
+                            <details class="mt-2 rounded-lg border border-slate-100 bg-slate-50 p-2">
+                                <summary class="cursor-pointer text-xs font-semibold text-teal-700">Chỉnh thời gian bài thi</summary>
+                                <form method="POST" action="{{ route('lms.teach.exams.schedule.update', [$course, $exam]) }}" class="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3" data-turbo="false">
+                                    @csrf
+                                    @method('PUT')
+                                    <label class="text-xs font-semibold text-slate-600">Thời lượng (phút)<input type="number" name="duration_minutes" value="{{ $exam->duration_minutes }}" min="5" max="480" required class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm"></label>
+                                    <label class="text-xs font-semibold text-slate-600">Mở lúc<input type="text" name="opens_at" value="{{ $exam->opens_at?->format('Y-m-d H:i') }}" class="flatpickr-datetime mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" autocomplete="off"></label>
+                                    <label class="text-xs font-semibold text-slate-600">Đóng lúc<input type="text" name="closes_at" value="{{ $exam->closes_at?->format('Y-m-d H:i') }}" class="flatpickr-datetime mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" autocomplete="off"></label>
+                                    <button type="submit" class="lms-btn-solid text-xs sm:col-span-3" style="padding:0.4rem 0.75rem">Lưu thời gian</button>
+                                </form>
+                            </details>
                         </li>
                     @empty
                         <li class="px-4 py-8 text-center text-slate-500 text-sm">Chưa có bài thi.</li>
@@ -2974,6 +3139,57 @@
         const tb = document.getElementById('lms-course-tabs');
         if (tb) tb.dataset.bound = '';
     });
+})();
+(() => {
+    const examFieldLabels = {
+        duration_minutes: 'Thời lượng (phút)',
+        max_attempts: 'Số lần làm bài',
+        opens_at: 'Mở lúc',
+        closes_at: 'Đóng lúc',
+        pass_score: 'Điểm đạt',
+    };
+    Object.entries(examFieldLabels).forEach(([name, text]) => {
+        const input = document.querySelector(`#teach-exam-create-form [name="${name}"]`);
+        if (!input || input.closest('.exam-field-label')) return;
+        const label = document.createElement('label');
+        label.className = 'exam-field-label';
+        const caption = document.createElement('span');
+        caption.textContent = text;
+        input.placeholder = '';
+        input.parentNode.insertBefore(label, input);
+        label.append(caption, input);
+    });
+    const examCreateForm = document.getElementById('teach-exam-create-form');
+    if (examCreateForm && !examCreateForm.querySelector('[name="publish_score_after_submit"]')) {
+        const scoreLabel = document.createElement('label');
+        scoreLabel.className = 'inline-flex items-center gap-2 text-sm text-slate-600';
+        scoreLabel.innerHTML = '<input type="checkbox" name="publish_score_after_submit" value="1"> Công bố điểm sau khi làm xong';
+        examCreateForm.querySelector('button[type="submit"]')?.before(scoreLabel);
+    }
+    const examLessonRows = Array.from(document.querySelectorAll('#exam-lesson-groups .exam-lesson-row'));
+    const examLessonInputs = Array.from(document.querySelectorAll('#exam-lesson-groups .exam-lesson-count'));
+    const examTotal = document.getElementById('exam-selected-total');
+    function refreshExamLessonPlan() {
+        let total = 0;
+        examLessonRows.forEach((row) => {
+            row.hidden = false;
+        });
+        examLessonInputs.forEach((input) => {
+            if (!input.disabled) total += Math.max(0, Number(input.value || 0));
+        });
+        if (examTotal) examTotal.textContent = total;
+    }
+    examLessonInputs.forEach((input) => input.addEventListener('input', refreshExamLessonPlan));
+    document.getElementById('teach-exam-create-form')?.addEventListener('submit', () => {
+        const form = document.getElementById('teach-exam-create-form');
+        form.querySelectorAll('input[name^="lesson_counts["]').forEach((input) => {
+            input.disabled = !input.closest('#exam-lesson-groups');
+        });
+        form.querySelectorAll('input[name="question_ids[]"]').forEach((input) => {
+            input.disabled = true;
+        });
+    });
+    refreshExamLessonPlan();
 })();
 </script>
 @endpush

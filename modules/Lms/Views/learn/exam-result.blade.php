@@ -7,6 +7,7 @@
     $scale10 = $maxScore > 0 ? round(($rawScore / $maxScore) * 10, 2) : 0;
     $passScore = (float) ($exam->pass_score ?? 5);
     $isGraded = $attempt->status === 'graded';
+    $canSeeScore = $canSeeScore ?? true;
     $isPass = $isGraded && $scale10 >= $passScore;
     $statusLabel = match ($attempt->status) {
         'graded' => $isPass ? 'Đạt' : 'Chưa đạt',
@@ -108,6 +109,14 @@
         if (!open) panel.scrollIntoView({behavior: 'smooth', block: 'start'});
     });
 })();
+if (!@json($canSeeScore)) {
+    const resultBody = document.querySelector('.max-w-md > .lms-card > .px-6.-mt-6');
+    const scoreCircle = resultBody?.querySelector('.mx-auto.flex.flex-col');
+    const scoreGrid = resultBody?.querySelector('.grid.grid-cols-2');
+    scoreCircle?.remove();
+    scoreGrid?.remove();
+    resultBody?.insertAdjacentHTML('afterbegin', '<div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Bài thi đã được nộp. Điểm sẽ được công bố sau.</div>');
+}
 </script>
 @endpush
 @endsection
