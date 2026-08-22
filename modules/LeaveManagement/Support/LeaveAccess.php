@@ -1,6 +1,0 @@
-<?php
-namespace Modules\LeaveManagement\Support;
-use App\Models\User;
-use App\Support\ManagerUnitScope;
-use Illuminate\Database\Eloquent\Builder;
-final class LeaveAccess { public static function isScoped(?User $user):bool{return ManagerUnitScope::isScoped($user);} public static function unitIds(?User $user):array{return ManagerUnitScope::managedUnitIds($user);} public static function canAccessUnit(int $unitId,?User $user):bool{return ManagerUnitScope::canAccessUnit($unitId,$user);} public static function personnel(Builder $query,?User $user):Builder{if(self::isScoped($user))$query->whereIn('unit_id',self::unitIds($user));return $query;} public static function requests(Builder $query,?User $user):Builder{if(self::isScoped($user))$query->where(fn($q)=>$q->whereHas('personnel',fn($p)=>$p->whereIn('unit_id',self::unitIds($user)))->orWhereIn('unit_id',self::unitIds($user)));return $query;} public static function ensurePersonnel(int $personnelId,?User $user):void{if(self::isScoped($user)&&!in_array((int)\Modules\LeaveManagement\Models\LeavePersonnel::whereKey($personnelId)->value('unit_id'),self::unitIds($user),true))abort(403,'Bạn chỉ được quản lý nhân sự thuộc đơn vị được phân công.');} }

@@ -38,8 +38,6 @@ class AppServiceProvider extends ServiceProvider
         $this->app->register(\Modules\Student\Providers\StudentServiceProvider::class);
         $this->app->register(\Modules\StudentSchedule\Providers\StudentScheduleServiceProvider::class);
         $this->app->register(\Modules\EssayExam\Providers\EssayExamServiceProvider::class);
-        $this->app->register(\Modules\Inventory\Providers\InventoryServiceProvider::class);
-        $this->app->register(\Modules\LeaveManagement\Providers\LeaveManagementServiceProvider::class);
         $this->app->register(\Modules\StandardHours\Providers\StandardHoursServiceProvider::class);
         $this->app->register(\Modules\Trash\Providers\TrashServiceProvider::class);
     }
