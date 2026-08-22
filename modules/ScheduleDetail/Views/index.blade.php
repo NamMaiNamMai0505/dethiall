@@ -1,0 +1,1 @@
+<h1>Module ScheduleDetail - Index</h1>

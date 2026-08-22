@@ -1,0 +1,104 @@
+name: Import Subject Lessons (bulk)
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag để chạy import (thường là 'latest' sau khi PR đã merge & deploy)"
+        required: false
+        default: "latest"
+      command:
+        description: "Lệnh cần chạy"
+        required: true
+        type: choice
+        options:
+          - bulk-import
+          - cleanup-duplicates
+        default: bulk-import
+      apply:
+        description: "true = ghi dữ liệu thật; false = chỉ xem trước (dry-run), không đổi gì"
+        required: true
+        type: boolean
+        default: false
+
+env:
+  LOCAL_REGISTRY: registry.hc2
+  LOCAL_PROJECT: cdhc2
+  IMAGE_NAME: tkb
+  K8S_NAMESPACE: tkb
+
+jobs:
+  import-lessons:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v4
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          tags: tag:ci
+          version: 1.90.6
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ secrets.DEST_IPv4 }} >> ~/.ssh/known_hosts
+
+      - name: Test SSH
+        run: |
+          ssh \
+            -i ~/.ssh/id_ed25519 \
+            -o StrictHostKeyChecking=no \
+            -o ConnectTimeout=10 \
+            cdhc2-itn@${{ secrets.DEST_IPv4 }} \
+            "echo 'SSH OK'; hostname"
+
+      - name: Prepare import Job manifest
+        run: |
+          APPLY_FLAG=""
+          if [ "${{ github.event.inputs.apply }}" = "true" ]; then
+            APPLY_FLAG="--apply"
+          fi
+          ARTISAN_COMMAND="subject-lessons:${{ github.event.inputs.command }}"
+          sed \
+            -e "s|IMAGE_PLACEHOLDER|${{ env.LOCAL_REGISTRY }}/${{ env.LOCAL_PROJECT }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.image_tag }}|" \
+            -e "s|ARTISAN_COMMAND_PLACEHOLDER|$ARTISAN_COMMAND|g" \
+            -e "s|APPLY_FLAG_PLACEHOLDER|$APPLY_FLAG|g" \
+            k8s/import-lessons-job.yaml > /tmp/import-lessons-job.yaml
+          cat /tmp/import-lessons-job.yaml
+
+      - name: Copy Job manifest to k3s node
+        run: |
+          scp \
+            -i ~/.ssh/id_ed25519 \
+            -o StrictHostKeyChecking=no \
+            /tmp/import-lessons-job.yaml \
+            cdhc2-itn@${{ secrets.DEST_IPv4 }}:/tmp/import-lessons-job.yaml
+
+      - name: Run import Job on cluster
+        run: |
+          ssh \
+            -i ~/.ssh/id_ed25519 \
+            -o StrictHostKeyChecking=no \
+            -o ConnectTimeout=10 \
+            cdhc2-itn@${{ secrets.DEST_IPv4 }} << 'EOF'
+          set -e
+          echo "== Removing any previous import Job =="
+          kubectl delete job qlhv-import-lessons -n tkb --ignore-not-found
+
+          echo "== Applying import Job =="
+          kubectl apply -f /tmp/import-lessons-job.yaml
+
+          echo "== Waiting for job to complete =="
+          kubectl wait --for=condition=complete job/qlhv-import-lessons -n tkb --timeout=180s || \
+            (kubectl logs job/qlhv-import-lessons -n tkb; exit 1)
+
+          echo "== Import logs =="
+          kubectl logs job/qlhv-import-lessons -n tkb
+
+          echo "✅ Job completed successfully!"
+          EOF

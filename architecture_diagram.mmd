@@ -1,0 +1,57 @@
+```mermaid
+flowchart TD
+    subgraph LaravelApp
+        direction TB
+        Authentication[Authentication Module]
+        User[User Module]
+        Unit[Unit Module]
+        Instructor[Instructor Module]
+        Class[Class Module]
+        Classroom[Classroom Module]
+        Building[Building Module]
+        Specialization[Specialization Module]
+        Subject[Subject Module]
+        TrainingSchedule[TrainingSchedule Module]
+        TeachingAssignment[TeachingAssignment Module]
+        ScheduleDetail[ScheduleDetail Module]
+        Dashboard[Dashboard Module]
+        Home[Home Module]
+    end
+
+    subgraph ExternalDependencies
+        direction LR
+        LaravelFramework["Laravel Framework"]
+        SpatiePermission["spatie/laravel-permission"]
+        MySQL[MySQL/MariaDB]
+        Redis[Redis]
+        NodeJS[Node.js & npm]
+    end
+
+    %% Module Dependencies
+    Authentication --> User
+    User --> Unit
+    TrainingSchedule --> Specialization
+    TrainingSchedule --> Class
+    TrainingSchedule --> Classroom
+    TrainingSchedule --> ScheduleDetail
+    ScheduleDetail --> Subject
+    ScheduleDetail --> Instructor
+    ScheduleDetail --> Classroom
+    TeachingAssignment --> Instructor
+    TeachingAssignment --> Subject
+    TeachingAssignment --> Class
+
+    %% Data flow
+    Home --> Dashboard
+    Dashboard --> User
+    Dashboard --> TrainingSchedule
+    TrainingSchedule --> ScheduleDetail
+    TrainingSchedule --> TeachingAssignment
+
+    %% External Dependencies
+    LaravelApp --> LaravelFramework
+    LaravelApp --> SpatiePermission
+    LaravelApp --> MySQL
+    LaravelApp --> Redis
+    LaravelApp --> NodeJS
+```

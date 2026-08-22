@@ -1,0 +1,25 @@
+{
+  "name": "LMS CDHC2",
+  "short_name": "LMS CDHC2",
+  "description": "Cổng học tập / giảng dạy CDHC2",
+  "start_url": "/lms/hoc",
+  "scope": "/lms/",
+  "display": "standalone",
+  "background_color": "#f0fdfa",
+  "theme_color": "#0f766e",
+  "lang": "vi",
+  "icons": [
+    {
+      "src": "/images/logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/images/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+@extends('layouts.admin')
+@section('title','Đáp án đề tích hợp')
+@section('content')
+@include('partials.module-menu', ['module' => 'exam'])
+<x-breadcrumb :items="[['title'=>'Đề thi tự luận','url'=>route('essay-exams.index')],['title'=>'Đáp án đề tích hợp']]" />
+<div class="flex items-center justify-between mb-5"><div><h1 class="text-2xl font-bold text-slate-900">Đáp án đề tích hợp</h1><p class="text-sm text-slate-500">Các file đáp án độc lập, có thể chứa đáp án của nhiều đề tích hợp.</p></div><a class="text-blue-600" href="{{ route('essay-exams.create') }}">Import đáp án</a></div>
+<div class="bg-white border rounded-xl overflow-hidden"><div class="overflow-x-auto"><table class="w-full text-sm"><thead class="bg-blue-50"><tr><th class="p-3 text-left">Mã bộ đáp án</th><th class="p-3 text-left">Tên bộ</th><th class="p-3 text-left">Môn</th><th class="p-3 text-center">Số đáp án</th><th class="p-3 text-center">Trạng thái</th><th></th></tr></thead><tbody class="divide-y">@forelse($sets as $set)<tr><td class="p-3 font-mono font-semibold">{{ $set->code }}</td><td class="p-3">{{ $set->title }}</td><td class="p-3">{{ $set->subject->name ?? '—' }}</td><td class="p-3 text-center">{{ $set->items_count ?? $set->items->count() }}</td><td class="p-3 text-center"><span class="px-2 py-1 rounded-full text-xs bg-slate-100">{{ $set->status }}</span></td><td class="p-3 text-right"><a class="text-blue-600 font-semibold" href="{{ route('essay-exams.integrated-answers.show',$set) }}">Xem</a></td></tr>@empty<tr><td colspan="6" class="p-8 text-center text-slate-500">Chưa có bộ đáp án đề tích hợp.</td></tr>@endforelse</tbody></table></div></div><div class="mt-4">{{ $sets->links() }}</div>
+@endsection

@@ -1,0 +1,54 @@
+/vendor/
+node_modules
+npm-debug.log
+yarn-error.log
+# Laravel 4 specific
+bootstrap/compiled.php
+app/storage/
+!public/dist/frontend/module/template/preview/*
+/public/hot
+/public/storage
+/public/uploads/0000
+/storage/*.key
+storage/app/*
+storage/debugbar/*
+storage/framework/*
+!storage/app/public/
+storage/app/public/*
+!storage/app/public/demo/
+_ide_helper.php
+
+
+/.idea/*
+!.idea/codeStyles/*
+/resources/ckeditor/node_modules/
+.env
+.env.test
+.env.backup
+.env.production
+.phpunit.result.cache
+Homestead.json
+Homestead.yaml
+auth.json
+/.fleet
+/.vscode
+storage/bc.php
+storage/pro.php
+storage/installed
+public/themes/*/dist
+/storage/
+.DS_Store
+*.sql
+
+# Local inspection artifacts — never part of an application release
+/_db.php
+/_inspect_*.php
+/_sample_*.docx
+/terminals/
+/mcps/
+
+# Ignore all .gitignore files in subdirectories
+**/.gitignore
+
+# But keep the root .gitignore
+!.gitignore

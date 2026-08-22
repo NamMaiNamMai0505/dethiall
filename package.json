@@ -1,0 +1,32 @@
+{
+    "$schema": "https://json.schemastore.org/package.json",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "build": "vite build",
+        "dev": "vite",
+        "setup": "php artisan key:generate && php artisan migrate --force && php artisan db:seed --force && npm run dev",
+        "fresh": "php artisan db:refresh-with-seeders && npm run dev",
+        "start": "php artisan serve",
+        "stats": "php artisan db:stats",
+        "refresh": "php artisan migrate:refresh",
+        "migrate": "php artisan migrate",
+        "sync-permission": "php artisan permissions:sync --reset",
+        "seed": "php artisan db:seed",
+        "tinker": "php artisan tinker",
+        "migration-status": "php artisan migrate:status"
+    },
+    "devDependencies": {
+        "@tailwindcss/vite": "^4.0.0",
+        "axios": "^1.8.2",
+        "concurrently": "^9.0.1",
+        "laravel-vite-plugin": "^1.2.0",
+        "tailwindcss": "^4.0.0",
+        "vite": "^6.2.4",
+        "vite-plugin-static-copy": "^4.1.1"
+    },
+    "dependencies": {
+        "bootstrap-icons": "^1.13.1",
+        "tom-select": "^2.4.1"
+    }
+}

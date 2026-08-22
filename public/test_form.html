@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Training Schedule Creation</title>
+    <meta name="csrf-token" content="test">
+</head>
+<body>
+    <h1>Test Training Schedule Creation</h1>
+    
+    <form action="/training-schedules" method="POST">
+        <input type="hidden" name="_token" value="test">
+        
+        <div>
+            <label>Tên lịch đào tạo:</label>
+            <input type="text" name="name" value="Test Schedule" required>
+        </div>
+        
+        <div>
+            <label>Ngành đào tạo ID:</label>
+            <input type="number" name="specialization_id" value="1" required>
+        </div>
+        
+        <div>
+            <label>Năm học:</label>
+            <input type="text" name="academic_year" value="2024-2025" required>
+        </div>
+        
+        <div>
+            <label>Học kỳ:</label>
+            <select name="semester" required>
+                <option value="semester_1">Học kỳ 1</option>
+                <option value="semester_2">Học kỳ 2</option>
+                <option value="summer">Học kỳ hè</option>
+            </select>
+        </div>
+        
+        <div>
+            <label>Ngày bắt đầu:</label>
+            <input type="date" name="start_date" value="2024-09-01" required>
+        </div>
+        
+        <div>
+            <label>Ngày kết thúc:</label>
+            <input type="date" name="end_date" value="2024-12-31" required>
+        </div>
+        
+        <button type="submit">Tạo lịch đào tạo</button>
+    </form>
+</body>
+</html>

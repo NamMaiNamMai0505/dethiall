@@ -1,0 +1,26 @@
+{
+    "compilerOptions": {
+        "target": "ES6",
+        "module": "commonjs",
+        "checkJs": false,
+        "baseUrl": ".",
+        "paths": {
+            "@/*": ["resources/js/*"]
+        }
+    },
+    "exclude": [
+        "node_modules",
+        "vendor",
+        "storage",
+        "public/build",
+        "public/hot",
+        "bootstrap/cache",
+        "**/**.blade.php",
+        "**/*.blade.php",
+        "resources/views/**/*.blade.php",
+        "modules/**/Views/**/*.blade.php"
+    ],
+    "include": [
+        "resources/js/**/*"
+    ]
+}

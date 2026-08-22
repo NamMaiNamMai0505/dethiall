@@ -1,0 +1,3 @@
+<?php
+use Illuminate\Database\Migrations\Migration; use Illuminate\Database\Schema\Blueprint; use Illuminate\Support\Facades\Schema;
+return new class extends Migration { public function up():void { Schema::create('exam_organization_plans',function(Blueprint $t){$t->id();$t->string('name');$t->foreignId('subject_id')->constrained('subjects');$t->foreignId('class_id')->constrained('classes');$t->date('exam_date');$t->time('exam_time')->nullable();$t->string('exam_form',50);$t->string('status',30)->default('PLANNED');$t->text('note')->nullable();$t->timestamps();}); } public function down():void{Schema::dropIfExists('exam_organization_plans');} };

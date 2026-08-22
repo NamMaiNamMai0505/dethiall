@@ -1,0 +1,83 @@
+name: Run DB Migration
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to run the migration with"
+        required: false
+        default: "latest"
+
+env:
+  LOCAL_REGISTRY: registry.hc2
+  LOCAL_PROJECT: cdhc2
+  # Trùng IMAGE_NAME với build-and-deploy.yml
+  IMAGE_NAME: tkb
+  K8S_NAMESPACE: tkb
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v4
+        with:
+          authkey: ${{ secrets.TAILSCALE_AUTHKEY }}
+          tags: tag:ci
+          version: 1.90.6
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H ${{ secrets.DEST_IPv4 }} >> ~/.ssh/known_hosts
+
+      - name: Test SSH
+        run: |
+          ssh \
+            -i ~/.ssh/id_ed25519 \
+            -o StrictHostKeyChecking=no \
+            -o ConnectTimeout=10 \
+            cdhc2-itn@${{ secrets.DEST_IPv4 }} \
+            "echo 'SSH OK'; hostname"
+
+      - name: Prepare migration Job manifest
+        run: |
+          sed "s|IMAGE_PLACEHOLDER|${{ env.LOCAL_REGISTRY }}/${{ env.LOCAL_PROJECT }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.image_tag }}|" \
+            k8s/migration-job.yaml > /tmp/migration-job.yaml
+
+      - name: Copy Job manifest to k3s node
+        run: |
+          scp \
+            -i ~/.ssh/id_ed25519 \
+            -o StrictHostKeyChecking=no \
+            /tmp/migration-job.yaml \
+            cdhc2-itn@${{ secrets.DEST_IPv4 }}:/tmp/migration-job.yaml
+
+      - name: Run migration Job on cluster
+        run: |
+          ssh \
+            -i ~/.ssh/id_ed25519 \
+            -o StrictHostKeyChecking=no \
+            -o ConnectTimeout=10 \
+            cdhc2-itn@${{ secrets.DEST_IPv4 }} << 'EOF'
+          set -e
+          echo "== Removing any previous migration Job =="
+          kubectl delete job qlhv-migration -n tkb --ignore-not-found
+
+          echo "== Applying migration Job =="
+          kubectl apply -f /tmp/migration-job.yaml
+
+          echo "== Waiting for migration to complete =="
+          kubectl wait --for=condition=complete job/qlhv-migration -n tkb --timeout=180s || \
+            (kubectl logs job/qlhv-migration -n tkb; exit 1)
+
+          echo "== Migration logs =="
+          kubectl logs job/qlhv-migration -n tkb
+
+          echo "✅ Migration completed successfully!"
+          EOF

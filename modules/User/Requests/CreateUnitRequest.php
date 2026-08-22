@@ -1,0 +1,45 @@
+<?php
+
+namespace Modules\Unit\Requests;
+
+use Illuminate\Foundation\Http\FormRequest;
+use Modules\Unit\Models\Unit;
+
+class CreateUnitRequest extends FormRequest
+{
+    public function authorize()
+    {
+        return true;
+    }
+
+    public function rules()
+    {
+        return [
+            'code' => ['required', 'string', 'max:50', 'unique:units,code'],
+            'name' => ['required', 'string', 'max:255'],
+            'parent_id' => ['nullable', 'exists:units,id'],
+            'status' => ['required', 'string', 'in:active,inactive']
+        ];
+    }
+
+    public function attributes()
+    {
+        return [
+            'code' => 'Mã đơn vị',
+            'name' => 'Tên đơn vị',
+            'parent_id' => 'Đơn vị cấp trên',
+            'status' => 'Trạng thái'
+        ];
+    }
+
+    public function messages()
+    {
+        return [
+            'code.required' => 'Vui lòng nhập mã đơn vị',
+            'code.unique' => 'Mã đơn vị đã tồn tại',
+            'name.required' => 'Vui lòng nhập tên đơn vị',
+            'parent_id.exists' => 'Đơn vị cấp trên không tồn tại',
+            'status.required' => 'Vui lòng chọn trạng thái'
+        ];
+    }
+}

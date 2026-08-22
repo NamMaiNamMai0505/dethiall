@@ -1,0 +1,37 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: qlhv-migration
+  namespace: tkb
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: IMAGE_PLACEHOLDER
+          # migrate + sync permissions (menu/module mới sau deploy) + clear cache
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -e
+              echo ">> Running migrations..."
+              php artisan migrate --force
+              echo ">> Syncing permissions & roles..."
+              php artisan permissions:sync
+              echo ">> Clearing caches..."
+              php artisan optimize:clear || true
+              echo ">> Done."
+          envFrom:
+            - secretRef:
+                name: tkb-env
+          volumeMounts:
+            - name: env-file
+              mountPath: /var/www/.env
+              subPath: .env
+      volumes:
+        - name: env-file
+          secret:
+            secretName: tkb-env
