@@ -88,13 +88,7 @@ class CourseRoomController extends Controller
             ->orderByDesc('id')
             ->get();
 
-        // Ngân hàng được tạo tự động từ phân hệ Import đề; LMS chỉ hiển thị.
-        $questionBanks = LmsQuestionBank::query()
-            ->where('lms_course_id', $course->id)
-            ->with(['questions.lesson'])
-            ->withCount('questions')
-            ->orderBy('title')
-            ->get();
+        $questionBanks = collect();
 
         $myExamAttempts = LmsExamAttempt::query()
             ->where('user_id', $user->id)
@@ -260,11 +254,8 @@ class CourseRoomController extends Controller
             }
             $questionBanks = LmsQuestionBank::query()
                 ->where('lms_course_id', $course->id)
-                ->with(['questions' => fn ($q) => $q->orderBy('sort_order')->orderBy('id'), 'questions.lesson'])
+                ->with(['questions' => fn ($q) => $q->orderBy('sort_order')->orderBy('id')])
                 ->withCount('questions')
-                // Luôn giữ ngân hàng đã duyệt trong danh sách; ngân hàng import mới
-                // chỉ được thêm vào phía sau với trạng thái bản nháp/chờ duyệt.
-                ->orderByRaw("CASE WHEN status = 'APPROVED' THEN 0 ELSE 1 END")
                 ->orderByDesc('id')
                 ->get();
 

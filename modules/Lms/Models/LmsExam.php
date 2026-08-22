@@ -18,7 +18,7 @@ class LmsExam extends Model
         'lms_course_id', 'title', 'description', 'duration_minutes', 'opens_at', 'closes_at',
         'max_attempts', 'pass_score', 'shuffle_questions', 'shuffle_options', 'proctor_basic',
         'require_fullscreen', 'auto_submit_on_leave', 'max_blur_events',
-        'is_published', 'publish_score_after_submit', 'created_by',
+        'is_published', 'created_by',
     ];
 
     protected $casts = [
@@ -31,7 +31,6 @@ class LmsExam extends Model
         'require_fullscreen' => 'boolean',
         'auto_submit_on_leave' => 'boolean',
         'is_published' => 'boolean',
-        'publish_score_after_submit' => 'boolean',
     ];
 
     public function course(): BelongsTo

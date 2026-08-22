@@ -115,17 +115,11 @@ Route::middleware(['web', 'auth'])->prefix('lms')->name('lms.')->group(function 
 
         // GV-4 + Sprint 6: thi online + CRUD câu NHCH
         Route::post('/courses/{course}/exam-banks', [TeachExamController::class, 'storeBank'])->name('exam-banks.store');
-        Route::post('/courses/{course}/exam-banks/import', [TeachExamController::class, 'importBank'])->name('exam-banks.import');
-        Route::post('/courses/{course}/exam-banks/{bank}/submit', [TeachExamController::class, 'submitBank'])->name('exam-banks.submit');
-        Route::post('/courses/{course}/exam-banks/submit-pending', [TeachExamController::class, 'submitPendingBanks'])->name('exam-banks.submit-pending');
-        Route::post('/courses/{course}/exam-banks/{bank}/approve', [TeachExamController::class, 'approveBank'])->name('exam-banks.approve');
-        Route::delete('/courses/{course}/exam-banks/{bank}', [TeachExamController::class, 'destroyBank'])->name('exam-banks.destroy');
         Route::post('/courses/{course}/exam-banks/{bank}/questions', [TeachExamController::class, 'storeQuestion'])->name('exam-questions.store');
         Route::put('/courses/{course}/exam-banks/{bank}/questions/{question}', [TeachExamController::class, 'updateQuestion'])->name('exam-questions.update');
         Route::delete('/courses/{course}/exam-banks/{bank}/questions/{question}', [TeachExamController::class, 'destroyQuestion'])->name('exam-questions.destroy');
         Route::post('/courses/{course}/exam-banks/{bank}/questions/{question}/move', [TeachExamController::class, 'moveQuestion'])->name('exam-questions.move');
         Route::post('/courses/{course}/exams', [TeachExamController::class, 'storeExam'])->name('exams.store');
-        Route::put('/courses/{course}/exams/{exam}/schedule', [TeachExamController::class, 'updateExamSchedule'])->name('exams.schedule.update');
         Route::post('/courses/{course}/exams/{exam}/toggle', [TeachExamController::class, 'toggleExam'])->name('exams.toggle');
         Route::delete('/courses/{course}/exams/{exam}', [TeachExamController::class, 'destroyExam'])->name('exams.destroy');
         Route::get('/courses/{course}/exams/{exam}/attempts', [TeachExamController::class, 'attempts'])->name('exams.attempts');

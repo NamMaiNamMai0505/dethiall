@@ -10,9 +10,7 @@ class LmsQuestionBank extends Model
 {
     protected $table = 'lms_question_banks';
 
-    protected $fillable = ['lms_course_id', 'title', 'description', 'created_by', 'status', 'submitted_at', 'approved_at', 'approved_by'];
-
-    protected $casts = ['submitted_at' => 'datetime', 'approved_at' => 'datetime'];
+    protected $fillable = ['lms_course_id', 'title', 'description', 'created_by'];
 
     public function course(): BelongsTo
     {

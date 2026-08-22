@@ -25,7 +25,7 @@
                     </select>
                     <textarea name="stem" required rows="2" placeholder="Câu hỏi" class="border rounded-lg text-sm px-2 py-1.5"></textarea>
                     <textarea name="options" rows="3" placeholder="MCQ: mỗi dòng 1 đáp án" class="border rounded-lg text-sm px-2 py-1.5"></textarea>
-                    <input name="correct_answer" required placeholder="Đáp án: A/B/C/D (MCQ) / true / text" class="border rounded-lg text-sm px-2 py-1.5">
+                    <input name="correct_answer" required placeholder="Đáp án: 0 (index MCQ) / true / text" class="border rounded-lg text-sm px-2 py-1.5">
                     <input type="number" step="0.1" name="points" value="1" class="border rounded-lg text-sm px-2 py-1.5">
                     <button class="bg-blue-600 text-white rounded-lg text-sm px-3 py-1.5">Thêm câu</button>
                 </form>

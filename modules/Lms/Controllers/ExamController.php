@@ -242,9 +242,8 @@ class ExamController extends Controller
             abort(403);
         }
 
-        $canSeeScore = (bool) $exam->publish_score_after_submit || Auth::user()?->can('lms.edit');
         $details = collect();
-        if ($attempt->status === 'graded' && $canSeeScore) {
+        if ($attempt->status === 'graded') {
             $order = $attempt->question_order ?? [];
             $answers = $attempt->answers ?? [];
             $questions = LmsQuestion::query()->whereIn('id', $order)->get()->keyBy('id');
@@ -271,7 +270,7 @@ class ExamController extends Controller
                 });
         }
 
-        return view('lms::learn.exam-result', compact('course', 'exam', 'attempt', 'details', 'canSeeScore'));
+        return view('lms::learn.exam-result', compact('course', 'exam', 'attempt', 'details'));
     }
 
     public function attempts(LmsCourse $course, LmsExam $exam)
