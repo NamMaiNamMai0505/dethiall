@@ -31,6 +31,8 @@ return [
     Modules\DatabaseManagement\Providers\DatabaseManagementServiceProvider::class,
     Modules\EssayExam\Providers\EssayExamServiceProvider::class,
     Modules\ExamOrganization\Providers\ExamOrganizationServiceProvider::class,
+    Modules\Inventory\Providers\InventoryServiceProvider::class,
+    Modules\LeaveManagement\Providers\LeaveManagementServiceProvider::class,
 
     // Third-party Service Providers
     Spatie\Permission\PermissionServiceProvider::class,

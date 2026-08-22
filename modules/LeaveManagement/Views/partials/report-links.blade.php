@@ -1,0 +1,1 @@
+<div class="flex gap-2">@can('leave-management.export')<a href="{{ route('leave-management.reports.word',['year'=>$year]) }}" class="rounded bg-blue-600 px-4 py-2 text-white">Xuất Word</a><a href="{{ route('leave-management.reports.csv',['year'=>$year]) }}" class="rounded bg-slate-700 px-4 py-2 text-white">Xuất CSV</a>@endcan</div>

@@ -1,0 +1,21 @@
+<form method="POST" action="{{ route('leave-management.personnel.store') }}" class="rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50 to-white p-5 shadow-sm">
+    @csrf
+    <div class="mb-4 flex items-center gap-3">
+        <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-700 text-white shadow-md"><i class="bi bi-person-plus-fill"></i></span>
+        <div><h2 class="text-lg font-extrabold text-slate-900">Thêm quân nhân</h2><p class="mt-1 text-sm font-medium text-slate-500">Nhập đầy đủ thông tin hồ sơ quân nhân để quản lý phép.</p></div>
+    </div>
+    <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div class="xl:col-span-2"><label class="mb-1.5 block text-sm font-bold text-slate-700">Tài khoản / Họ tên <span class="text-rose-500">*</span></label><select name="user_id" required class="w-full rounded-xl border px-3 py-2.5"><option value="">Chọn quân nhân</option>@foreach($users as $user)<option value="{{ $user->id }}">{{ $user->code }} — {{ $user->name }}</option>@endforeach</select></div>
+        <div><label class="mb-1.5 block text-sm font-bold text-slate-700">Đối tượng</label><select name="object_type" class="w-full rounded-xl border px-3 py-2.5"><option value="">Chọn đối tượng</option>@foreach($objects as $object)<option value="{{ $object->code }}">{{ $object->name }}</option>@endforeach</select></div>
+        <div><label class="mb-1.5 block text-sm font-bold text-slate-700">Cấp bậc</label><input name="rank" placeholder="Ví dụ: Đại úy" class="w-full rounded-xl border px-3 py-2.5"></div>
+        <div><label class="mb-1.5 block text-sm font-bold text-slate-700">Chức vụ</label><input name="position" placeholder="Ví dụ: Chỉ huy, Trợ lý" class="w-full rounded-xl border px-3 py-2.5"></div>
+        <div><label class="mb-1.5 block text-sm font-bold text-slate-700">Ngày nhập ngũ</label><input name="enlistment_date" type="date" class="w-full rounded-xl border px-3 py-2.5"></div>
+        <div class="xl:col-span-2"><label class="mb-1.5 block text-sm font-bold text-slate-700">Cơ quan / đơn vị quản lý</label><select name="unit_id" class="w-full rounded-xl border px-3 py-2.5"><option value="">Chọn cơ quan, đơn vị</option>@foreach($units as $unit)<option value="{{ $unit->id }}">{{ $unit->code }} — {{ $unit->name }}</option>@endforeach</select></div>
+        <div class="xl:col-span-2"><label class="mb-1.5 block text-sm font-bold text-slate-700">Cơ quan đang chỉ huy</label><select name="commander_name" class="w-full rounded-xl border px-3 py-2.5"><option value="">Chọn cơ quan đang chỉ huy</option>@foreach($units as $unit)<option value="{{ $unit->name }}">{{ $unit->code }} — {{ $unit->name }}</option>@endforeach</select></div>
+        <div class="xl:col-span-2"><label class="mb-1.5 block text-sm font-bold text-slate-700">Quê quán</label><select name="hometown" class="w-full rounded-xl border px-3 py-2.5"><option value="">Chọn tỉnh/TP và phường/xã</option>@foreach(\Modules\LeaveManagement\Models\LeaveLocality::with('parent')->orderBy('level')->orderBy('name')->get() as $locality)@php($localityLabel=$locality->parent ? $locality->parent->name.' — '.$locality->name : $locality->name)<option value="{{ $localityLabel }}">{{ $localityLabel }}</option>@endforeach</select></div>
+        <div class="xl:col-span-2"><label class="mb-1.5 block text-sm font-bold text-slate-700">Địa chỉ thường trú</label><select name="permanent_residence" class="w-full rounded-xl border px-3 py-2.5"><option value="">Chọn tỉnh/TP và phường/xã</option>@foreach(\Modules\LeaveManagement\Models\LeaveLocality::with('parent')->orderBy('level')->orderBy('name')->get() as $locality)@php($localityLabel=$locality->parent ? $locality->parent->name.' — '.$locality->name : $locality->name)<option value="{{ $localityLabel }}">{{ $localityLabel }}</option>@endforeach</select></div>
+    </div>
+    <input type="hidden" name="name" value="Quân nhân">
+    <button class="mt-4 rounded-xl bg-blue-700 px-5 py-2.5 font-bold text-white shadow-md shadow-blue-100 transition hover:bg-blue-800"><i class="bi bi-person-plus mr-1"></i>Thêm quân nhân</button>
+    <div class="mt-3"><label class="mb-1.5 block text-sm font-bold text-slate-700">Gmail quân nhân</label><input name="gmail" type="email" placeholder="quannhan@gmail.com" class="w-full rounded-xl border px-3 py-2.5"></div>
+</form>
