@@ -10,13 +10,13 @@
         .no-print { position: fixed; top: 12px; right: 12px; display: flex; gap: 8px; z-index: 5; font-family: Arial, sans-serif; }
         .no-print button, .no-print a { padding: 8px 14px; border: 0; border-radius: 5px; background: #1e3a8a; color: #fff; cursor: pointer; text-decoration: none; font: inherit; }
         .no-print a { background: #475569; }
-        .head { display: grid; grid-template-columns: 1fr 1.25fr; text-align: center; align-items: start; margin-bottom: 10px; }
-        .head-left, .head-right { font-weight: 700; font-size: 12px; line-height: 1.25; }
-        .head-right { font-size: 13px; }
+        .head { display: grid; grid-template-columns: 1fr 1fr; text-align: center; align-items: start; margin: 8mm 0 16px; }
+        .head-left, .head-right { font-weight: 700; font-size: 14px; line-height: 1.35; }
+        .head-right { font-size: 14px; }
         .head-right em { display: block; font-weight: 400; margin-top: 2px; }
         .title { text-align: center; margin-top: 4px; }
-        .title h1 { margin: 0 0 6px; font-size: 20px; }
-        .title .line { margin: 2px 0; font-size: 15px; }
+        .title h1 { margin: 0 0 8px; font-size: 18px; }
+        .title .line { margin: 3px 0; font-size: 15px; }
         .title .line strong { display: inline-block; min-width: 72px; }
         .code { text-align: center; margin: 9px 0 15px; font-size: 15px; font-weight: 700; }
         .questions { margin-top: 2px; }
@@ -36,11 +36,11 @@
 <body>
     <div class="no-print actions"><button onclick="window.print()">In trang này</button><a href="{{ route('essay-exams.draw') }}">Quay lại Rút đề</a></div>
     <header class="head">
-        <div class="head-left">TRƯỜNG CAO ĐẲNG HẬU CẦN 2<br>BAN KT&amp;ĐBCLGDĐT</div>
+        <div class="head-left">TRƯỜNG CAO ĐẲNG HẬU CẦN 2<br>KHOA ĐIỀU DƯỠNG</div>
         <div class="head-right">CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM<em>Độc lập – Tự do – Hạnh phúc</em></div>
     </header>
     <section class="title">
-        <h1>{{ $withAnswers ? 'ĐÁP ÁN ĐỀ THI HẾT HỌC PHẦN' : 'ĐỀ THI HẾT HỌC PHẦN' }}</h1>
+        <h1>BỘ CÂU HỎI{{ $withAnswers ? ' - ĐÁP ÁN' : '' }} THI TỰ LUẬN</h1>
         <div class="line"><strong>Môn:</strong> {{ $draw->exam->subject->name ?? $draw->exam->title }}</div>
         <div class="line"><strong>Lớp:</strong> {{ $draw->class_name ?: '—' }}</div>
         <div class="line"><strong>Ngày thi:</strong> {{ $draw->exam_date?->format('d/m/Y') ?? '—' }}</div>

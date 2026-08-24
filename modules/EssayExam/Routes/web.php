@@ -17,6 +17,11 @@ Route::middleware(['web','auth'])->prefix('essay-exams')->name('essay-exams.')->
     Route::post('/integrated-answers/{answerSet}/return', [EssayExamController::class, 'integratedAnswerReturn'])->middleware('permission:essay-exams.approval.approve')->name('integrated-answers.return');
     Route::post('/', [EssayExamController::class, 'store'])->middleware('permission:essay-exams.authoring.create')->name('store');
     Route::get('/approval', [EssayExamController::class, 'approval'])->middleware('permission:essay-exams.approval.index')->name('approval');
+    Route::get('/approval-documents', [EssayExamController::class, 'approvalDocuments'])->middleware('permission:essay-exams.approval.index')->name('approval-documents.index');
+    Route::get('/approval-documents/template', [EssayExamController::class, 'approvalDocumentTemplate'])->middleware('permission:essay-exams.approval.index')->name('approval-documents.template');
+    Route::get('/approval-documents/{document}', [EssayExamController::class, 'approvalDocumentShow'])->middleware('permission:essay-exams.approval.index')->name('approval-documents.show');
+    Route::get('/approval-documents/{document}/download', [EssayExamController::class, 'approvalDocumentDownload'])->middleware('permission:essay-exams.approval.index')->name('approval-documents.download');
+    Route::post('/approval/print/{essayExam}', [EssayExamController::class, 'savePrintedApprovalDocument'])->middleware('permission:essay-exams.approval.approve')->name('approval.print');
     Route::post('/approval/lms-banks/{bank}/approve', [EssayExamController::class, 'approveLmsBank'])->middleware('permission:essay-exams.approval.approve')->name('approval.lms-banks.approve');
     Route::post('/approval/lms-banks/bulk-approve', [EssayExamController::class, 'approveLmsBanksBulk'])->middleware('permission:essay-exams.approval.approve')->name('approval.lms-banks.bulk-approve');
     Route::get('/bank', [EssayExamController::class, 'bank'])->middleware('permission:essay-exams.bank.index')->name('bank');

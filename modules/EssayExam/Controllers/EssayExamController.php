@@ -6,14 +6,17 @@ use App\Models\User;
 use App\Models\AcademicYear;
 use App\Support\SystemNotifier;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\View\View;
 use Modules\EssayExam\Models\EssayExam;
 use Modules\EssayExam\Models\EssayExamQuestion;
 use Modules\EssayExam\Models\EssayExamWorkflowLog;
 use Modules\EssayExam\Models\EssayExamDraw;
+use Modules\EssayExam\Models\EssayExamApprovalDocument;
 use Modules\EssayExam\Models\IntegratedAnswerSet;
 use Modules\EssayExam\Models\IntegratedAnswerItem;
 use Modules\EssayExam\Models\IntegratedAnswerWorkflowLog;
@@ -87,6 +90,104 @@ class EssayExamController extends Controller
         return view('essay-exam::approval', compact('exams','lmsBanks','stage','subjects','specializations'));
     }
 
+    public function approvalDocuments(Request $request): View
+    {
+        $documents = EssayExamApprovalDocument::with(['exam', 'subject', 'class', 'approver'])
+            ->when($request->filled('search'), function ($query) use ($request): void {
+                $search = trim((string) $request->input('search'));
+                $query->where(function ($nested) use ($search): void {
+                    $nested->where('decision_code', 'like', "%{$search}%")
+                        ->orWhere('title', 'like', "%{$search}%")
+                        ->orWhere('class_name', 'like', "%{$search}%")
+                        ->orWhere('subject_name', 'like', "%{$search}%");
+                });
+            })
+            ->latest('approved_at')
+            ->paginate(20)
+            ->withQueryString();
+
+        return view('essay-exam::approval-documents', compact('documents'));
+    }
+
+    public function savePrintedApprovalDocument(Request $request, EssayExam $essayExam): JsonResponse
+    {
+        $data = $request->validate([
+            'print_mode' => 'required|in:unsigned,image,direct',
+            'signature_method' => 'nullable|in:upload,draw',
+            'signature_data' => 'nullable|string|max:7000000',
+        ]);
+        $signature = null;
+        if ($data['print_mode'] !== 'unsigned') {
+            abort_unless($data['signature_method'] === ($data['print_mode'] === 'image' ? 'upload' : 'draw'), 422, 'Phương thức ký không khớp với nút in.');
+            $signature = $this->captureApprovalSignature($request);
+        }
+        $user = $request->user();
+        $essayExam->load(['subject', 'class', 'questions']);
+        $finalApproval = $data['print_mode'] !== 'unsigned';
+        if ($finalApproval) {
+            // In có chữ ký là thao tác duyệt cuối: duyệt toàn bộ câu/đề trong bộ.
+            $essayExam->questions()->where('paper_status', '!=', 'APPROVED')->update(['paper_status' => 'APPROVED']);
+            $this->transition($essayExam, 'APPROVED', 'APPROVE_PRINT', $user, 'Tự động duyệt toàn bộ bộ đề sau khi in có chữ ký.');
+            $essayExam->update([
+                'approved_by_user_id' => $user->id,
+                'approved_at' => now(),
+                'locked' => true,
+                'approval_qr' => $essayExam->approval_qr ?: 'QR-EXAM-'.strtoupper(substr(hash('sha256',$essayExam->id.'|'.$essayExam->code.'|'.microtime(true)),0,24)),
+            ]);
+        }
+        $document = EssayExamApprovalDocument::firstOrNew(['essay_exam_id' => $essayExam->id]);
+        $document->fill([
+            'decision_code' => $document->decision_code ?: 'IN-'.now()->format('YmdHis').'-'.str_pad((string) $essayExam->id, 5, '0', STR_PAD_LEFT),
+            'title' => $essayExam->title,
+            'class_id' => $essayExam->class_id,
+            'class_name' => $essayExam->class?->name,
+            'subject_id' => $essayExam->subject_id,
+            'subject_name' => $essayExam->subject?->name,
+            'approved_by_user_id' => $user->id,
+            'approver_name' => $user->name ?: $user->email,
+            'approved_at' => $finalApproval ? now() : $document->approved_at,
+            'signature_method' => $signature['method'] ?? $document->signature_method,
+            'signature_path' => $signature['path'] ?? $document->signature_path,
+            'status' => $finalApproval ? 'APPROVED' : ($document->status === 'APPROVED' ? 'APPROVED' : 'PRINTED'),
+        ]);
+        $document->save();
+        $document->load(['exam.subject', 'exam.class', 'exam.questions']);
+        $html = view('essay-exam::approval-document', [
+            'document' => $document,
+            'signatureUrl' => $document->signature_path ? $this->signatureDataUrl($document->signature_path) : null,
+        ])->render();
+        $path = 'essay-exam/approval-documents/'.$document->decision_code.'.html';
+        Storage::disk('public')->put($path, $html);
+        $document->update(['document_path' => $path]);
+        return response()->json(['ok' => true, 'document_id' => $document->id]);
+    }
+
+    public function approvalDocumentTemplate()
+    {
+        $path = public_path('samples/essay-exam/Đe_dieu_duong_unique.docx');
+        abort_unless(is_file($path), 404, 'Chưa có mẫu chuẩn văn bản phê duyệt.');
+        return response()->download($path, 'Đe_dieu_duong_unique.docx');
+    }
+
+    public function approvalDocumentShow(EssayExamApprovalDocument $document): View
+    {
+        $document->load(['exam.subject', 'exam.class', 'exam.questions', 'subject', 'class', 'approver']);
+        return view('essay-exam::approval-document', [
+            'document' => $document,
+            'signatureUrl' => $this->signatureDataUrl($document->signature_path),
+        ]);
+    }
+
+    public function approvalDocumentDownload(EssayExamApprovalDocument $document)
+    {
+        abort_unless($document->document_path && Storage::disk('public')->exists($document->document_path), 404, 'Chưa có file văn bản phê duyệt.');
+        return response()->download(
+            Storage::disk('public')->path($document->document_path),
+            $document->decision_code.'.html',
+            ['Content-Type' => 'text/html; charset=UTF-8'],
+        );
+    }
+
     public function approveLmsBank(Request $request, LmsQuestionBank $bank): RedirectResponse
     {
         $user = $request->user();
@@ -139,7 +240,7 @@ class EssayExamController extends Controller
 
     public function bank(Request $request): View
     {
-        $exams = EssayExam::with(['subject.specialization','questions'])->withCount('draws')->whereHas('questions', fn($q) => $q->where('paper_status','APPROVED'))
+        $exams = EssayExam::with(['subject.specialization','questions'])->withCount('draws')->where('status','APPROVED')->where('locked',true)->whereHas('questions', fn($q) => $q->where('paper_status','APPROVED'))
             ->when($request->search, fn ($q,$s) => $q->where(fn($x) => $x->where('code','like',"%$s%")->orWhere('title','like',"%$s%")))
             ->when($request->used === 'yes', fn ($q) => $q->has('draws'))
             ->when($request->used === 'no', fn ($q) => $q->doesntHave('draws'))
@@ -289,10 +390,8 @@ class EssayExamController extends Controller
             return redirect()->route('essay-exams.draw.print', ['draw' => $draw->id, 'auto' => 1]);
         }
         if ($data['exam_type'] === 'Tự luận') {
-            $essayCount = (int) ($sourceData['essay_question_count'] ?? 0);
-            abort_unless(in_array($essayCount, [1, 2], true), 422, 'Đề tự luận chỉ được chọn 1 hoặc 2 câu.');
-            abort_unless(! empty($sourceData['essay_pool_id']), 422, 'Hãy chọn ngân hàng đề tự luận Dashboard.');
-            // Nguồn tự luận là ngân hàng tổng hợp theo môn/lớp, không phải một đề riêng lẻ.
+            // Tự luận luôn bốc ngẫu nhiên một đề hoàn chỉnh (một paper),
+            // không bốc từng câu và không nhận số câu từ biểu mẫu.
             $essayQuestionsPool = EssayExamQuestion::query()
                 ->where('question_type','essay')
                 ->where('paper_status','APPROVED')
@@ -305,11 +404,13 @@ class EssayExamController extends Controller
                 ->whereHas('exam', fn ($q) => $q->where('subject_id', $data['subject_id'])->where('exam_type','Tự luận'))
                 ->pluck('draw_type')->unique()->values();
             abort_if($printedTypes->contains($data['draw_type']), 422, 'Loại phiếu này đã được rút cho lớp và môn trong 3 ngày gần đây.');
-            $requiredPoints = $essayCount === 1 ? 4 : 2;
-            $questions = $essayQuestionsPool->where('points', $requiredPoints)->shuffle()->unique(fn ($q) => trim((string) $q->content))->take($essayCount)->values();
-            abort_if($questions->count() < $essayCount, 422, $essayCount === 1 ? 'Ngân hàng không có câu tự luận 4 điểm.' : 'Ngân hàng không đủ 2 câu tự luận 2 điểm khác nhau.');
+            $papers = $essayQuestionsPool
+                ->groupBy(fn ($question) => $question->essay_exam_id.':'.$question->paper_number)
+                ->filter(fn ($questions) => $questions->isNotEmpty());
+            $questions = $papers->shuffle()->first()?->sortBy('question_number')->values() ?? collect();
+            abort_if($questions->isEmpty(), 422, 'Chưa có đề tự luận hoàn chỉnh được duyệt để bốc.');
             $drawCode = 'RT-'.now()->format('YmdHis').'-'.random_int(100,999);
-            $draw = EssayExamDraw::create(['essay_exam_id'=>$questions->first()->essay_exam_id,'paper_number'=>1,'question_ids'=>$questions->pluck('id')->all(),'draw_code'=>$drawCode,'qr_code'=>'QR-'.$drawCode,'draw_type'=>$data['draw_type'],'class_name'=>$class->name,'exam_date'=>$data['exam_date'] ?? null,'exam_time'=>$data['exam_time'] ?? null,'location'=>$data['location'] ?? null,'drawn_by_user_id'=>$request->user()->id,'drawn_at'=>now(),'printed_at'=>now()]);
+            $draw = EssayExamDraw::create(['essay_exam_id'=>$questions->first()->essay_exam_id,'paper_number'=>$questions->first()->paper_number,'question_ids'=>$questions->pluck('id')->all(),'draw_code'=>$drawCode,'qr_code'=>'QR-'.$drawCode,'draw_type'=>$data['draw_type'],'class_name'=>$class->name,'exam_date'=>$data['exam_date'] ?? null,'exam_time'=>$data['exam_time'] ?? null,'location'=>$data['location'] ?? null,'drawn_by_user_id'=>$request->user()->id,'drawn_at'=>now(),'printed_at'=>now()]);
             return redirect()->route('essay-exams.draw.print', ['draw' => $draw->id, 'auto' => 1]);
         }
         if ($data['exam_type'] === 'Tích hợp') {
@@ -454,28 +555,36 @@ class EssayExamController extends Controller
             'subject_id' => $lesson->course?->subject_id,
             'class_id' => $lesson->course?->class_id,
         ])->values()->all();
-        $curriculumOptions = LmsCourse::query()->with('academicYear:id,code')->whereNotNull('class_id')->whereNotNull('subject_id')->get(['id','class_id','subject_id','academic_year_id','term'])->map(fn ($course) => [
+        $defaultAcademicYear = AcademicYear::query()->where('is_current', true)->where('is_active', true)->first()
+            ?: AcademicYear::query()->where('is_active', true)->orderByDesc('start_year')->orderByDesc('id')->first();
+        $curriculumOptions = LmsCourse::query()->with(['academicYear:id,code','subject:id,semester'])->whereNotNull('class_id')->whereNotNull('subject_id')->get(['id','class_id','subject_id','academic_year_id','term'])->map(fn ($course) => [
             'class_id' => (int) $course->class_id,
             'subject_id' => (int) $course->subject_id,
-            'academic_year' => $course->academicYear?->code,
-            'semester' => $course->term,
+            'academic_year' => $course->academicYear?->code ?: $defaultAcademicYear?->code,
+            'semester' => $course->term ?: $course->subject?->semester,
         ])->filter(fn ($item) => $item['academic_year'] && $item['semester'])->unique(fn ($item) => $item['class_id'].':'.$item['subject_id'])->values()->all();
         $academicYears = AcademicYear::query()->where('is_active', true)->orderByDesc('start_year')->orderByDesc('id')->get(['id','code','name']);
+        if ($academicYears->isEmpty()) {
+            $academicYears = AcademicYear::query()->orderByDesc('start_year')->orderByDesc('id')->get(['id','code','name']);
+        }
         return view('essay-exam::create', compact('subjects','classes','specializations','lessons','lessonOptions','curriculumOptions','academicYears'));
     }
 
     private function curriculumMetadata(int $classId, int $subjectId): ?array
     {
-        $course = LmsCourse::query()->with('academicYear:id,code')
+        $course = LmsCourse::query()->with(['academicYear:id,code','subject:id,semester'])
             ->where('class_id', $classId)->where('subject_id', $subjectId)
-            ->whereNotNull('academic_year_id')->whereNotNull('term')
             ->latest('id')->first();
 
-        if (! $course?->academicYear?->code || ! $course->term) {
+        $academicYear = $course?->academicYear?->code
+            ?: AcademicYear::query()->where('is_current', true)->where('is_active', true)->value('code')
+            ?: AcademicYear::query()->where('is_active', true)->orderByDesc('start_year')->orderByDesc('id')->value('code');
+        $semester = $course?->term ?: $course?->subject?->semester;
+        if (! $academicYear || ! $semester) {
             return null;
         }
 
-        return ['academic_year' => $course->academicYear->code, 'semester' => $course->term];
+        return ['academic_year' => $academicYear, 'semester' => $semester];
     }
 
     public function import(Request $request): RedirectResponse
@@ -490,10 +599,15 @@ class EssayExamController extends Controller
         $request->validate(['import_class_id'=>'required|exists:classes,id']);
         $subject = Subject::findOrFail($data['import_subject_id']);
         $class = ClassModel::findOrFail($request->integer('import_class_id'));
-        $curriculum = $this->curriculumMetadata((int) $class->id, (int) $subject->id);
+         $curriculum = $this->curriculumMetadata((int) $class->id, (int) $subject->id) ?: [
+             'academic_year' => $data['academic_year'],
+             'semester' => $data['semester'],
+         ];
         abort_unless($curriculum, 422, 'Chưa có chương trình đào tạo cho môn/lớp đã chọn nên không xác định được năm học và học kỳ.');
-        $data['academic_year'] = $curriculum['academic_year'];
-        $data['semester'] = $curriculum['semester'];
+         if ($curriculum) {
+             $data['academic_year'] = $curriculum['academic_year'];
+             $data['semester'] = $curriculum['semester'];
+         }
         abort_unless((int) $subject->specialization_id === (int) $data['import_specialization_id'], 422, 'Môn học không thuộc ngành đã chọn.');
         abort_unless((int) $class->specialization_id === (int) $data['import_specialization_id'], 422, 'Lớp không thuộc ngành đã chọn.');
         if (! empty($data['import_lesson_id'])) {
@@ -742,7 +856,7 @@ class EssayExamController extends Controller
         return redirect()->route('essay-exams.show', $exam)->with('success','Đã tạo đề thi tự luận.');
     }
 
-    public function show(Request $request, EssayExam $essayExam): View { $exam = $essayExam->load(['subject','questions','logs']); if ($request->filled('paper')) $exam->setRelation('questions', $exam->questions->where('paper_number',(int)$request->paper)->values()); if ($exam->questions->contains(fn($q) => $q->paper_status === 'APPROVED') && !$exam->approval_qr) { $exam->update(['approval_qr'=>'QR-EXAM-'.strtoupper(substr(hash('sha256',$exam->id.'|'.$exam->code),0,24))]); } if ($exam->locked) $exam->setRelation('questions', collect()); return view('essay-exam::show', ['exam'=>$exam]); }
+    public function show(Request $request, EssayExam $essayExam): View { $exam = $essayExam->load(['subject','questions','logs']); if ($request->filled('paper')) $exam->setRelation('questions', $exam->questions->where('paper_number',(int)$request->paper)->values()); if ($exam->locked) $exam->setRelation('questions', collect()); return view('essay-exam::show', ['exam'=>$exam]); }
 
     public function submit(Request $request, EssayExam $essayExam): RedirectResponse
     {
@@ -770,14 +884,100 @@ class EssayExamController extends Controller
             default => false,
         };
         abort_unless($canApprove, 403, 'Tài khoản không thuộc cấp duyệt của bước này.');
+        $willComplete = $essayExam->questions()
+            ->where('paper_status', $stage)
+            ->whereNotIn('paper_number', $paperNumbers)
+            ->doesntExist();
+        $signature = null;
+        if ($stage === 'PENDING_BGH' && $willComplete) {
+            $signature = $this->captureApprovalSignature($request);
+        }
         $essayExam->questions()->where('paper_status',$stage)->whereIn('paper_number', $paperNumbers)->update(['paper_status'=>$next]);
-        if ($next === 'APPROVED') $essayExam->update(['approved_by_user_id'=>$request->user()->id,'approved_at'=>now(),'locked'=>true,'approval_qr'=>$essayExam->approval_qr ?: 'QR-EXAM-'.strtoupper(substr(hash('sha256',$essayExam->id.'|'.$essayExam->code.'|'.microtime(true)),0,24))]);
         $allApproved = $essayExam->questions()->select('paper_number')->distinct()->where('paper_status','!=','APPROVED')->doesntExist();
         if ($allApproved) {
             $this->transition($essayExam, $next, 'APPROVE', $request->user(), 'Đề số: '.implode(', ', $paperNumbers));
-            if ($next === 'APPROVED') $essayExam->update(['approved_by_user_id'=>$request->user()->id,'approved_at'=>now(),'locked'=>true,'approval_qr'=>$essayExam->approval_qr ?: 'QR-EXAM-'.strtoupper(substr(hash('sha256',$essayExam->id.'|'.$essayExam->code.'|'.microtime(true)),0,24))]);
+            if ($next === 'APPROVED') {
+                $essayExam->update([
+                    'approved_by_user_id' => $request->user()->id,
+                    'approved_at' => now(),
+                    'locked' => true,
+                    'approval_qr' => $essayExam->approval_qr ?: 'QR-EXAM-'.strtoupper(substr(hash('sha256',$essayExam->id.'|'.$essayExam->code.'|'.microtime(true)),0,24)),
+                ]);
+                if ($stage === 'PENDING_BGH' && $signature) {
+                    $this->createApprovalDocument($essayExam->fresh(), $request->user(), $signature);
+                }
+            }
         } else $this->log($essayExam, 'APPROVE_PAPERS', $essayExam->status, $essayExam->status, $request->user(), 'Đề số: '.implode(', ', $paperNumbers));
         return back()->with('success', 'Đã ghi nhận duyệt đề số: '.implode(', ', $paperNumbers).($allApproved ? ' — bộ đề đã chuyển bước.' : ' — các đề còn lại vẫn chờ duyệt.'));
+    }
+
+    private function captureApprovalSignature(Request $request): array
+    {
+        $data = $request->validate([
+            'signature_method' => 'required|in:upload,draw',
+            'signature_data' => 'required|string|max:7000000',
+        ]);
+        if (! preg_match('/^data:image\/png;base64,(.+)$/s', (string) $data['signature_data'], $match)) {
+            abort(422, 'Chữ ký phải là ảnh PNG nền trong suốt.');
+        }
+        $binary = base64_decode($match[1], true);
+        abort_unless($binary !== false && strlen($binary) > 100, 422, 'Ảnh chữ ký không hợp lệ.');
+        $path = 'essay-exam/signatures/'.now()->format('Y/m').'/signature-'.now()->format('YmdHis').'-'.bin2hex(random_bytes(5)).'.png';
+        Storage::disk('public')->put($path, $binary);
+        return ['method' => $data['signature_method'], 'path' => $path];
+    }
+
+    private function createApprovalDocument(EssayExam $exam, User $user, array $signature): EssayExamApprovalDocument
+    {
+        $exam->loadMissing(['subject', 'class', 'questions']);
+        $document = EssayExamApprovalDocument::firstOrNew(['essay_exam_id' => $exam->id]);
+        $document->fill([
+            'decision_code' => $document->decision_code ?: 'QD-'.now()->format('YmdHis').'-'.str_pad((string) $exam->id, 5, '0', STR_PAD_LEFT),
+            'title' => $exam->title,
+            'class_id' => $exam->class_id,
+            'class_name' => $exam->class?->name,
+            'subject_id' => $exam->subject_id,
+            'subject_name' => $exam->subject?->name,
+            'approved_by_user_id' => $user->id,
+            'approver_name' => $user->name ?: $user->email,
+            'approved_at' => now(),
+            'signature_method' => $signature['method'],
+            'signature_path' => $signature['path'],
+            'status' => 'SENT_TO_EXAM_OFFICE',
+            'sent_to_exam_office_at' => now(),
+            'sent_to_exam_office_by_user_id' => $user->id,
+        ]);
+        $document->save();
+        $document->load(['exam.subject', 'exam.class', 'exam.questions', 'subject', 'class', 'approver']);
+        $html = view('essay-exam::approval-document', [
+            'document' => $document,
+            'signatureUrl' => $this->signatureDataUrl($signature['path']),
+        ])->render();
+        $path = 'essay-exam/approval-documents/'.$document->decision_code.'.html';
+        Storage::disk('public')->put($path, $html);
+        $document->update(['document_path' => $path]);
+
+        $recipientIds = User::whereHas('roles', fn ($query) => $query->whereIn('name', ['exam-manager', 'exam-office', 'testing-office']))->pluck('id');
+        if ($recipientIds->isNotEmpty()) {
+            SystemNotifier::deliver(
+                userIds: $recipientIds,
+                actor: $user,
+                module: 'essay-exams',
+                action: 'approval-document',
+                title: 'Có văn bản phê duyệt đề thi mới',
+                message: "Văn bản {$document->decision_code} của bộ đề {$exam->code} đã được BGH ký và chuyển xuống Ban Khảo thí.",
+                url: route('essay-exams.approval-documents.show', $document, false),
+                type: SystemNotifier::TYPE_SYSTEM_CHANGE,
+                meta: ['essay_exam_id' => $exam->id, 'approval_document_id' => $document->id, 'status' => $document->status],
+            );
+        }
+        return $document;
+    }
+
+    private function signatureDataUrl(?string $path): ?string
+    {
+        if (! $path || ! Storage::disk('public')->exists($path)) return null;
+        return 'data:image/png;base64,'.base64_encode(Storage::disk('public')->get($path));
     }
 
         /* legacy stray calls removed */
@@ -1397,8 +1597,12 @@ class EssayExamController extends Controller
             if ($wordAnswerMode && preg_match('/^([\d]+(?:[,.][\d]+)?)\s*$/', $line, $pm)) {
                 $score = (float) str_replace(',', '.', $pm[1]);
                 if ($wordQuestion !== null) {
-                    if ($wordLastAnswerLine) $wordRows[$wordQuestion]['answer'] .= ' ['.$pm[1].' điểm]';
-                    else $wordRows[$wordQuestion]['points'] = $score;
+                    // Barem có thể nằm sau các dòng đáp án. Luôn ghi vào points;
+                    // nếu đã có đáp án thì chỉ giữ thêm nhãn điểm trong phần đáp án.
+                    $wordRows[$wordQuestion]['points'] = $score > 0 ? $score : 1;
+                    if ($wordLastAnswerLine) {
+                        $wordRows[$wordQuestion]['answer'] .= ($wordRows[$wordQuestion]['answer'] ? "\n" : '').'['.$pm[1].' điểm]';
+                    }
                 }
                 $wordLastAnswerLine = false;
                 continue;
@@ -1408,23 +1612,51 @@ class EssayExamController extends Controller
                 || preg_match('/^Äá»\s*(?:thi\s*)?(?:sá»‘|so)\s*(\d+)/iu', $line, $m)) { $wordPaper = (int) end($m); $wordQuestion = null; continue; }
             if (preg_match('/^\s*[^\d\r\n]*(\d+)\s*(?:\([^)]*\))?\s*[.\-:)]\s*(.*)$/u', $line, $m)) {
                 $number = (int) $m[1];
+                $unmatchedAnswerHeader = false;
                 if ($wordAnswerMode) {
+                    $previousWordQuestion = $wordQuestion;
+                    $previousLastAnswerLine = $wordLastAnswerLine;
                     $wordQuestion = null; $wordLastAnswerLine = false;
                     foreach ($wordRows as $idx => $existing) if ($existing['paper'] === $wordPaper && $existing['question'] === $number) {
                         $wordQuestion = $idx;
                         if (preg_match('/\t\s*([\d,.]+)\s*$/', $m[2], $pm)) $wordRows[$idx]['points'] = (float) str_replace(',', '.', $pm[1]);
+                        $inlineAnswer = trim(preg_replace('/\t\s*[\d,.]+\s*$/', '', $m[2]) ?: $m[2]);
+                        if ($inlineAnswer !== '') {
+                            $wordRows[$idx]['answer'] = trim(($wordRows[$idx]['answer'] ? $wordRows[$idx]['answer']."\n" : '').$inlineAnswer);
+                            $wordLastAnswerLine = true;
+                        }
                         break;
                     }
-                    continue;
+                    // Nếu không có câu tương ứng ở phần I thì đây là ý dạng
+                    // "1) ..."/"2) ..." của câu hiện tại, không phải câu mới.
+                    if ($wordQuestion !== null) continue;
+                    $wordQuestion = $previousWordQuestion;
+                    $wordLastAnswerLine = $previousLastAnswerLine;
+                    $unmatchedAnswerHeader = true;
                 }
-                $content = trim($m[2]); $points = 1;
-                if (preg_match('/\t\s*([\d,.]+)\s*$/', $content, $pm)) { $points = (float) str_replace(',', '.', $pm[1]); $content = trim(substr($content, 0, -strlen($pm[0]))); }
-                $wordRows[] = ['paper'=>$wordPaper,'question'=>$number,'content'=>$content,'answer'=>'','points'=>$points > 0 ? $points : 1];
-                $wordQuestion = count($wordRows) - 1; $wordLastAnswerLine = false; continue;
+                if (! $unmatchedAnswerHeader) {
+                    $content = trim($m[2]); $points = 1;
+                    if (preg_match('/\t\s*([\d,.]+)\s*$/', $content, $pm)) { $points = (float) str_replace(',', '.', $pm[1]); $content = trim(substr($content, 0, -strlen($pm[0]))); }
+                    $wordRows[] = ['paper'=>$wordPaper,'question'=>$number,'content'=>$content,'answer'=>'','points'=>$points > 0 ? $points : 1];
+                    $wordQuestion = count($wordRows) - 1; $wordLastAnswerLine = false; continue;
+                }
             }
-            if ($wordAnswerMode && $wordQuestion !== null && preg_match('/^[-•]\s*(.*)$/u', $line, $bm)) {
-                $wordRows[$wordQuestion]['answer'] .= ($wordRows[$wordQuestion]['answer'] ? "\n" : '').trim($bm[1]);
-                $wordLastAnswerLine = true;
+            if ($wordAnswerMode && $wordQuestion !== null) {
+                $answerText = null;
+                if (preg_match('/^[-•]\s*(.+)$/u', $line, $bm)) {
+                    $answerText = trim($bm[1]);
+                } elseif (preg_match('/^(?:[A-Za-z]|\d+)\s*[.)]\s*(.+)$/u', $line, $bm)
+                    || preg_match('/^(?:y|ý)\s*\d+\s*[:.)-]\s*(.+)$/iu', $line, $bm)) {
+                    // Nhận cả ý dạng a), 1), Ý 1:; trước đây chỉ nhận gạch đầu dòng.
+                    $answerText = trim($bm[1]);
+                } elseif ($line !== '') {
+                    // Một số file Word không có ký hiệu ở ý đầu tiên.
+                    $answerText = $line;
+                }
+                if ($answerText !== null && $answerText !== '') {
+                    $wordRows[$wordQuestion]['answer'] .= ($wordRows[$wordQuestion]['answer'] ? "\n" : '').$answerText;
+                    $wordLastAnswerLine = true;
+                }
             }
         }
         if (count($wordRows) > 0) return $wordRows;
