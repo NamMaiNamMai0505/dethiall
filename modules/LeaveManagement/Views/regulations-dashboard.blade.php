@@ -1,4 +1,7 @@
-@extends('layouts.admin')
+@extends('layouts.module-portal')
+@php($portalHome = route('leave-management.portal'))
+@php($portalTitle = 'Cổng quản lý phép')
+@php($portalIcon = 'bi-calendar2-check')
 @section('title', 'Quy định về phép')
 @section('page-title', 'Quy định về phép')
 @section('content')

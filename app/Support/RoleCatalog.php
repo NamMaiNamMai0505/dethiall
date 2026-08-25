@@ -25,6 +25,11 @@ final class RoleCatalog
 
     public const STUDENT = 'student';
 
+    public const LEAVE_MILITARY = 'military-personnel';
+    public const LEAVE_COMMANDER = 'agency-commander';
+    public const LEAVE_QUAN_LUC = 'military-force-manager';
+    public const LEAVE_MANAGEMENT_AGENCY = 'cadres-agency-manager';
+
     private const VIEW = ApplicationRegistry::ACTION_VIEW;
 
     private const CREATE = ApplicationRegistry::ACTION_CREATE;
@@ -105,6 +110,38 @@ final class RoleCatalog
                 'abilities' => self::researchAgencyAbilities(),
             ],
             [
+                'name' => self::LEAVE_MILITARY,
+                'label' => 'Quân nhân',
+                'description' => 'Đề xuất và theo dõi đơn nghỉ phép của chính mình.',
+                'scope' => 'Dữ liệu phép của chính mình',
+                'permissions' => ['leave-management.access.index','leave-management.access.show','leave-management.requests.index','leave-management.requests.show','leave-management.requests.create','leave-management.index','leave-management.create'],
+                'abilities' => [],
+            ],
+            [
+                'name' => self::LEAVE_COMMANDER,
+                'label' => 'Chỉ huy cơ quan',
+                'description' => 'Xem xét, chỉnh sửa và chuyển đề xuất phép lên cơ quan quản lý.',
+                'scope' => 'Đơn vị được phân công',
+                'permissions' => ['leave-management.access.index','leave-management.access.show','leave-management.personnel.index','leave-management.personnel.show','leave-management.requests.index','leave-management.requests.show','leave-management.requests.edit','leave-management.approvals.index','leave-management.approvals.show','leave-management.approvals.approve','leave-management.batches.index','leave-management.batches.show','leave-management.records.index','leave-management.records.show','leave-management.index','leave-management.edit','leave-management.approve'],
+                'abilities' => [],
+            ],
+            [
+                'name' => self::LEAVE_QUAN_LUC,
+                'label' => 'Quân lực',
+                'description' => 'In giấy trình Ban Giám hiệu ký, duyệt cuối và thông báo kết quả cho quân nhân.',
+                'scope' => 'Các đơn thuộc cơ quan Quân lực',
+                'permissions' => ['leave-management.access.index','leave-management.access.show','leave-management.requests.index','leave-management.requests.show','leave-management.approvals.index','leave-management.approvals.show','leave-management.approvals.approve','leave-management.batches.index','leave-management.batches.show','leave-management.records.index','leave-management.records.show','leave-management.reports.index','leave-management.reports.show','leave-management.reports.export','leave-management.index','leave-management.approve','leave-management.export','leave-management.edit'],
+                'abilities' => [],
+            ],
+            [
+                'name' => self::LEAVE_MANAGEMENT_AGENCY,
+                'label' => 'Cơ quan cán bộ',
+                'description' => 'Chức năng giống Quân lực: in giấy trình Ban Giám hiệu ký, duyệt cuối và thông báo kết quả cho quân nhân.',
+                'scope' => 'Các đơn thuộc Cơ quan cán bộ',
+                'permissions' => ['leave-management.access.index','leave-management.access.show','leave-management.requests.index','leave-management.requests.show','leave-management.approvals.index','leave-management.approvals.show','leave-management.approvals.approve','leave-management.batches.index','leave-management.batches.show','leave-management.records.index','leave-management.records.show','leave-management.reports.index','leave-management.reports.show','leave-management.reports.export','leave-management.index','leave-management.approve','leave-management.export','leave-management.edit'],
+                'abilities' => [],
+            ],
+            [
                 'name' => self::INSTRUCTOR,
                 'label' => 'Giảng viên',
                 'description' => 'Tự kê khai giờ quy đổi và NCKH; dạy trên LMS và nhập điểm cho lớp mình phụ trách.',
@@ -161,6 +198,10 @@ final class RoleCatalog
         $group = self::find($name);
         if ($group === null) {
             return [];
+        }
+
+        if (isset($group['permissions'])) {
+            return array_values(array_unique($group['permissions']));
         }
 
         $names = [];

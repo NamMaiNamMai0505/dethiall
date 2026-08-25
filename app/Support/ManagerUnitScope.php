@@ -80,6 +80,11 @@ class ManagerUnitScope
      */
     public static function unitAndDescendantIds(int $unitId): array
     {
+        static $cache = [];
+        if (array_key_exists($unitId, $cache)) {
+            return $cache[$unitId];
+        }
+
         $ids = [$unitId];
         $frontier = [$unitId];
 
@@ -98,7 +103,7 @@ class ManagerUnitScope
             $frontier = $new;
         }
 
-        return array_values(array_unique($ids));
+        return $cache[$unitId] = array_values(array_unique($ids));
     }
 
     public static function applyToInstructorQuery(Builder $query, ?User $user = null): Builder

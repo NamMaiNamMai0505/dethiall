@@ -1,8 +1,26 @@
 @extends('layouts.admin')
+@php($portalHome = route('leave-management.portal'))
+@php($portalTitle = 'Cổng quản lý phép')
+@php($portalIcon = 'bi-calendar2-check')
 @section('title', 'Quản lý phép')
 @section('page-title', 'Quản lý phép')
 @section('content')
-@include('partials.module-menu', ['module' => 'leave'])
+@if(false)
+<div class="mb-5 flex flex-col gap-4 rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-950 to-indigo-700 p-5 text-white sm:flex-row sm:items-center sm:justify-between"><div><p class="text-xs font-bold uppercase tracking-widest text-blue-200">Cổng nghiệp vụ</p><h1 class="mt-1 text-2xl font-extrabold">Quản lý phép</h1><p class="mt-1 text-sm text-blue-100">Mở giao diện quản lý phép riêng, không dùng sidebar Dashboard.</p></div><a href="{{ route('leave-management.portal') }}" class="inline-flex items-center justify-center rounded-xl bg-white px-4 py-2.5 font-extrabold text-blue-900 shadow-sm hover:bg-blue-50">Xem cổng <i class="bi bi-arrow-up-right ml-2"></i></a></div>
+@endif
+<x-breadcrumb :items="[['title' => 'Trang chủ'], ['title' => 'Quản lý phép']]" />
+<x-page-header title="QUẢN LÝ PHÉP" subtitle="Quân nhân – học viên · đề xuất · phê duyệt · hồ sơ · báo cáo" />
+<div class="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
+    <div class="rounded-xl border border-blue-100 border-l-4 border-l-blue-500 bg-white p-5 shadow-sm"><p class="text-sm text-slate-600">Quân nhân – học viên</p><p class="mt-1 text-3xl font-bold text-slate-900">{{ number_format($stats['personnel']) }}</p></div>
+    <div class="rounded-xl border border-emerald-100 border-l-4 border-l-emerald-500 bg-white p-5 shadow-sm"><p class="text-sm text-slate-600">Số đơn phép đã duyệt</p><p class="mt-1 text-3xl font-bold text-slate-900">{{ number_format($stats['approved']) }}</p><p class="text-xs text-slate-500">đơn</p></div>
+    <div class="rounded-xl border border-indigo-100 border-l-4 border-l-indigo-500 bg-white p-5 shadow-sm"><p class="text-sm text-slate-600">Đơn đang chờ duyệt</p><p class="mt-1 text-3xl font-bold text-slate-900">{{ number_format($stats['pending']) }}</p></div>
+</div>
+<div class="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    @foreach([['leave-management.portal','Xem cổng quản lý phép','Giao diện cổng nghiệp vụ riêng — tách biệt Dashboard','bi-calendar2-check','border-blue-300 ring-1 ring-blue-100'],['leave-management.personnel','Quân nhân – học viên','Danh sách và hồ sơ nhân sự phép','bi-people',''],['leave-management.requests','Đề xuất nghỉ phép','Tạo và theo dõi đơn phép','bi-file-earmark-plus',''],['leave-management.approvals','Duyệt phép','Xử lý các đơn đang chờ','bi-check2-circle',''],['leave-management.records','Hồ sơ phép','Lưu trữ và tra cứu hồ sơ','bi-archive',''],['leave-management.reports','Báo cáo phép','Tổng hợp ngày phép theo năm','bi-bar-chart-line',''],['leave-management.units','Đơn vị','Quản lý đơn vị và tổ chức','bi-diagram-3',''],['leave-management.regulations.dashboard','Quy định phép','Thiết lập tiêu chuẩn phép','bi-sliders','']] as [$route,$label,$desc,$icon,$style])
+        <a href="{{ route($route) }}" class="group rounded-xl border bg-white p-5 shadow-sm transition hover:border-blue-200 hover:shadow-md {{ $style }}"><div class="mb-3 flex h-11 w-11 items-center justify-center rounded-lg bg-blue-100 text-xl text-blue-700"><i class="bi {{ $icon }}"></i></div><span class="font-semibold text-slate-900 group-hover:text-blue-700">{{ $label }}</span><span class="mt-1 block text-sm text-slate-500">{{ $desc }}</span></a>
+    @endforeach
+</div>
+@if(false)
 <div class="space-y-5">
     <div class="flex items-center justify-between"><h1 class="text-2xl font-bold">Quản lý phép</h1><a href="{{ route('leave-management.reports') }}" class="rounded border px-3 py-2">Báo cáo phép</a></div>
     @if(session('success'))<div class="rounded bg-green-100 p-3 text-green-800">{{ session('success') }}</div>@endif
@@ -15,4 +33,5 @@
     @include('leave-management::partials.personnel-list', ['personnel' => $personnel])
     <div class="overflow-x-auto rounded border bg-white"><table class="w-full text-left text-sm"><thead class="bg-slate-100"><tr><th class="p-3">Nhân sự</th><th class="p-3">Thời gian</th><th class="p-3">Loại / ngày</th><th class="p-3">Trạng thái</th><th class="p-3">Thao tác</th></tr></thead><tbody>@forelse($requests as $item)<tr class="border-t"><td class="p-3">{{ $item->personnel?->name }}</td><td class="p-3">{{ $item->from_date?->format('d/m/Y') }} – {{ $item->to_date?->format('d/m/Y') }}</td><td class="p-3">{{ $item->leave_type }} / {{ $item->total_days }} ngày<div class="text-xs text-slate-500">Chuẩn {{ $item->base_days }}, đi đường {{ $item->travel_days }}, cộng thêm {{ $item->extra_days }}</div></td><td class="p-3">{{ $item->status }}</td><td class="p-3">@if($item->status === 'PENDING')<div class="flex flex-wrap gap-1"><form method="POST" action="{{ route('leave-management.requests.decide',$item) }}">@csrf @method('PATCH')<button name="status" value="APPROVED" class="rounded bg-green-600 px-2 py-1 text-white">Duyệt</button><button name="status" value="REJECTED" class="rounded bg-red-600 px-2 py-1 text-white">Từ chối</button></form><form method="POST" action="{{ route('leave-management.requests.cancel',$item) }}">@csrf @method('PATCH')<button class="rounded bg-orange-500 px-2 py-1 text-white">Hủy</button></form></div>@else<span class="text-slate-500">Đã xử lý</span>@endif</td></tr>@empty<tr><td colspan="5" class="p-8 text-center">Chưa có đơn nghỉ phép.</td></tr>@endforelse</tbody></table><div class="p-3">{{ $requests->links() }}</div></div>
 </div>
+@endif
 @endsection
