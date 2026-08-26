@@ -415,6 +415,8 @@ class EssayExamController extends Controller
         }
         if ($data['exam_type'] === 'Tích hợp') {
             abort_unless(! empty($sourceData['mcq_bank_id']) && ! empty($sourceData['essay_pool_id']), 422, 'Hãy chọn ngân hàng trắc nghiệm và ngân hàng tự luận cho đề tích hợp.');
+            $scoreData = $request->validate(['mcq_total_points'=>'required|numeric|min:0|max:100','essay_total_points'=>'required|numeric|min:0|max:100']);
+            abort_if((float) $scoreData['mcq_total_points'] + (float) $scoreData['essay_total_points'] <= 0, 422, 'Tổng điểm đề tích hợp phải lớn hơn 0.');
             $mcqSource = explode(':', (string) $sourceData['mcq_bank_id']);
             $mcqBankIds = LmsQuestionBank::query()->where('status','APPROVED')->whereHas('course', fn ($q) => $q->where('subject_id',$data['subject_id'])->where(fn ($x) => $x->where('class_id',$class->id)->orWhereNull('class_id')))->pluck('id');
             $essaySource = explode(':', (string) $sourceData['essay_pool_id']);
@@ -443,18 +445,21 @@ class EssayExamController extends Controller
             $essayQuestions = $essayQuestionsPool
                 ->shuffle()->unique(fn ($q) => trim((string) $q->content))->values()->take($essayCount);
             abort_if($essayQuestions->count() < $essayCount, 422, 'Ngân hàng đề tự luận không đủ câu khác nhau để rút.');
-            $essayPoints = round((float) $essayQuestions->sum('points'), 2);
-            $remainingPoints = round(10 - $essayPoints, 2);
-            abort_if($remainingPoints < 0, 422, 'Tổng điểm các câu tự luận đã vượt quá 10 điểm.');
             $mcqTotal = $pickedMcqQuestions->count();
-            abort_if($mcqTotal === 0 && $remainingPoints > 0, 422, 'Cơ cấu đề phải có câu trắc nghiệm để đủ 10 điểm.');
-            $mcqPoint = $mcqTotal > 0 ? round($remainingPoints / $mcqTotal, 2) : 0;
+            $mcqTotalPoints = (float) $scoreData['mcq_total_points'];
+            $essayTotalPoints = (float) $scoreData['essay_total_points'];
+            abort_if($mcqTotal === 0 && $mcqTotalPoints > 0, 422, 'Có điểm trắc nghiệm nhưng chưa chọn câu trắc nghiệm.');
+            abort_if($essayCount === 0 && $essayTotalPoints > 0, 422, 'Có điểm tự luận nhưng chưa chọn câu tự luận.');
+            abort_if($mcqTotal > 0 && $mcqTotalPoints <= 0, 422, 'Hãy nhập tổng điểm trắc nghiệm lớn hơn 0.');
+            abort_if($essayCount > 0 && $essayTotalPoints <= 0, 422, 'Hãy nhập tổng điểm tự luận lớn hơn 0.');
+            $mcqPoint = $mcqTotal > 0 ? round($mcqTotalPoints / $mcqTotal, 4) : 0;
+            $essayPoint = $essayCount > 0 ? round($essayTotalPoints / $essayCount, 4) : 0;
             foreach ($pickedMcqQuestions as $index => $item) {
                 $q = $item['question'];
-                $point = $index === $mcqTotal - 1 ? round($remainingPoints - ($mcqPoint * max(0, $mcqTotal - 1)), 2) : $mcqPoint;
+                $point = $index === $mcqTotal - 1 ? round($mcqTotalPoints - ($mcqPoint * max(0, $mcqTotal - 1)), 4) : $mcqPoint;
                 $exam->questions()->create(['lms_lesson_id'=>$item['lesson_id'],'paper_number'=>$data['paper_number'],'question_number'=>++$number,'question_type'=>'multiple_choice','content'=>$q->stem,'options'=>$q->options,'answer'=>$q->correctAnswerLabel(),'points'=>$point,'paper_status'=>'APPROVED']);
             }
-            foreach ($essayQuestions as $q) $exam->questions()->create(['lms_lesson_id'=>null,'paper_number'=>$data['paper_number'],'question_number'=>++$number,'question_type'=>'essay','content'=>$q->content,'options'=>$q->options,'answer'=>$q->answer,'points'=>$q->points,'paper_status'=>'APPROVED']);
+            foreach ($essayQuestions as $index => $q) { $point = $index === $essayCount - 1 ? round($essayTotalPoints - ($essayPoint * max(0, $essayCount - 1)), 4) : $essayPoint; $exam->questions()->create(['lms_lesson_id'=>null,'paper_number'=>$data['paper_number'],'question_number'=>++$number,'question_type'=>'essay','content'=>$q->content,'options'=>$q->options,'answer'=>$q->answer,'points'=>$point,'paper_status'=>'APPROVED']); }
             $drawCode = 'RT-'.now()->format('YmdHis').'-'.random_int(100,999);
             $draw = EssayExamDraw::create(['essay_exam_id'=>$exam->id,'paper_number'=>$data['paper_number'],'draw_code'=>$drawCode,'qr_code'=>'QR-'.$drawCode,'draw_type'=>$data['draw_type'],'class_name'=>$class->name,'exam_date'=>$data['exam_date'] ?? null,'exam_time'=>$data['exam_time'] ?? null,'location'=>$data['location'] ?? null,'drawn_by_user_id'=>$request->user()->id,'drawn_at'=>now(),'printed_at'=>now()]);
             return redirect()->route('essay-exams.draw.print', ['draw' => $draw->id, 'auto' => 1]);
