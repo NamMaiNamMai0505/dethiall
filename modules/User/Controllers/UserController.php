@@ -9,12 +9,15 @@ use App\Support\ManagerPosition;
 use App\Support\MilitaryRankAssignment;
 use App\Support\RoleAssignment;
 use App\Support\RoleDisplay;
+use App\Support\RoleCatalog;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Maatwebsite\Excel\Facades\Excel;
 use Modules\Class\Models\ClassModel;
 use Modules\Instructor\Models\Instructor;
+use Modules\LeaveManagement\Models\LeavePersonnel;
 use Modules\StandardHours\Models\ObjectType;
 use Modules\StandardHours\Models\Position;
 use Modules\Unit\Models\Unit;
@@ -137,9 +140,14 @@ class UserController extends ModuleBaseController
             ->get();
         $classes = ClassModel::pluck('name', 'id');
         $formExtras = $this->userFormExtras();
+        $militaryLinkRoleIds = $this->militaryLinkRoleIds();
+        $militaryPersonnel = LeavePersonnel::withoutGlobalScopes()
+            ->where('active', true)
+            ->orderBy('name')
+            ->get(['id', 'staff_code', 'name', 'rank', 'position', 'unit', 'email', 'gmail', 'user_id']);
 
         return view('user::create', array_merge(
-            compact('units', 'roles', 'instructors', 'classes'),
+            compact('units', 'roles', 'instructors', 'classes', 'militaryLinkRoleIds', 'militaryPersonnel'),
             $formExtras
         ));
     }
@@ -152,6 +160,19 @@ class UserController extends ModuleBaseController
         // Permission already checked by middleware
 
         $data = $request->validated();
+        $linkedPersonnel = ! empty($data['leave_personnel_id'])
+            ? LeavePersonnel::withoutGlobalScopes()->where('active', true)->findOrFail($data['leave_personnel_id'])
+            : null;
+        if ($linkedPersonnel?->user_id) {
+            abort(422, 'Hồ sơ quân nhân này đã được liên kết với một tài khoản khác. Hãy gỡ liên kết trước khi tạo tài khoản mới.');
+        }
+        if ($linkedPersonnel) {
+            // Hồ sơ quân nhân là nguồn dữ liệu ưu tiên; trường nào hồ sơ chưa có
+            // thì giữ giá trị người quản trị nhập trên form.
+            $data['name'] = $linkedPersonnel->name ?: $data['name'];
+            $data['code'] = $linkedPersonnel->staff_code ?: ($data['code'] ?? null);
+            $data['email'] = $linkedPersonnel->gmail ?: ($linkedPersonnel->email ?: $data['email']);
+        }
         $data['password'] = bcrypt($data['password']);
         $data['user_type'] = $data['user_type'] ?? 'internal_user';
         $data['position_id'] = $data['position_id'] ?? null;
@@ -169,6 +190,8 @@ class UserController extends ModuleBaseController
         if ($role) {
             $user->syncRoles([$role->name]);
         }
+
+        $this->syncMilitaryPersonnelLink($user, $data['leave_personnel_id'] ?? null);
 
         $this->syncInstructorStandardHours($user, $data);
 
@@ -212,6 +235,8 @@ class UserController extends ModuleBaseController
 
         $classes = ClassModel::pluck('name', 'id');
         $user->loadMissing(['instructor']);
+        $militaryPersonnel = LeavePersonnel::withoutGlobalScopes()->where('active', true)->orderBy('name')->get(['id', 'staff_code', 'name', 'rank', 'position', 'unit', 'email', 'gmail', 'user_id']);
+        $selectedLeavePersonnelId = LeavePersonnel::withoutGlobalScopes()->where('user_id', $user->id)->value('id');
         $formExtras = $this->userFormExtras($user);
 
         // Ưu tiên giá trị user; fallback hồ sơ GV (để edit thấy đúng Chức danh / Đối tượng)
@@ -219,7 +244,7 @@ class UserController extends ModuleBaseController
         $selectedObjectTypeId = old('object_type_id', $user->object_type_id ?: $user->instructor?->object_type_id);
 
         return view('user::edit', array_merge(
-            compact('user', 'units', 'roles', 'instructors', 'classes', 'selectedPositionId', 'selectedObjectTypeId'),
+            compact('user', 'units', 'roles', 'instructors', 'classes', 'militaryPersonnel', 'selectedLeavePersonnelId', 'selectedPositionId', 'selectedObjectTypeId'),
             $formExtras
         ));
     }
@@ -310,6 +335,53 @@ class UserController extends ModuleBaseController
         );
     }
 
+    /** @return list<int> */
+    private function militaryLinkRoleIds(): array
+    {
+        return Role::query()->get(['id', 'name'])
+            ->filter(function (Role $role): bool {
+                $name = Str::lower(Str::ascii((string) $role->name));
+                return Str::contains($name, ['quan nhan', 'chi huy co quan', 'quan luc', 'co quan can bo']);
+            })
+            ->pluck('id')->map(fn ($id) => (int) $id)->values()->all();
+
+        return Role::query()
+            ->whereIn('name', [
+                RoleCatalog::LEAVE_MILITARY,
+                RoleCatalog::LEAVE_COMMANDER,
+                RoleCatalog::LEAVE_QUAN_LUC,
+                RoleCatalog::LEAVE_MANAGEMENT_AGENCY,
+            ])
+            ->pluck('id')
+            ->map(fn ($id) => (int) $id)
+            ->values()
+            ->all();
+    }
+
+    private function syncMilitaryPersonnelLink(User $user, ?int $personnelId): void
+    {
+        if (! $personnelId) {
+            LeavePersonnel::withoutGlobalScopes()->where('user_id', $user->id)->update(['user_id' => null]);
+            return;
+        }
+
+        LeavePersonnel::withoutGlobalScopes()->where('user_id', $user->id)->where('id', '!=', $personnelId)->update(['user_id' => null]);
+
+        $personnel = LeavePersonnel::withoutGlobalScopes()
+            ->whereKey($personnelId)
+            ->where('active', true)
+            ->first();
+        if (! $personnel) {
+            return;
+        }
+
+        $update = ['user_id' => $user->id];
+        if (blank($personnel->email)) $update['email'] = $user->email;
+        if (blank($personnel->gmail)) $update['gmail'] = $user->email;
+        if (blank($personnel->staff_code) && filled($user->code)) $update['staff_code'] = $user->code;
+        $personnel->update($update);
+    }
+
     /** @return array<int, string> */
     private function unitOptions(): array
     {
@@ -335,6 +407,10 @@ class UserController extends ModuleBaseController
         // Permission already checked by middleware
 
         $data = $request->validated();
+        if (! empty($data['leave_personnel_id'])) {
+            $linkedPersonnel = LeavePersonnel::withoutGlobalScopes()->where('active', true)->findOrFail($data['leave_personnel_id']);
+            abort_unless(! $linkedPersonnel->user_id || (int) $linkedPersonnel->user_id === (int) $user->id, 422, 'Hồ sơ quân nhân này đã được liên kết với một tài khoản khác.');
+        }
         if (! empty($data['password'])) {
             $data['password'] = bcrypt($data['password']);
         } else {
@@ -357,6 +433,8 @@ class UserController extends ModuleBaseController
         if ($role) {
             $user->syncRoles([$role->name]);
         }
+
+        $this->syncMilitaryPersonnelLink($user, $data['leave_personnel_id'] ?? null);
 
         $this->syncInstructorStandardHours($user->fresh(), $data);
 

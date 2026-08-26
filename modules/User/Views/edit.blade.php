@@ -51,6 +51,15 @@
                             :value="old('role_id', $user->roles->first()->id ?? $user->role_id)"
                         />
                     </div>
+                    <div class="md:col-span-2 rounded-xl border border-blue-200 bg-blue-50/60 p-4">
+                        <label for="leave_personnel_id" class="block text-sm font-semibold text-slate-700">Liên kết hồ sơ quân nhân hiện có</label>
+                        <select name="leave_personnel_id" id="leave_personnel_id" class="mt-2 w-full rounded-lg border-slate-200 px-3 py-2.5">
+                            <option value="">Không liên kết</option>
+                            @foreach($militaryPersonnel ?? [] as $person)
+                                <option value="{{ $person->id }}" @selected((int) old('leave_personnel_id', $selectedLeavePersonnelId ?? 0) === (int) $person->id)>{{ $person->name }} — {{ $person->position ?: 'Chưa có chức vụ' }} — {{ $person->unit ?: 'Chưa có đơn vị' }}</option>
+                            @endforeach
+                        </select>
+                    </div>
                     <div id="unit_field_wrap">
                         <x-form.select
                             label="Khoa / đơn vị"

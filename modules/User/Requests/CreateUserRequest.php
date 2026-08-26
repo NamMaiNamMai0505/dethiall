@@ -59,6 +59,11 @@ class CreateUserRequest extends FormRequest
                 'nullable',
                 'exists:classes,id',
             ],
+            'leave_personnel_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('leave_personnel', 'id')->where(fn ($query) => $query->where('active', true)),
+            ],
         ];
     }
 

@@ -40,6 +40,31 @@
                         />
                     </div>
 
+                    <div id="military_personnel_link_field" class="md:col-span-2 rounded-xl border border-blue-200 bg-blue-50/60 p-4">
+                        <label for="leave_personnel_id" class="block text-sm font-semibold text-slate-700">
+                            Liên kết hồ sơ quân nhân hiện có
+                        </label>
+                        <p class="mt-1 text-xs text-slate-600">Áp dụng cho quân nhân đề xuất phép, chỉ huy cơ quan và quân lực. Tìm theo họ tên, mã quân nhân, cấp bậc hoặc đơn vị.</p>
+                        <input type="search" id="military_personnel_search" class="mt-3 w-full rounded-lg border-slate-200 px-3 py-2.5" placeholder="Gõ để tìm quân nhân..." autocomplete="off">
+                        <select name="leave_personnel_id" id="leave_personnel_id" class="mt-2 w-full rounded-lg border-slate-200 px-3 py-2.5">
+                            <option value="">Chọn hồ sơ quân nhân cần liên kết...</option>
+                            @foreach($militaryPersonnel ?? [] as $person)
+                                <option value="{{ $person->id }}"
+                                        data-search="{{ strtolower(trim(($person->staff_code ?? '').' '.($person->name ?? '').' '.($person->rank ?? '').' '.($person->position ?? '').' '.($person->unit ?? '').' '.($person->email ?? '').' '.($person->gmail ?? ''))) }}"
+                                        data-name="{{ $person->name }}"
+                                        data-code="{{ $person->staff_code }}"
+                                        data-email="{{ $person->gmail ?: $person->email }}"
+                                        data-rank="{{ $person->rank }}"
+                                        data-position="{{ $person->position }}"
+                                        data-unit="{{ $person->unit }}"
+                                        {{ old('leave_personnel_id') == $person->id ? 'selected' : '' }}>
+                                    {{ $person->staff_code ?: 'Chưa có mã' }} — {{ $person->name }}{{ $person->rank ? ' — '.$person->rank : '' }}{{ $person->unit ? ' — '.$person->unit : '' }}{{ $person->user_id ? ' (đã liên kết)' : '' }}
+                                </option>
+                            @endforeach
+                        </select>
+                        @error('leave_personnel_id')<p class="mt-1 text-sm text-red-600">{{ $message }}</p>@enderror
+                    </div>
+
                     <div id="unit_field_wrap">
                         <x-form.select
                             label="Khoa / đơn vị"
@@ -349,6 +374,10 @@ function togglePassword(fieldId, btn) {
         const emailInput = document.getElementById('email');
         const phoneInput = document.getElementById('phone');
         const unitSelect = document.getElementById('unit_id');
+        const militaryLinkField = document.getElementById('military_personnel_link_field');
+        const militaryPersonnelSelect = document.getElementById('leave_personnel_id');
+        const militaryPersonnelSearch = document.getElementById('military_personnel_search');
+        const militaryLinkRoleIds = @json($militaryLinkRoleIds ?? []);
         if (!roleSelect || !userTypeSelect || !instructorField) return;
         if (boundRoleSelects.has(roleSelect)) return;
         boundRoleSelects.add(roleSelect);
@@ -397,6 +426,75 @@ function togglePassword(fieldId, btn) {
                     setSelectValue(unitSelect, option.dataset.unitId, true);
                 }
             }
+        }
+
+        function selectedMilitaryPersonnelOption() {
+            if (!militaryPersonnelSelect) return null;
+            const value = getSelectValue(militaryPersonnelSelect);
+            if (!value) return null;
+            return militaryPersonnelSelect.querySelector('option[value="' + CSS.escape(String(value)) + '"]');
+        }
+
+        function setFromPersonnel(input, value) {
+            if (!input) return;
+            const text = String(value || '').trim();
+            if (text) input.value = text;
+            input.readOnly = Boolean(text);
+            input.classList.toggle('bg-slate-100', Boolean(text));
+        }
+
+        function syncMilitaryPersonnelToUserFields() {
+            const option = selectedMilitaryPersonnelOption();
+            if (!option) return;
+
+            setFromPersonnel(nameInput, option.dataset.name);
+            setFromPersonnel(codeInput, option.dataset.code);
+            setFromPersonnel(emailInput, option.dataset.email);
+
+            // Cấp bậc là select: tự chọn được option tương ứng; nếu hồ sơ chưa có thì vẫn cho chọn.
+            if (militaryRankSelect) {
+                const rankText = String(option.dataset.rank || '').trim().toLowerCase();
+                const rankOption = Array.from(militaryRankSelect.options).find(function (item) {
+                    return rankText && item.textContent.trim().toLowerCase().includes(rankText);
+                });
+                if (rankOption) setSelectValue(militaryRankSelect, rankOption.value, true);
+            }
+
+            if (positionSelect && option.dataset.position) {
+                const positionText = option.dataset.position.trim().toLowerCase();
+                const positionOption = Array.from(positionSelect.options).find(function (item) {
+                    return positionText && item.textContent.trim().toLowerCase().includes(positionText);
+                });
+                if (positionOption) setSelectValue(positionSelect, positionOption.value, true);
+            }
+
+            // Đơn vị trong hồ sơ quân nhân là tên; tự khớp với option đơn vị nếu tìm thấy.
+            if (unitSelect && option.dataset.unit) {
+                const unitText = option.dataset.unit.trim().toLowerCase();
+                const unitOption = Array.from(unitSelect.options).find(function (item) {
+                    return unitText && item.textContent.trim().toLowerCase().includes(unitText);
+                });
+                if (unitOption) setSelectValue(unitSelect, unitOption.value, true);
+            }
+        }
+
+        function toggleMilitaryPersonnelLink() {
+            const selectedRole = roleSelect.options[roleSelect.selectedIndex];
+            const roleText = String(selectedRole?.textContent || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+            const show = true;
+            militaryLinkField?.classList.toggle('hidden', !show);
+            if (!show && militaryPersonnelSelect) {
+                setSelectValue(militaryPersonnelSelect, '', true);
+            }
+        }
+
+        function filterMilitaryPersonnelOptions() {
+            if (!militaryPersonnelSelect || !militaryPersonnelSearch) return;
+            const term = militaryPersonnelSearch.value.trim().toLowerCase();
+            Array.from(militaryPersonnelSelect.options).forEach(function (option, index) {
+                if (index === 0) return;
+                option.hidden = Boolean(term) && !String(option.dataset.search || option.textContent).toLowerCase().includes(term);
+            });
         }
 
         function filterInstructorOptions(preserveSelected) {
@@ -562,6 +660,7 @@ function togglePassword(fieldId, btn) {
                 }
                 syncManagerUnitField();
                 toggleMilitaryRankField();
+                toggleMilitaryPersonnelLink();
             } finally {
                 syncing = false;
             }
@@ -585,6 +684,7 @@ function togglePassword(fieldId, btn) {
                 toggleClassField();
                 syncManagerUnitField();
                 toggleMilitaryRankField();
+                toggleMilitaryPersonnelLink();
             } finally {
                 syncing = false;
             }
@@ -608,6 +708,8 @@ function togglePassword(fieldId, btn) {
         bindSelectChange(unitSelect, onUnitChange);
         bindSelectChange(positionSelect, applyManagerRoleFromPosition);
         bindSelectChange(instructorSelect, syncInstructorToUserFields);
+        bindSelectChange(militaryPersonnelSelect, syncMilitaryPersonnelToUserFields);
+        militaryPersonnelSearch?.addEventListener('input', filterMilitaryPersonnelOptions);
 
         // Trạng thái ban đầu (old input / default)
         syncing = true;
@@ -620,9 +722,11 @@ function togglePassword(fieldId, btn) {
             showInstructorBox(isInstructorType() || isInstructorRole());
             syncManagerUnitField();
             toggleMilitaryRankField();
+            toggleMilitaryPersonnelLink();
             if ((isInstructorType() || isInstructorRole()) && getSelectedInstructorOption()) {
                 syncInstructorToUserFields();
             }
+            if (selectedMilitaryPersonnelOption()) syncMilitaryPersonnelToUserFields();
         } finally {
             syncing = false;
         }
