@@ -899,7 +899,13 @@
     window.initTomSelects = function (root) {
         if (typeof window.TomSelect === 'undefined') return false;
         const scope = root || document.getElementById('admin-content') || document;
-        scope.querySelectorAll('select').forEach(initOne);
+        // querySelectorAll() does not include the root itself. Several
+        // dynamic forms pass a single select here, so include it explicitly.
+        if (scope.tagName === 'SELECT') {
+            initOne(scope);
+        } else {
+            scope.querySelectorAll('select').forEach(initOne);
+        }
         return true;
     };
 
@@ -1124,6 +1130,9 @@
         });
     }
 
+    // app.js is a deferred module and may have fired its event before this
+    // inline helper is parsed. Boot immediately when that has already
+    // happened; DOMContentLoaded alone is too late for Turbo fragments.
     bootTomSelects();
 })();
 </script>
