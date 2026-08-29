@@ -66,6 +66,18 @@ class PermissionCheck
                 return true;
             }
 
+            // Tài khoản có vai trò quản lý được vào luồng quản lý phép để
+            // tiếp nhận đơn của thành viên thuộc cùng đơn vị.
+            if (in_array($permission, [
+                'leave-management.access.index',
+                'leave-management.index',
+                'leave-management.approvals.index',
+                'leave-management.requests.index',
+            ], true) && class_exists(\Modules\LeaveManagement\Support\LeaveAccess::class)
+                && \Modules\LeaveManagement\Support\LeaveAccess::isCommanderAccount($user)) {
+                return true;
+            }
+
             $approvalDecision = ApprovalAgency::permissionDecision($user, $permission);
             if ($approvalDecision !== null) {
                 return $approvalDecision;

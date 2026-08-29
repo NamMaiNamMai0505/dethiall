@@ -42,13 +42,24 @@
         <div class="row"><span class="label">Được nghỉ từ:</span><span>07h00 ngày {{ $request->from_date?->format('d/m/Y') }}</span></div>
         <div class="row"><span class="label">Đến:</span><span>17h00 ngày {{ $request->to_date?->format('d/m/Y') }}</span></div>
         <div class="row"><span class="label">Nơi nghỉ phép:</span><span>{{ $request->locality_path ?: '—' }}</span></div>
-        <div class="row"><span class="label">Lý do:</span><span>{{ $request->reason ?: 'Nghỉ phép năm.' }}</span></div>
+        @php
+            $printReason = trim((string) ($request->reason ?? ''));
+            if ($request->leave_type === 'ANNUAL') {
+                $printReason = ($printReason ?: 'Nghỉ phép năm') . ' ' . now()->year;
+            } elseif ($printReason === '') {
+                $printReason = 'Nghỉ phép.';
+            }
+        @endphp
+        <div class="row"><span class="label">Lý do:</span><span>{{ $printReason }}</span></div>
+        @if($request->decision_note)
+            <div class="row"><span class="label">Lý do trả về/từ chối:</span><span>{{ $request->decision_note }}</span></div>
+        @endif
     </div>
     <div class="signatures">
         <div><div>XÁC NHẬN</div><div>Của chính quyền địa phương<br>nơi nghỉ phép</div><span class="hint">(Ký, đóng dấu)</span><div class="sign-space"></div></div>
         <div><div>KT. HIỆU TRƯỞNG</div><div>PHÓ HIỆU TRƯỞNG</div><div class="sign-space"></div><div>........................................</div></div>
     </div>
 </main>
-<div class="actions"><button onclick="window.print()">In giấy nghỉ phép</button></div>
+<div class="actions"><button onclick="window.print()">In giấy nghỉ phép</button><a href="{{ route('leave-management.approvals') }}">← Quay lại trang duyệt</a></div>
 </body>
 </html>

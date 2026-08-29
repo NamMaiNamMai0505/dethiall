@@ -1,4 +1,4 @@
-@if(auth()->user()?->isSuperAdmin() || auth()->user()?->can('leave-management.create') || auth()->user()?->hasRole(\App\Support\RoleCatalog::LEAVE_MILITARY))
+@if(auth()->user()?->isSuperAdmin() || auth()->user()?->can('leave-management.create') || auth()->user()?->can('leave-management.requests.create') || auth()->user()?->hasRole(\App\Support\RoleCatalog::LEAVE_MILITARY))
 @php
     $user = auth()->user();
     $militaryPersonnel = $militaryPersonnel ?? \Modules\LeaveManagement\Models\LeavePersonnel::withoutGlobalScopes()
@@ -105,6 +105,15 @@
     @if($isMilitaryAccount || $canProposeForUnit)<div id="server-military-extra" class="mt-4 rounded-xl border border-slate-200 bg-white p-3 md:col-span-2"><div class="mb-3 text-sm font-extrabold text-slate-800">Ph&eacute;p th&ecirc;m</div><div class="flex border-b border-slate-200 bg-slate-50">@foreach([5,10] as $tabDays)<button type="button" class="server-extra-tab px-5 py-3 text-sm font-extrabold {{ $loop->first ? 'bg-white text-blue-700' : 'text-slate-500' }}" data-tab-days="{{ $tabDays }}">{{ $tabDays }} ng&agrave;y</button>@endforeach</div>@foreach([5,10] as $tabDays)<div class="server-extra-panel space-y-2 p-3 {{ $loop->first ? '' : 'hidden' }}" data-panel-days="{{ $tabDays }}">@foreach($extraStandards->where('base_days',$tabDays) as $rule)<label class="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 p-3"><input type="checkbox" name="extra_standard_ids[]" value="{{ $rule->id }}" data-days="{{ $rule->base_days }}" class="server-extra-check mt-1 h-4 w-4 accent-blue-600"><span><span class="block font-semibold text-slate-700">{{ $rule->label ?: $rule->description }}</span><span class="mt-1 block text-xs text-slate-500">{{ $rule->base_days }} ngày</span></span></label>@endforeach</div>@endforeach</div>@endif
 </form>
 </section>
+@php
+    // This script is rendered outside the permission block above, so keep the
+    // replacement data available for every render path.
+    $replacementData = ($replacementPersonnel ?? collect())->map(fn($item) => [
+        'id' => (int) $item->id,
+        'label' => ($item->staff_code ? $item->staff_code . ' — ' : '') . $item->name,
+        'unit_id' => (int) $item->unit_id,
+    ])->values();
+@endphp
 <script>
 (()=>{
   const isAdmin=@json(($canProposeForUnit ?? false) && !($isMilitaryAccount ?? false));
@@ -297,6 +306,14 @@
 })();
 </script>
 @endif
+@php
+    // This script is outside the permission block, so define the data here as well.
+    $replacementData = ($replacementPersonnel ?? collect())->map(fn($item) => [
+        'id' => (int) $item->id,
+        'label' => ($item->staff_code ? $item->staff_code . ' — ' : '') . $item->name,
+        'unit_id' => (int) $item->unit_id,
+    ])->values();
+@endphp
 <script>
 (() => {
     const personnel = document.getElementById('proposal-personnel');

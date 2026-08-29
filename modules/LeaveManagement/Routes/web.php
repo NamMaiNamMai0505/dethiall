@@ -3,7 +3,7 @@ use Illuminate\Support\Facades\Route;
 use Modules\LeaveManagement\Controllers\{LeaveMailController,LeaveManagementController,LeaveUnitController,LeaveWorkflowController};
 use Modules\LeaveManagement\Controllers\LeaveRequestEditController;
 use Modules\LeaveManagement\Controllers\{LeaveProposalController,LeaveDecisionController};
-Route::middleware(['web','auth','permission:leave-management.access.index|leave-management.index'])->prefix('quan-ly-phep')->name('leave-management.')->group(function(){
+Route::middleware(['web','auth','permission:leave-management.access.index|leave-management.index|leave-management.create|leave-management.requests.create'])->prefix('quan-ly-phep')->name('leave-management.')->group(function(){
     Route::get('/bao-cao/word',[LeaveWorkflowController::class,'reportWordFixed'])->middleware('permission:leave-management.export')->name('reports.word.compat');
     Route::post('/dia-phuong/reset',[LeaveWorkflowController::class,'localityReset'])->middleware('permission:leave-management.delete')->name('localities.reset');
     Route::get('/cong',[LeaveManagementController::class,'portal'])->name('portal');

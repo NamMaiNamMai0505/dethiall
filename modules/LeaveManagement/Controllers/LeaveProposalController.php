@@ -41,11 +41,16 @@ class LeaveProposalController extends ModuleBaseController
               || $request->user()->can('leave-management.approvals.approve')
               || $request->user()->can('leave-management.approve');
            $linkedMilitaryPersonnel = LeaveAccess::personnelForUser($request->user());
-           $isCommanderPersonnel = $linkedMilitaryPersonnel && LeaveAccess::isCommanderPersonnel($linkedMilitaryPersonnel->position);
+           $isCommanderPersonnel = LeaveAccess::isCommanderAccount($request->user())
+               || ($linkedMilitaryPersonnel && LeaveAccess::isCommanderPersonnel($linkedMilitaryPersonnel->position));
            if ($isCommanderPersonnel) {
-               abort(403, 'Tài khoản có chức vụ chỉ huy không được tự đề xuất phép.');
+               abort(403, 'Tài khoản quản lý cơ quan/đơn vị chỉ tiếp nhận và xử lý đề xuất phép.');
            }
-           $canProposeForUnit = $request->user()->isSuperAdmin() || (!$linkedMilitaryPersonnel && ($request->user()->can('leave-management.approvals.approve') || $request->user()->can('leave-management.approve')));
+          $canProposeForUnit = $request->user()->isSuperAdmin()
+              || (!$linkedMilitaryPersonnel && ($request->user()->can('leave-management.create')
+                  || $request->user()->can('leave-management.requests.create')
+                  || $request->user()->can('leave-management.approvals.approve')
+                  || $request->user()->can('leave-management.approve')));
           $isMilitaryAccount = !$request->user()->isSuperAdmin() && $linkedMilitaryPersonnel;
           $isMilitaryAccount = !$canProposeForUnit && ($request->user()->hasRole(\App\Support\RoleCatalog::LEAVE_MILITARY) || $linkedMilitaryPersonnel);
            $isMilitaryAccount = !$request->user()->isSuperAdmin()
