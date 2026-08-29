@@ -46,7 +46,6 @@
                     <th class="whitespace-nowrap px-4 py-3">Cấp bậc</th>
                     <th class="whitespace-nowrap px-4 py-3">Chức vụ</th>
                     <th class="whitespace-nowrap px-4 py-3">Ngày nhập ngũ</th>
-                    <th class="whitespace-nowrap px-4 py-3">Đơn vị</th>
                     <th class="whitespace-nowrap px-4 py-3">Quê quán</th>
                     <th class="whitespace-nowrap px-4 py-3">Thường trú</th>
                     <th class="whitespace-nowrap px-4 py-3">Chỉ huy đơn vị</th>
@@ -76,7 +75,6 @@
                         <td class="whitespace-nowrap px-4 py-3">{{ $person->rank ?: '—' }}</td>
                         <td class="whitespace-nowrap px-4 py-3">{{ $person->position ?: '—' }}</td>
                         <td class="whitespace-nowrap px-4 py-3">{{ $person->enlistment_date?->format('d/m/Y') ?: '—' }}</td>
-                        <td class="whitespace-nowrap px-4 py-3">{{ $person->unitRelation?->name ?? $person->unit ?? '—' }}</td>
                         <td class="whitespace-nowrap px-4 py-3">{{ $person->hometown ?: '—' }}</td>
                         <td class="whitespace-nowrap px-4 py-3">{{ $person->permanent_residence ?: '—' }}</td>
                         <td class="whitespace-nowrap px-4 py-3">{{ data_get($unitCommanders->firstWhere('id', $defaultCommanderId), 'name') ?? $person->commander_name ?? '—' }}</td>
@@ -89,7 +87,7 @@
                         </td>
                     </tr>
                     <tr class="personnel-edit-row hidden bg-slate-50/70">
-                        <td colspan="13" class="px-4 py-4">
+                        <td colspan="12" class="px-4 py-4">
                             <form method="POST" action="{{ route('leave-management.personnel.update', $person) }}" class="grid w-full gap-3 rounded-xl border border-blue-100 bg-blue-50/40 p-4 md:grid-cols-2">
                                     @csrf
                                     @method('PATCH')
@@ -102,23 +100,14 @@
                                     <label class="block text-xs font-bold text-slate-600">Đơn vị<input name="unit" value="{{ $person->unitRelation?->name ?? $person->unit }}" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"></label>
                                     <label class="block text-xs font-bold text-slate-600">Quê quán<input name="hometown" value="{{ $person->hometown }}" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"></label>
                                     <label class="block text-xs font-bold text-slate-600">Thường trú<input name="permanent_residence" value="{{ $person->permanent_residence }}" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"></label>
-                                     <label class="block text-xs font-bold text-slate-600">Cơ quan đang chỉ huy<input name="commander_name" value="{{ $person->commander_name ?: ($person->unitRelation?->name ?? $person->unit) }}" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"></label>
-                                     <label class="block text-xs font-bold text-slate-600">Tài khoản chỉ huy nhận đề xuất
-                                         @if($isNoCommanderRequired)
-                                             <input type="hidden" name="commander_user_id" value="">
-                                             <select name="commander_user_display" disabled class="mt-1 w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm"><option value="">Không cần tài khoản chỉ huy</option></select>
-                                         @else
-                                             <select name="commander_user_id" required class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"><option value="">Chọn tài khoản chỉ huy</option>@foreach($unitCommanders as $commander)<option value="{{ $commander['id'] }}" @selected((int) $defaultCommanderId === (int) $commander['id'])>{{ $commander['code'] }} — {{ $commander['name'] }}</option>@endforeach</select>
-                                         @endif
-                                         <span class="mt-1 block text-xs font-normal text-slate-500">Có thể thay đổi trong danh sách chỉ huy của đúng đơn vị này.</span>
-                                     </label>
+                                     <div class="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">Chỉ huy tiếp nhận được tự động xác định theo đơn vị và role <strong>Chỉ huy cơ quan / đơn vị</strong>; không cần liên kết thủ công.</div>
                                     <label class="block text-xs font-bold text-slate-600">Gmail<input name="gmail" type="email" value="{{ $person->gmail ?: $person->email }}" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"></label>
                                     <div class="flex justify-end md:col-span-2"><button class="rounded-lg bg-blue-700 px-5 py-2.5 font-bold text-white hover:bg-blue-800">Lưu thay đổi</button></div>
                             </form>
                         </td>
                     </tr>
                 @empty
-                    <tr><td colspan="13" class="px-5 py-10 text-center text-slate-500">Chưa có quân nhân.</td></tr>
+                    <tr><td colspan="12" class="px-5 py-10 text-center text-slate-500">Chưa có quân nhân.</td></tr>
                 @endforelse
             </tbody>
         </table>

@@ -17,6 +17,9 @@ class LeaveDecisionController extends ModuleBaseController
     {
         $user=$request->user();
         $decision=$request->validate(['status'=>'required|in:PENDING_AGENCY,APPROVED,REJECTED','decision_note'=>'nullable|string|max:2000','bgh_signed'=>'nullable|boolean','bgh_note'=>'nullable|string|max:2000']);
+        if ($decision['status']==='REJECTED') {
+            abort_if(trim((string)($decision['decision_note']??''))==='',422,'Khi trả về/từ chối phải nêu rõ lý do.');
+        }
         $status=$leaveRequest->status==='PENDING'?'PENDING_COMMANDER':$leaveRequest->status;
 
         if ($status==='PENDING_COMMANDER') {
@@ -40,6 +43,7 @@ class LeaveDecisionController extends ModuleBaseController
             return back()->with('success','Đã từ chối đề xuất nghỉ phép.');
         }
 
+        abort_unless($leaveRequest->printed_at,422,'Phải in đơn trình Ban Giám hiệu trước khi duyệt.');
         abort_unless($request->boolean('bgh_signed') || $leaveRequest->bgh_signed_at,422,'Chưa xác nhận Ban Giám hiệu đã ký.');
         DB::transaction(function () use ($leaveRequest,$user,$decision): void {
             if (!$leaveRequest->bgh_signed_at) {

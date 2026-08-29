@@ -48,6 +48,7 @@
     @if(session('success'))<div class="rounded bg-green-100 p-3 text-green-800">{{ session('success') }}</div>@endif
 
     @if($section === 'personnel')
+        <div class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-indigo-100 bg-indigo-50 p-4"><div><h2 class="font-bold text-indigo-900">Đồng bộ chức vụ với Dashboard</h2><p class="mt-1 text-sm text-indigo-700">Cập nhật chức vụ và mã chức vụ từ tài khoản đã liên kết.</p></div><form method="POST" action="{{ route('leave-management.personnel.positions.sync') }}">@csrf<button class="rounded-lg bg-indigo-700 px-4 py-2 font-bold text-white hover:bg-indigo-800"><i class="bi bi-arrow-repeat mr-1"></i>Đồng bộ chức vụ</button></form></div>
         @include('leave-management::partials.personnel-create', ['users' => $users, 'units' => $units, 'objects' => $objects, 'positions' => $positions])
         <script>document.querySelectorAll('select[name="hometown"],select[name="permanent_residence"]').forEach(function(select){Array.from(select.options).forEach(function(option){if(option.value && !/\s[—–-]\s/.test(option.textContent))option.remove();});});</script>
         @include('leave-management::partials.personnel-detail-list')

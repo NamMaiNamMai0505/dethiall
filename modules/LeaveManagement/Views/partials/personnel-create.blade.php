@@ -9,12 +9,22 @@
         <div class="xl:col-span-2"><label class="mb-1.5 block text-sm font-bold text-slate-700">Tài khoản quân nhân (nếu có)</label><select name="user_id" class="w-full rounded-xl border px-3 py-2.5"><option value="">Không liên kết tài khoản</option>@foreach($users as $user)<option value="{{ $user->id }}">{{ $user->code }} — {{ $user->name }}</option>@endforeach</select><span class="mt-1 block text-xs font-normal text-slate-500">Chỉ chọn khi quân nhân đã có tài khoản đăng nhập.</span></div>
         <div><label class="mb-1.5 block text-sm font-bold text-slate-700">Đối tượng</label><select name="object_type" class="w-full rounded-xl border px-3 py-2.5"><option value="">Chọn đối tượng</option>@foreach($objects as $object)<option value="{{ $object->code }}">{{ $object->name }}</option>@endforeach</select></div>
         <div><label class="mb-1.5 block text-sm font-bold text-slate-700">Cấp bậc</label><input name="rank" placeholder="Ví dụ: Đại úy" class="w-full rounded-xl border px-3 py-2.5"></div>
-        <div><label class="mb-1.5 block text-sm font-bold text-slate-700">Chức vụ</label><input name="position" placeholder="Ví dụ: Chỉ huy, Trợ lý" class="w-full rounded-xl border px-3 py-2.5"></div>
+        <div>
+            <label class="mb-1.5 block text-sm font-bold text-slate-700">Chức vụ</label>
+            <select name="position" class="w-full rounded-xl border px-3 py-2.5">
+                <option value="">Chọn chức vụ</option>
+                @foreach(($positions ?? collect()) as $position)
+                    <option value="{{ $position->name }}">{{ $position->name }}</option>
+                @endforeach
+                @if(!($positions ?? collect())->contains('name', 'Chỉ huy cơ quan/đơn vị'))
+                    <option value="Chỉ huy cơ quan/đơn vị">Chỉ huy cơ quan/đơn vị</option>
+                @endif
+            </select>
+        </div>
         <div><label class="mb-1.5 block text-sm font-bold text-slate-700">Ngày nhập ngũ</label><input name="enlistment_date" type="date" class="w-full rounded-xl border px-3 py-2.5"></div>
         <div class="xl:col-span-2"><label class="mb-1.5 block text-sm font-bold text-slate-700">Cơ quan tiếp nhận phép</label><input name="managing_agency_display" value="Tự động theo đối tượng" readonly class="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5"></div>
         <div class="xl:col-span-2"><label class="mb-1.5 block text-sm font-bold text-slate-700">Đơn vị quân nhân</label><select name="unit_id" class="w-full rounded-xl border px-3 py-2.5"><option value="">Chọn đơn vị</option>@foreach($units as $unit)<option value="{{ $unit->id }}">{{ $unit->code }} — {{ $unit->name }}</option>@endforeach</select></div>
-        <div class="xl:col-span-2"><label class="mb-1.5 block text-sm font-bold text-slate-700">Cơ quan đang chỉ huy</label><select name="commander_name" class="w-full rounded-xl border px-3 py-2.5"><option value="">Chọn cơ quan đang chỉ huy</option>@foreach($units as $unit)<option value="{{ $unit->name }}">{{ $unit->code }} — {{ $unit->name }}</option>@endforeach</select></div>
-        <div class="xl:col-span-2"><label class="mb-1.5 block text-sm font-bold text-slate-700">Tài khoản chỉ huy nhận đề xuất <span class="text-rose-500">*</span></label><select name="commander_user_id" required class="w-full rounded-xl border px-3 py-2.5"><option value="">Chọn tài khoản chỉ huy</option></select><span class="mt-1 block text-xs font-normal text-slate-500">Danh sách được lấy từ hồ sơ quân nhân có chức vụ “Chỉ huy” và chỉ hiển thị đúng theo cơ quan đang chỉ huy.</span></div>
+        <div class="xl:col-span-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"><i class="bi bi-info-circle mr-1"></i> Tài khoản tiếp nhận đề xuất được xác định tự động theo <strong>đơn vị quân nhân</strong>: tài khoản có role <strong>Chỉ huy cơ quan / đơn vị</strong> trong cùng đơn vị sẽ nhận đơn. Không cần liên kết thủ công từng quân nhân với tài khoản chỉ huy.</div>
         <div class="xl:col-span-2"><label class="mb-1.5 block text-sm font-bold text-slate-700">Quê quán</label><select name="hometown" class="w-full rounded-xl border px-3 py-2.5"><option value="">Chọn tỉnh/TP và phường/xã</option>@foreach(\Modules\LeaveManagement\Models\LeaveLocality::with('parent')->orderBy('level')->orderBy('name')->get() as $locality)@php($localityLabel=$locality->parent ? $locality->parent->name.' — '.$locality->name : $locality->name)<option value="{{ $localityLabel }}">{{ $localityLabel }}</option>@endforeach</select></div>
         <div class="xl:col-span-2"><label class="mb-1.5 block text-sm font-bold text-slate-700">Địa chỉ thường trú</label><select name="permanent_residence" class="w-full rounded-xl border px-3 py-2.5"><option value="">Chọn tỉnh/TP và phường/xã</option>@foreach(\Modules\LeaveManagement\Models\LeaveLocality::with('parent')->orderBy('level')->orderBy('name')->get() as $locality)@php($localityLabel=$locality->parent ? $locality->parent->name.' — '.$locality->name : $locality->name)<option value="{{ $localityLabel }}">{{ $localityLabel }}</option>@endforeach</select></div>
     </div>

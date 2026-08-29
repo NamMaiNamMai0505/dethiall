@@ -41,7 +41,7 @@ class LeaveProposalController extends ModuleBaseController
               || $request->user()->can('leave-management.approvals.approve')
               || $request->user()->can('leave-management.approve');
            $linkedMilitaryPersonnel = LeaveAccess::personnelForUser($request->user());
-           $isCommanderPersonnel = $linkedMilitaryPersonnel && str_contains(Str::lower(Str::ascii((string) $linkedMilitaryPersonnel->position)), 'chi huy');
+           $isCommanderPersonnel = $linkedMilitaryPersonnel && LeaveAccess::isCommanderPersonnel($linkedMilitaryPersonnel->position);
            if ($isCommanderPersonnel) {
                abort(403, 'Tài khoản có chức vụ chỉ huy không được tự đề xuất phép.');
            }
@@ -161,20 +161,13 @@ class LeaveProposalController extends ModuleBaseController
                 }
                   $positionKey = Str::lower(Str::ascii((string) $person->position));
                   $isTopLeadership = Str::contains($positionKey, ['hieu truong', 'pho hieu truong']);
-                  $commander = $isTopLeadership ? null : $person->commander_user_id;
-                 $commanderUser = null;
-                 // Đề xuất lớp/tranh thủ do chỉ huy đơn vị gửi; nếu hồ sơ học viên
-                 // chưa được gán riêng chỉ huy thì dùng người gửi làm đầu mối duyệt cấp 1.
-                 if (!$commander && in_array($scope, ['CLASS', 'SHORT_LEAVE'], true)) {
+                  // Không lưu liên kết chỉ huy trên từng hồ sơ. Tài khoản có role
+                  // agency-commander và cùng đơn vị sẽ tự động nhận đề xuất.
+                  $commanderUser = LeaveAccess::commanderForUnit((int) $person->unit_id);
+                  $commander = $isTopLeadership ? null : $commanderUser?->id;
+                 if (!$commander && in_array($scope, ['CLASS', 'SHORT_LEAVE'], true) && (int) $request->user()->unit_id === (int) $person->unit_id && $request->user()->hasRole(\App\Support\RoleCatalog::LEAVE_COMMANDER)) {
                      $commander = $request->user()->id;
-                 }
-                 if (!$commander && $isMilitaryAccount) {
-                     $approvers = \App\Models\User::query()->where('status', 1)->get()
-                         ->filter(fn ($candidate) => PermissionCheck::can($candidate, 'leave-management.approve') || PermissionCheck::can($candidate, 'leave-management.approvals.approve'));
-                     $commanderUser = $approvers->first(fn ($candidate) => trim((string) $candidate->name) === 'Nguyễn Văn D')
-                         ?: $approvers->first(fn ($candidate) => (int) $candidate->unit_id === (int) $person->unit_id)
-                         ?: $approvers->first();
-                     $commander = $commanderUser?->id;
+                     $commanderUser = $request->user();
                  }
                   if (!$commander && !$isTopLeadership) {
                     abort(422, 'Chưa có tài khoản chỉ huy/cơ quan quản lý được cấp quyền duyệt phép để tiếp nhận đề xuất.');
