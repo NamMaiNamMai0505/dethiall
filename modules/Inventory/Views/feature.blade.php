@@ -152,10 +152,12 @@
     document.addEventListener('DOMContentLoaded',()=>{const form=document.querySelector('form[action="{{ route('inventory.transfers.store') }}"]'),source=form?.querySelector('[name="from_classroom_id"]');if(!form||!source)return;const rooms={{ \Illuminate\Support\Js::from($transferRooms) }};source.innerHTML='<option value="">Chọn phòng nguồn</option>'+rooms.map(x=>`<option value="${x.id}">${x.name}</option>`).join('');source.dispatchEvent(new Event('change'));});
     </script>
     <script>
-    document.addEventListener('DOMContentLoaded', () => {
+    const initInventoryTransferUi = () => {
         const form = document.querySelector('form[action*="/dieu-dong"]');
         const source = form?.querySelector('select[name="from_classroom_id"]');
         if (!form || !source) return;
+        if (form.dataset.transferUiReady === '1') return;
+        form.dataset.transferUiReady = '1';
         ['asset_id', 'material_id', 'industry_filter', 'type_filter'].forEach(name => {
             form.querySelectorAll(`[name="${name}"]`).forEach(field => {
                 const label = field.closest('label');
@@ -194,7 +196,9 @@
         table.querySelector('.transfer-search').addEventListener('input', render);
         render();
         setTimeout(render, 500);
-    });
+    };
+    document.addEventListener('DOMContentLoaded', initInventoryTransferUi);
+    document.addEventListener('turbo:load', initInventoryTransferUi);
     </script>
     <script>
     document.addEventListener('DOMContentLoaded', () => {

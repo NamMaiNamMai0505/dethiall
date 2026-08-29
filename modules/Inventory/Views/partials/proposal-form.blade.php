@@ -1,4 +1,6 @@
-@php($currentUserUnitId = auth()->user()?->unit_id)
+@php
+    $currentUserUnitId = auth()->user()?->unit_id;
+@endphp
 <div class="rounded-xl border bg-white p-5 shadow-sm">
     <div class="mb-5 flex items-start justify-between gap-4">
         <div>
@@ -52,6 +54,14 @@
             </label>
         </div>
 
+        <div id="proposal-recall-warehouse" class="hidden rounded-lg border border-amber-200 bg-amber-50 p-3">
+            <label class="text-sm font-semibold text-slate-700">Kho nhận khi thu hồi / trả kho <span class="text-red-600">*</span>
+                <select name="warehouse_id" id="proposal-warehouse" class="mt-1 w-full rounded-lg border bg-white p-2.5">
+                    <option value="">Chọn kho nhận</option>
+                    @foreach(\Modules\Inventory\Models\InventoryWarehouse::where('active', true)->orderBy('name')->get() as $warehouse)<option value="{{ $warehouse->id }}" @selected(old('warehouse_id') == $warehouse->id)>{{ $warehouse->code }} — {{ $warehouse->name }}</option>@endforeach
+                </select>
+            </label>
+        </div>
         <div class="rounded-xl border border-dashed border-slate-300 bg-slate-50/60 p-4">
             <div class="mb-3 flex items-center justify-between"><div><h3 class="font-bold text-slate-800">Thêm vật tư</h3><p class="text-xs text-slate-500">Chọn phòng và vật tư cần xử lý trong đề xuất.</p></div></div>
             <div class="grid gap-4 md:grid-cols-5">
@@ -116,15 +126,42 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 </script>
 <script>
+document.addEventListener('DOMContentLoaded', function () {
+    const type = document.querySelector('select[name="type"]');
+    const box = document.getElementById('proposal-recall-warehouse');
+    const warehouse = document.getElementById('proposal-warehouse');
+    const sync = () => { const recall = type?.value === 'RECALL'; box?.classList.toggle('hidden', !recall); if (warehouse) warehouse.required = recall; };
+    type?.addEventListener('change', sync); sync();
+});
+</script>
+@php
+    $proposalTypesJson = ($types ?? collect())->map(fn ($item) => [
+        'value' => (string) $item->id,
+        'text' => $item->code.' — '.$item->name,
+        'parent' => (string) $item->parent_id,
+    ])->values();
+    $proposalMaterialRooms = ($assets ?? collect())
+        ->groupBy('material_id')
+        ->map(fn ($items) => $items->pluck('classroom_id')->filter()->unique()->values())
+        ->all();
+    $proposalMaterialsJson = ($materials ?? collect())->map(fn ($item) => [
+        'value' => (string) $item->id,
+        'text' => $item->code.' — '.$item->name,
+        'type' => (string) $item->category_id,
+        'rooms' => ($proposalMaterialRooms[$item->id] ?? collect())
+            ->map(fn ($id) => (string) $id)->values()->all(),
+    ])->values();
+@endphp
+<script>
 (()=>{
     const init=()=>{
         const industry=document.getElementById('proposal-category'),type=document.getElementById('proposal-type'),material=document.getElementById('proposal-material');
         if(!industry||!type||!material||industry.dataset.cascadeFinal==='1')return;
         industry.dataset.cascadeFinal='1';
-        const types=@json(($types ?? collect())->map(fn($item)=>['value'=>(string)$item->id,'text'=>$item->code.' — '.$item->name,'parent'=>(string)$item->parent_id])->values());
+        const types=@json($proposalTypesJson);
         const classroom=document.getElementById('proposal-classroom');
         const materialRooms=@json(($assets ?? collect())->groupBy('material_id')->map(fn($items)=>$items->pluck('classroom_id')->filter()->unique()->values())->all());
-        const materials=@json(($materials ?? collect())->map(fn($item)=>['value'=>(string)$item->id,'text'=>$item->code.' — '.$item->name,'type'=>(string)$item->category_id,'rooms'=>($materialRooms[$item->id] ?? collect())->map(fn($id)=>(string)$id)->values()->all()])->values());
+        const materials=@json($proposalMaterialsJson);
         const setOptions=(select,items,empty)=>{
             const current=select.value;
             if(select.tomselect){
