@@ -21,14 +21,20 @@ class UpdateClassroomRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'code' => ['nullable', 'string', 'max:80', Rule::unique('classrooms', 'code')->ignore($this->classroom->id)],
             'name' => [
                 'required',
                 'string',
                 'max:255',
                 Rule::unique('classrooms', 'name')->ignore($this->classroom->id)
             ],
+            'room_type' => ['nullable', 'string', 'max:100'],
             'status' => ['sometimes', 'boolean'],
             'building_id' => ['required', 'exists:buildings,id'],   
+            'floor' => ['nullable', 'string', 'max:50'],
+            'capacity' => ['nullable', 'integer', 'min:0'],
+            'managing_unit_id' => ['nullable', 'exists:units,id'],
+            'description' => ['nullable', 'string'],
         ];
     }
 

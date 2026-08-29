@@ -12,8 +12,14 @@ class Classroom extends Model
     use HasFactory, SoftDeletes;
 
     protected $fillable = [
+        'code',
         'name',
+        'room_type',
         'status',
+        'floor',
+        'capacity',
+        'managing_unit_id',
+        'description',
         'created_by',
         'updated_by',
         'building_id'
@@ -80,6 +86,16 @@ class Classroom extends Model
     public function building()
     {
         return $this->belongsTo(\Modules\Building\Models\Building::class, 'building_id');
+    }
+
+    public function managingUnit()
+    {
+        return $this->belongsTo(\Modules\Unit\Models\Unit::class, 'managing_unit_id');
+    }
+
+    public function inventoryAssets()
+    {
+        return $this->hasMany(\Modules\Inventory\Models\InventoryAsset::class, 'classroom_id');
     }
 
     public function scheduleDetails()

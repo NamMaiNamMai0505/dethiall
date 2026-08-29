@@ -52,6 +52,10 @@
 
 
             {{-- Name Field --}}
+            <div class="grid gap-6 md:grid-cols-2">
+                <div><label for="code" class="block text-sm font-medium text-gray-700 mb-2">Mã phòng</label><input id="code" name="code" value="{{ old('code', $classroom->code) }}" class="w-full px-3 py-2 border border-gray-300 rounded-md"></div>
+                <div><label for="room_type" class="block text-sm font-medium text-gray-700 mb-2">Loại phòng</label><input id="room_type" name="room_type" value="{{ old('room_type', $classroom->room_type) }}" class="w-full px-3 py-2 border border-gray-300 rounded-md"></div>
+            </div>
             <div>
                 <label for="name" class="block text-sm font-medium text-gray-700 mb-2">
                     Tên giảng đường <span class="text-red-500">*</span>
@@ -67,6 +71,13 @@
                     <p class="mt-1 text-sm text-red-600">{{ $message }}</p>
                 @enderror
             </div>
+
+            <div class="grid gap-6 md:grid-cols-3">
+                <div><label for="floor" class="block text-sm font-medium text-gray-700 mb-2">Tầng</label><input id="floor" name="floor" value="{{ old('floor', $classroom->floor) }}" class="w-full px-3 py-2 border border-gray-300 rounded-md"></div>
+                <div><label for="capacity" class="block text-sm font-medium text-gray-700 mb-2">Sức chứa</label><input id="capacity" type="number" min="0" name="capacity" value="{{ old('capacity', $classroom->capacity) }}" class="w-full px-3 py-2 border border-gray-300 rounded-md"></div>
+                <div><label for="managing_unit_id" class="block text-sm font-medium text-gray-700 mb-2">Đơn vị quản lý</label><select id="managing_unit_id" name="managing_unit_id" class="w-full px-3 py-2 border border-gray-300 rounded-md"><option value="">Chọn đơn vị</option>@foreach($units as $unit)<option value="{{ $unit->id }}" @selected(old('managing_unit_id', $classroom->managing_unit_id) == $unit->id)>{{ $unit->name }}</option>@endforeach</select></div>
+            </div>
+            <div><label for="description" class="block text-sm font-medium text-gray-700 mb-2">Mô tả phòng</label><textarea id="description" name="description" rows="3" class="w-full px-3 py-2 border border-gray-300 rounded-md">{{ old('description', $classroom->description) }}</textarea></div>
 
             {{-- Status Field --}}
             <div>

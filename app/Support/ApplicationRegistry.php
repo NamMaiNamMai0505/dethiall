@@ -111,7 +111,7 @@ final class ApplicationRegistry
      */
     public static function subsystems(): array
     {
-        return [
+        $subsystems = [
             [
                 'key' => 'training',
                 'label' => 'Lịch đào tạo',
@@ -189,7 +189,63 @@ final class ApplicationRegistry
                         self::ACTION_CREATE => ['plan'],
                         self::ACTION_EDIT => ['assignment', 'execution', 'grading'],
                     ]),
-                    self::app('inventory', 'Quản lý vật tư', [
+                    self::app('inventory.access', 'Truy cập quản lý vật tư', [
+                        self::ACTION_VIEW => ['index', 'show'],
+                    ]),
+                    self::app('inventory.materials', 'Danh mục vật tư', [
+                        self::ACTION_VIEW => ['index', 'show'],
+                        self::ACTION_CREATE => ['create'],
+                        self::ACTION_EDIT => ['edit'],
+                        self::ACTION_DELETE => ['delete'],
+                        self::ACTION_IMPORT => ['import'],
+                    ]),
+                    self::app('inventory.assets', 'Cập nhật vật tư trong đơn vị', [
+                        self::ACTION_VIEW => ['index', 'show'],
+                        self::ACTION_CREATE => ['create'],
+                        self::ACTION_EDIT => ['edit'],
+                        self::ACTION_DELETE => ['delete'],
+                        self::ACTION_IMPORT => ['import'],
+                    ]),
+                    self::app('inventory.warehouses', 'Kho vật tư', [
+                        self::ACTION_VIEW => ['index', 'show'],
+                        self::ACTION_CREATE => ['create'],
+                        self::ACTION_EDIT => ['edit'],
+                        self::ACTION_DELETE => ['delete'],
+                    ]),
+                    self::app('inventory.proposals', 'Đề xuất vật tư', [
+                        self::ACTION_VIEW => ['index', 'show'],
+                        self::ACTION_CREATE => ['create'],
+                        self::ACTION_EDIT => ['edit'],
+                        self::ACTION_APPROVE => ['approve'],
+                        self::ACTION_EXPORT => ['export'],
+                    ]),
+                    self::app('inventory.transfers', 'Điều động vật tư', [
+                        self::ACTION_VIEW => ['index', 'show'],
+                        self::ACTION_CREATE => ['create'],
+                        self::ACTION_EDIT => ['edit'],
+                        self::ACTION_APPROVE => ['approve'],
+                        self::ACTION_EXPORT => ['export'],
+                    ]),
+                    self::app('inventory.repairs', 'Phân công / sửa chữa vật tư', [
+                        self::ACTION_VIEW => ['index', 'show'],
+                        self::ACTION_CREATE => ['create'],
+                        self::ACTION_EDIT => ['edit'],
+                    ]),
+                    self::app('inventory.reports', 'Báo cáo vật tư', [
+                        self::ACTION_VIEW => ['index', 'show'],
+                        self::ACTION_EXPORT => ['export'],
+                    ]),
+                    self::app('inventory.logs', 'Nhật ký vật tư', [
+                        self::ACTION_VIEW => ['index', 'show'],
+                    ]),
+                    self::app('inventory.templates', 'Mẫu biểu vật tư', [
+                        self::ACTION_VIEW => ['index', 'show'],
+                        self::ACTION_CREATE => ['create'],
+                        self::ACTION_EDIT => ['edit'],
+                        self::ACTION_DELETE => ['delete'],
+                        self::ACTION_EXPORT => ['export'],
+                    ]),
+                    self::app('inventory', 'Quản lý vật tư (tương thích quyền cũ)', [
                         self::ACTION_VIEW => ['index', 'show'],
                         self::ACTION_CREATE => ['create'],
                         self::ACTION_EDIT => ['edit'],
@@ -308,6 +364,30 @@ final class ApplicationRegistry
                 ],
             ],
         ];
+
+        // Tách riêng tổ chức thi và quản lý vật tư trên ma trận phân quyền.
+        $subsystems = collect($subsystems)->flatMap(function (array $subsystem): array {
+            if ($subsystem['key'] !== 'inventory-exam') {
+                return [$subsystem];
+            }
+
+            $applications = collect($subsystem['applications']);
+
+            return [
+                [
+                    'key' => 'exam-organization',
+                    'label' => 'Tổ chức thi',
+                    'applications' => $applications->filter(fn (array $application): bool => ! str_starts_with($application['key'], 'inventory'))->values()->all(),
+                ],
+                [
+                    'key' => 'inventory-management',
+                    'label' => 'Quản lý vật tư',
+                    'applications' => $applications->filter(fn (array $application): bool => str_starts_with($application['key'], 'inventory'))->values()->all(),
+                ],
+            ];
+        })->values()->all();
+
+        return $subsystems;
     }
 
     /**

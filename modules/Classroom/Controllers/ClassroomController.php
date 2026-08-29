@@ -62,7 +62,8 @@ class ClassroomController extends ModuleBaseController
         // get all building, sort by Name
         $buildings = Building::orderBy('name')->get();
 
-        return view('classroom::create', compact('buildings'));
+        $units = \Modules\Unit\Models\Unit::active()->orderBy('name')->get();
+        return view('classroom::create', compact('buildings', 'units'));
     }
 
     /**
@@ -106,8 +107,9 @@ class ClassroomController extends ModuleBaseController
     {
         // Permission already checked by middleware
         $buildings = Building::all();
+        $units = \Modules\Unit\Models\Unit::active()->orderBy('name')->get();
 
-        return view('classroom::edit', compact('classroom', 'buildings'));
+        return view('classroom::edit', compact('classroom', 'buildings', 'units'));
     }
 
     /**
@@ -122,7 +124,7 @@ class ClassroomController extends ModuleBaseController
 
             $classroom->update($data);
 
-            return redirect()->route('classrooms.index')
+            return redirect()->back()
                 ->with('success', 'Giảng đường đã được cập nhật thành công!');
         } catch (\Exception $e) {
             return redirect()->back()
