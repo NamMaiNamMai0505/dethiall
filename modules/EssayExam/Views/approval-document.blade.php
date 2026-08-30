@@ -28,6 +28,7 @@
 </head>
 <body>
 <div class="toolbar"><button onclick="window.print()">In / Lưu PDF</button> <a href="{{ route('essay-exams.approval-documents.download', $document) }}">Tải văn bản</a></div>
+@php($formatAnswer = static fn ($answer) => preg_replace('/\R\s*(\[[^\x5D\r\n]*(?:\x{0111}i\x{1EC3}m|diem)[^\x5D\r\n]*\])/iu', ' $1', trim((string) $answer)) ?: trim((string) $answer))
 <main>
     <div class="header">
         <strong>TRƯỜNG CAO ĐẲNG HẬU CẦN 2</strong>
@@ -50,7 +51,7 @@
             @foreach($questions as $question)
                 <div class="question">
                     <strong>Câu {{ $question->question_number }}.</strong> {{ $question->content }} <span class="points">({{ number_format((float) $question->points, 2, ',', '.') }} điểm)</span>
-                    @if($question->answer)<div class="answer"><strong>Đáp án / barem:</strong> {{ $question->answer }}</div>@endif
+                    @if($question->answer)<div class="answer"><strong>Đáp án / barem:</strong> {{ $formatAnswer($question->answer) }}</div>@endif
                 </div>
             @endforeach
         </section>

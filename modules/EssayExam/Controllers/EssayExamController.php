@@ -79,6 +79,8 @@ class EssayExamController extends Controller
         if ($request->filled('subject_id')) $query->where('subject_id',$request->integer('subject_id'));
         if ($request->filled('teacher')) $query->where(function($q) use ($request) { $q->where('created_by_display_name','like','%'.$request->teacher.'%')->orWhere('created_by_username','like','%'.$request->teacher.'%'); });
         if ($request->filled('specialization_id')) $query->whereHas('subject', fn($q) => $q->where('specialization_id',$request->integer('specialization_id')));
+        $examOptions = (clone $query)->with('subject')->orderBy('code')->get(['id','code','title','subject_id','created_by_display_name','created_by_username']);
+        if ($request->filled('exam_id')) $query->whereKey($request->integer('exam_id'));
         $exams = $query->latest()->get();
         $lmsBanks = LmsQuestionBank::with(['course', 'questions.lesson'])
             ->where('status', $stage)
@@ -87,7 +89,7 @@ class EssayExamController extends Controller
             ->get();
         $subjects = Subject::orderBy('name')->get(['id','code','name']);
         $specializations = \Modules\Specialization\Models\Specialization::orderBy('name')->get(['id','name','code']);
-        return view('essay-exam::approval', compact('exams','lmsBanks','stage','subjects','specializations'));
+        return view('essay-exam::approval', compact('exams','lmsBanks','stage','subjects','specializations','examOptions'));
     }
 
     public function approvalDocuments(Request $request): View
@@ -645,7 +647,7 @@ class EssayExamController extends Controller
                 $set = IntegratedAnswerSet::create(['code'=>$code,'title'=>$data['import_title'] ?: 'Đáp án đề tích hợp','subject_id'=>$data['import_subject_id'],'status'=>'DRAFT','created_by_user_id'=>$user->id,'created_by_username'=>$user->email,'created_by_display_name'=>$user->name]);
                 foreach ($answers as $key => $answer) {
                     [$paper, $question] = array_map('intval', explode(':', $key, 2));
-                    $set->items()->create(['paper_number'=>$paper ?: 1,'question_number'=>$question,'answer'=>$answer,'points'=>1]);
+                    $set->items()->create(['paper_number'=>$paper ?: 1,'question_number'=>$question,'answer'=>$this->ensureAnswerHasPoint($answer, 1),'points'=>1]);
                 }
                 $this->logIntegratedAnswer($set, 'IMPORT', null, 'DRAFT', $user, 'Import từ '.$request->file('answer_file')->getClientOriginalName());
                 return $set;
@@ -1664,7 +1666,7 @@ class EssayExamController extends Controller
                 }
             }
         }
-        if (count($wordRows) > 0) return $wordRows;
+        if (count($wordRows) > 0) return array_map(fn ($row) => $this->normalizeImportedAnswerPointBreaks($row), $wordRows);
         $headerIndex = null; $map = [];
         foreach (array_slice($lines, 0, 8, true) as $i => $line) {
             $cells = preg_split('/\t|\s*\|\s*|\s*;\s*/', trim($line));
@@ -1705,7 +1707,57 @@ class EssayExamController extends Controller
             }
         }
         unset($row);
-        return array_values($rows);
+        return array_values(array_map(fn ($row) => $this->normalizeImportedAnswerPointBreaks($row), $rows));
+    }
+
+    private function normalizeImportedAnswerPointBreaks(array $row): array
+    {
+        $row['answer'] = $this->normalizeAnswerPointBreaks(trim((string) ($row['answer'] ?? '')));
+        if ($row['answer'] !== '') {
+            $row['answer'] = $this->ensureAnswerHasPoint($row['answer'], (float) ($row['points'] ?? 1));
+        }
+        return $row;
+    }
+
+    private function normalizeAnswerPointBreaks(string $answer): string
+    {
+        return preg_replace('/\R\s*(\[[^\x5D\r\n]*(?:\x{0111}i\x{1EC3}m|diem)[^\x5D\r\n]*\])/iu', ' $1', $answer) ?: $answer;
+    }
+
+    private function ensureAnswerHasPoint(string $answer, float $point): string
+    {
+        $answer = $this->normalizeAnswerPointBreaks(trim($answer));
+        if ($answer === '') {
+            return $answer;
+        }
+        $lines = preg_split('/\r\n|\r|\n/', $answer) ?: [];
+        $missingIndexes = [];
+        $existingPointTotal = 0.0;
+        foreach ($lines as $index => $line) {
+            if (trim($line) === '') {
+                continue;
+            }
+            if (preg_match('/\[\s*([\d]+(?:[,.][\d]+)?)\s*(?:\x{0111}i\x{1EC3}m|diem)[^\x5D\r\n]*\]/iu', $line, $match)) {
+                $existingPointTotal += (float) str_replace(',', '.', $match[1]);
+            } else {
+                $missingIndexes[] = $index;
+            }
+        }
+        if ($missingIndexes === []) {
+            return trim(implode("\n", $lines));
+        }
+        $remainingPoint = $point > $existingPointTotal ? $point - $existingPointTotal : 0.0;
+        $pointPerMissingLine = $remainingPoint > 0 ? $remainingPoint / count($missingIndexes) : $point / count($missingIndexes);
+        foreach ($missingIndexes as $index) {
+            $lines[$index] = rtrim($lines[$index]).' ['.$this->formatImportedPoint($pointPerMissingLine).' điểm]';
+        }
+        return trim(implode("\n", $lines));
+    }
+
+    private function formatImportedPoint(float $point): string
+    {
+        $formatted = rtrim(rtrim(number_format($point, 2, ',', '.'), '0'), ',');
+        return str_contains($formatted, ',') ? $formatted : $formatted.',0';
     }
 
     private function parseAnswerAfterOptionsRows(array $lines): array
@@ -1803,8 +1855,8 @@ class EssayExamController extends Controller
             if (($row['question_type'] ?? '') === 'essay' && $scoreFromContent !== null && $scoreFromContent > 0) {
                 $row['points'] = $scoreFromContent;
             }
-            $row['answer'] = trim((string) ($row['answer'] ?? ''));
             $row['points'] = (float) ($row['points'] ?? 1) > 0 ? (float) $row['points'] : 1;
+            $row['answer'] = $this->ensureAnswerHasPoint(trim((string) ($row['answer'] ?? '')), $row['points']);
             $row['options'] = is_array($row['options'] ?? null) ? $row['options'] : [];
             $row['options'] = array_intersect_key($row['options'], array_flip(['A', 'B', 'C', 'D']));
             if (($row['question_type'] ?? '') === 'essay') {

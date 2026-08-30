@@ -3,6 +3,7 @@
 @section('page-title','Chi tiết bộ đề')
 @section('content')
 @include('partials.module-menu', ['module' => 'exam'])
+@php($formatAnswer = static fn ($answer) => preg_replace('/\R\s*(\[[^\x5D\r\n]*(?:\x{0111}i\x{1EC3}m|diem)[^\x5D\r\n]*\])/iu', ' $1', trim((string) $answer)) ?: trim((string) $answer))
 <style>
     .essay-question-content { font-family: "Times New Roman", Times, serif; font-size: 15px; line-height: 1.35; white-space: pre-wrap; }
     .essay-question-options { font-family: "Times New Roman", Times, serif; font-size: 15px; line-height: 1.35; }
@@ -24,7 +25,7 @@
             @if($q->question_type === 'multiple_choice' && is_array($q->options))
             <div class="mt-2 grid md:grid-cols-2 gap-1 essay-question-options">@foreach($q->options as $key=>$option)<div><b>{{ strtoupper($key) }}.</b> {{ $option }}</div>@endforeach</div>
             @endif
-            @if($q->answer)<details class="mt-3"><summary class="text-blue-600 cursor-pointer">Xem đáp án / hướng dẫn chấm</summary><div class="mt-2 p-3 bg-slate-50 rounded whitespace-pre-line">{{ $q->answer }}</div></details>@endif
+            @if($q->answer)<details class="mt-3"><summary class="text-blue-600 cursor-pointer">Xem đáp án / hướng dẫn chấm</summary><div class="mt-2 p-3 bg-slate-50 rounded whitespace-pre-line">{{ $formatAnswer($q->answer) }}</div></details>@endif
         </article>
         @endforeach
     </div>
