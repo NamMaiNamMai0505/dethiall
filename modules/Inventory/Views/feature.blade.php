@@ -178,22 +178,22 @@
             table.querySelector('.transfer-rows').innerHTML = !source.value
                 ? '<p class="text-sm text-slate-500">Hãy chọn phòng nguồn để xem vật tư.</p>'
                 : rows.length
-                    ? `<table class="w-full text-left text-sm"><thead><tr class="border-b"><th class="p-2">Chọn</th><th class="p-2">Mã</th><th class="p-2">Tên vật tư</th><th class="p-2">Số lượng</th></tr></thead><tbody>${rows.map(item => `<tr class="border-b"><td class="p-2"><input type="checkbox" name="asset_ids[]" value="${item.id}" class="h-4 w-4"></td><td class="p-2">${item.code || ''}</td><td class="p-2">${item.name || ''}</td><td class="p-2">${item.quantity || 0} ${item.unit || ''}</td></tr>`).join('')}</tbody></table>`
+                    ? `<table class="w-full text-left text-sm"><thead><tr class="border-b"><th class="p-2">Chọn</th><th class="p-2">Mã</th><th class="p-2">Tên vật tư</th><th class="p-2">Số lượng hiện có</th><th class="p-2">Số lượng chuyển</th></tr></thead><tbody>${rows.map(item => `<tr class="border-b"><td class="p-2"><input type="checkbox" name="asset_ids[]" value="${item.id}" class="h-4 w-4"></td><td class="p-2">${item.code || ''}</td><td class="p-2">${item.name || ''}</td><td class="p-2">${item.quantity || 0} ${item.unit || ''}</td><td class="p-2"><input type="number" name="quantities[${item.id}]" min="1" max="${item.quantity || 1}" value="1" disabled class="w-20 rounded border p-1 text-sm" title="Số lượng chuyển"></td></tr>`).join('')}</tbody></table>`
                     : '<p class="text-sm text-slate-500">Phòng nguồn chưa có vật tư.</p>';
             table.querySelectorAll('input[name="asset_ids[]"]').forEach(check => {
-                const item = assets.find(asset => String(asset.id) === String(check.value));
-                const quantity = document.createElement('input');
-                quantity.type = 'number'; quantity.name = `quantities[${check.value}]`; quantity.min = '1'; quantity.max = String(item?.quantity || 1); quantity.value = '1';
-                quantity.className = 'w-20 rounded border p-1 text-sm'; quantity.title = 'Số lượng chuyển'; quantity.disabled = true;
-                check.addEventListener('change', () => { quantity.disabled = !check.checked; });
-                const cell = document.createElement('td'); cell.className = 'p-2'; cell.appendChild(quantity); check.closest('tr')?.appendChild(cell);
+                const quantity = check.closest('tr')?.querySelector(`input[name="quantities[${check.value}]"]`);
+                check.addEventListener('change', () => { if (quantity) quantity.disabled = !check.checked; });
             });
-            const header = table.querySelector('thead tr');
-            if (header && !header.querySelector('.transfer-quantity-header')) header.insertAdjacentHTML('beforeend', '<th class="transfer-quantity-header p-2">Số lượng chuyển</th>');
         };
         if (typeof window.onTomChange === 'function') window.onTomChange(source, render);
         else source.addEventListener('change', render);
         table.querySelector('.transfer-search').addEventListener('input', render);
+        form.addEventListener('submit', event => {
+            if (!form.querySelector('input[name="asset_ids[]"]:checked')) {
+                event.preventDefault();
+                alert('Vui lòng chọn ít nhất một vật tư trong phòng nguồn.');
+            }
+        });
         render();
         setTimeout(render, 500);
     };
