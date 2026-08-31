@@ -160,8 +160,55 @@
         @php
             $leaveTypeLabels = ['ANNUAL' => 'Phép năm', 'EXTRA' => 'Phép thêm', 'SHORT_LEAVE' => 'Nghỉ ngắn ngày'];
             $leaveStatusLabels = ['PENDING' => 'Chờ gửi', 'DRAFT' => 'Bản nháp', 'PENDING_COMMANDER' => 'Chờ chỉ huy', 'PENDING_AGENCY' => 'Chờ cơ quan quản lý', 'PENDING_HEAD' => 'Chờ thủ trưởng ký', 'RETURNED' => 'Trả lại', 'APPROVED' => 'Đã duyệt', 'REJECTED' => 'Từ chối', 'CANCELLED' => 'Đã hủy'];
+            $deletableLeaveStatuses = ['PENDING','DRAFT','PENDING_COMMANDER','PENDING_AGENCY','PENDING_HEAD','RETURNED','CANCELLED','REJECTED','APPROVED'];
         @endphp
-        <div class="mt-4 overflow-x-auto rounded border bg-white"><table class="w-full min-w-[1050px] text-left text-sm"><thead class="bg-slate-100"><tr><th class="p-3">Quân nhân</th><th class="p-3">Loại</th><th class="p-3">Tổng ngày</th><th class="p-3">Nơi nghỉ</th><th class="p-3">Lý do</th><th class="p-3">Trạng thái</th><th class="p-3">Ngày tạo</th></tr></thead><tbody>@forelse($items as $item)<tr class="border-t"><td class="p-3 font-semibold">{{ $item->personnel?->name ?? $item->personnel_name }}</td><td class="p-3">{{ $leaveTypeLabels[$item->leave_type] ?? $item->leave_type }}</td><td class="p-3 font-bold">{{ $item->total_days }} ngày</td><td class="p-3">{{ $item->locality_path ?: '—' }}</td><td class="p-3">{{ $item->decision_note ?: $item->reason ?: '—' }}</td><td class="p-3">{{ $leaveStatusLabels[$item->status] ?? $item->status }}</td><td class="p-3">{{ $item->created_at?->format('d/m/Y H:i') }}</td></tr>@empty<tr><td colspan="7" class="p-6 text-center text-slate-500">Chưa có đơn phép.</td></tr>@endforelse</tbody></table></div>
+        <div class="mt-4 overflow-x-auto rounded border bg-white">
+            <table class="w-full min-w-[1150px] text-left text-sm">
+                <thead class="bg-slate-100">
+                    <tr>
+                        <th class="p-3">Quân nhân</th>
+                        <th class="p-3">Loại</th>
+                        <th class="p-3">Tổng ngày</th>
+                        <th class="p-3">Nơi nghỉ</th>
+                        <th class="p-3">Lý do</th>
+                        <th class="p-3">Trạng thái</th>
+                        <th class="p-3">Ngày tạo</th>
+                        <th class="p-3">Thao tác</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @forelse($items as $item)
+                        @php
+                            $requestName = $item->personnel?->name ?? $item->personnel_name;
+                            $canDeleteLeaveRequest = in_array($item->status, $deletableLeaveStatuses, true)
+                                && (auth()->user()?->isSuperAdmin() || auth()->user()?->can('leave-management.delete') || (int) $item->created_by === (int) auth()->id());
+                        @endphp
+                        <tr class="border-t">
+                            <td class="p-3 font-semibold">{{ $requestName }}</td>
+                            <td class="p-3">{{ $leaveTypeLabels[$item->leave_type] ?? $item->leave_type }}</td>
+                            <td class="p-3 font-bold">{{ $item->total_days }} ngày</td>
+                            <td class="p-3">{{ $item->locality_path ?: '—' }}</td>
+                            <td class="p-3">{{ $item->decision_note ?: $item->reason ?: '—' }}</td>
+                            <td class="p-3">{{ $leaveStatusLabels[$item->status] ?? $item->status }}</td>
+                            <td class="p-3">{{ $item->created_at?->format('d/m/Y H:i') }}</td>
+                            <td class="p-3">
+                                @if($canDeleteLeaveRequest)
+                                    <form method="POST" action="{{ route('leave-management.requests.destroy',$item) }}" onsubmit="return confirm('Xóa đơn phép khỏi danh sách?');">
+                                        @csrf
+                                        @method('DELETE')
+                                        <button class="rounded bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-700">Xóa</button>
+                                    </form>
+                                @else
+                                    <span class="text-slate-500">Đã xử lý</span>
+                                @endif
+                            </td>
+                        </tr>
+                    @empty
+                        <tr><td colspan="8" class="p-6 text-center text-slate-500">Chưa có đơn phép.</td></tr>
+                    @endforelse
+                </tbody>
+            </table>
+        </div>
      @elseif($section === 'regulations')
         <form method="POST" action="{{ route('leave-management.regulations.store') }}" class="grid gap-2 rounded border bg-white p-4 md:grid-cols-4">@csrf<input name="leave_type" value="ANNUAL" placeholder="Loại phép" class="rounded border p-2"><select name="object_type" class="rounded border p-2"><option value="">Mọi đối tượng</option>@foreach($objects as $object)<option value="{{ $object->code }}">{{ $object->name }}</option>@endforeach</select><input name="base_days" type="number" min="0" required placeholder="Số ngày chuẩn" class="rounded border p-2"><input name="label" placeholder="Tên quy định" class="rounded border p-2"><input name="min_years" type="number" min="0" placeholder="Từ năm công tác" class="rounded border p-2"><input name="max_years" type="number" min="0" placeholder="Đến năm công tác" class="rounded border p-2"><textarea name="description" placeholder="Mô tả" class="rounded border p-2 md:col-span-4"></textarea><button class="rounded bg-blue-600 px-4 py-2 text-white">Thêm quy định</button></form><div class="rounded border bg-white p-4">@foreach($items as $item)<div class="flex justify-between border-b p-2"><span>{{ $item->label }} — {{ $item->leave_type }} — {{ $item->object_type ?: 'Mọi đối tượng' }} — {{ $item->base_days }} ngày</span><div class="flex gap-2"><details><summary class="cursor-pointer text-blue-600">Sửa</summary><form method="POST" action="{{ route('leave-management.regulations.update',$item) }}" class="mt-1 flex gap-1">@csrf @method('PATCH')<input name="leave_type" value="{{ $item->leave_type }}" class="w-20 rounded border p-1"><input name="base_days" type="number" value="{{ $item->base_days }}" class="w-16 rounded border p-1"><input name="label" value="{{ $item->label }}" class="rounded border p-1"><button class="rounded bg-blue-600 px-2 py-1 text-white">Lưu</button></form></details><form method="POST" action="{{ route('leave-management.regulations.delete',$item) }}">@csrf @method('DELETE')<button class="text-red-600">Xóa</button></form></div></div>@endforeach</div>
     @elseif($section === 'localities')

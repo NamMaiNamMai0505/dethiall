@@ -205,7 +205,27 @@ class LeaveWorkflowController extends ModuleBaseController {
     public function batchStore(Request $r){$d=$r->validate(['request_id'=>'required|exists:leave_requests,id','label'=>'required|string|max:255','start_date'=>'required|date','end_date'=>'required|date|after_or_equal:start_date','total_days'=>'required|integer|min:1','note'=>'nullable|string']);LeaveBatch::create($d+['created_by'=>$r->user()->id]);return back()->with('success','Đã tạo đợt nghỉ.');}
     public function batchUpdate(Request $r, LeaveBatch $batch){$batch->update($r->validate(['label'=>'required|string|max:255','start_date'=>'required|date','end_date'=>'required|date|after_or_equal:start_date','total_days'=>'required|integer|min:1','note'=>'nullable|string']));return back()->with('success','Đã cập nhật đợt nghỉ.');}
     public function batchDelete(LeaveBatch $batch){$batch->delete();return back()->with('success','Đã xóa đợt nghỉ.');}
-    public function records(){return view('leave-management::feature',['section'=>'records','title'=>'Hồ sơ phép','items'=>LeaveRecord::with(['request.personnel','decidedBy'])->latest()->get()]);}
+    public function records(Request $request){
+        $user=$request->user();
+        $year=(int)($request->input('year')?:now()->year);
+        $unitId=$request->input('unit_id')?(int)$request->input('unit_id'):null;
+        $selectedUnit=$unitId?\Modules\Unit\Models\Unit::find($unitId):null;
+        $keyword=trim((string)$request->input('q',''));
+        $scopedUnitIds=LeaveAccess::isScoped($user)?LeaveAccess::unitIds($user):[];
+        if($unitId&&$scopedUnitIds)abort_unless(in_array($unitId,$scopedUnitIds,true),403);
+        $scopeFilter=function($q)use($scopedUnitIds){if($scopedUnitIds)$q->where(function($x)use($scopedUnitIds){$x->whereIn('unit_id',$scopedUnitIds)->orWhereHas('personnel',fn($p)=>$p->whereIn('unit_id',$scopedUnitIds));});};
+        $unitFilter=function($q)use($unitId,$selectedUnit){if($unitId)$q->where(function($x)use($unitId,$selectedUnit){$x->where('unit_id',$unitId)->orWhere('unit_name',$selectedUnit?->name)->orWhereHas('personnel',fn($p)=>$p->where('unit_id',$unitId)->orWhere('unit',$selectedUnit?->name));});};
+        $nameFilter=function($q)use($keyword){if($keyword!=='')$q->where(function($x)use($keyword){$x->where('personnel_name','like','%'.$keyword.'%')->orWhere('personnel_code','like','%'.$keyword.'%')->orWhereHas('personnel',fn($p)=>$p->where('name','like','%'.$keyword.'%')->orWhere('staff_code','like','%'.$keyword.'%'));});};
+        $units=\Modules\Unit\Models\Unit::active()->when(LeaveAccess::isScoped($user),fn($q)=>$q->whereIn('id',LeaveAccess::unitIds($user)))->orderBy('name')->get();
+        $items=LeaveRecord::with(['request.personnel','decidedBy','personnel.unitRelation'])
+            ->when($year,fn($q)=>$q->where(function($x)use($year){$x->where('leave_year',$year)->orWhereYear('start_date',$year);}))
+            ->when($scopedUnitIds,$scopeFilter)
+            ->when($unitId,$unitFilter)
+            ->when($keyword,$nameFilter)
+            ->latest()
+            ->get();
+        return view('leave-management::feature',['section'=>'records','title'=>'Hồ sơ phép','items'=>$items,'units'=>$units,'year'=>$year,'recordKeyword'=>$keyword,'recordUnitId'=>$unitId]);
+    }
     public function auditLogs(){return view('leave-management::feature',['section'=>'audit','title'=>'Nhật ký quản lý phép','items'=>LeaveAuditLog::with('user')->latest()->limit(200)->get()]);}
     public function alerts(Request $request){$alerts=LeaveAlert::with('request.personnel')->where('user_id',$request->user()->id)->latest()->paginate(30);return view('leave-management::feature',['section'=>'alerts','title'=>'Thông báo quản lý phép','items'=>$alerts]);}
     public function alertRead(Request $request, LeaveAlert $alert){abort_unless((int)$alert->user_id===(int)$request->user()->id,403);$alert->update(['read_at'=>now()]);return back();}
