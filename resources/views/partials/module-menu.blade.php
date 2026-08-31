@@ -102,7 +102,7 @@
         'leave-management.index' => 'leave-management.index',
         'leave-management.personnel' => 'leave-management.personnel.index',
         'leave-management.directory' => 'leave-management.personnel.show',
-        'leave-management.requests' => 'leave-management.requests.index',
+        'leave-management.requests' => ['leave-management.requests.index', 'leave-management.requests.create', 'leave-management.create'],
         'leave-management.approvals' => 'leave-management.approvals.index',
         'leave-management.units' => 'leave-management.catalogs.index',
         'leave-management.classes' => 'leave-management.catalogs.index',
@@ -131,7 +131,8 @@
             foreach ($routePermissions as $route => $required) {
                 if ($route === $item['route'] || (str_ends_with($route, '.') && str_starts_with($item['route'], $route))) { $permission = $required; break; }
             }
-            return $permission === null || auth()->user()?->can($permission);
+            $permissions = is_array($permission) ? $permission : [$permission];
+            return $permission === null || collect($permissions)->contains(fn ($item) => auth()->user()?->can($item));
         }));
         return $group;
     }, $config['groups']), fn (array $group): bool => count($group['items']) > 0));

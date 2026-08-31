@@ -77,12 +77,15 @@
         @endif
     @elseif($section === 'request-detail')
         @php
-            $statusLabels=['PENDING'=>'Chờ gửi','PENDING_COMMANDER'=>'Chờ chỉ huy cơ quan','PENDING_AGENCY'=>'Chờ cơ quan cán bộ / Quân lực','APPROVED'=>'Đã duyệt','REJECTED'=>'Từ chối'];
+            $statusLabels=['PENDING'=>'Chờ gửi','PENDING_COMMANDER'=>'Chờ chỉ huy cơ quan','PENDING_AGENCY'=>'Chờ cơ quan cán bộ / Quân lực thẩm định','PENDING_HEAD'=>'Chờ thủ trưởng ký','RETURNED'=>'Trả lại','APPROVED'=>'Đã duyệt','REJECTED'=>'Từ chối'];
         @endphp
-        @if(in_array($request->status,['PENDING','DRAFT','PENDING_COMMANDER','PENDING_AGENCY'],true))
+        @if(in_array($request->status,['PENDING','DRAFT','PENDING_COMMANDER','PENDING_AGENCY','RETURNED'],true))
             @include('leave-management::partials.request-edit', ['request' => $request])
         @endif
         <div class="rounded border bg-white p-5"><div class="grid gap-3 md:grid-cols-3"><div><span class="text-slate-500">Nhân sự</span><p class="font-semibold">{{ $request->personnel?->name ?? $request->personnel_name }}</p></div><div><span class="text-slate-500">Người gửi</span><p>{{ $request->proposed_by_display_name ?? $request->proposed_by_username ?? '—' }}</p></div><div><span class="text-slate-500">Loại phép</span><p>{{ $request->leave_type }}</p></div><div><span class="text-slate-500">Trạng thái</span><p class="font-semibold">{{ $statusLabels[$request->status] ?? $request->status }}</p></div><div><span class="text-slate-500">Chỉ huy cơ quan</span><p>{{ $request->commander?->name ?? $request->commander_name ?? 'Chưa gán' }}</p></div><div><span class="text-slate-500">Thời gian</span><p>{{ $request->from_date?->format('d-m-Y') }} - {{ $request->to_date?->format('d-m-Y') }}</p></div><div><span class="text-slate-500">Số ngày</span><p>{{ $request->total_days }} (chuẩn {{ $request->base_days }}, đi đường {{ $request->travel_days }}, cộng {{ $request->extra_days }})</p></div><div><span class="text-slate-500">Địa phương</span><p>{{ $request->locality_path }}</p></div></div><div class="mt-4"><span class="text-slate-500">Lý do</span><p>{{ $request->reason }}</p></div></div>
+        @if(in_array($request->status,['PENDING','DRAFT','PENDING_COMMANDER','PENDING_AGENCY','PENDING_HEAD','RETURNED'],true) && ((int)$request->created_by === (int)auth()->id() || auth()->user()?->isSuperAdmin()))
+            <div class="rounded border border-orange-200 bg-orange-50 p-4"><form method="POST" action="{{ route('leave-management.requests.cancel',$request) }}" onsubmit="return confirm('Xóa/thu hồi đề xuất này?');">@csrf @method('PATCH')<input name="decision_note" required minlength="3" placeholder="Lý do xóa/thu hồi" class="rounded border px-3 py-2"><button class="ml-2 rounded bg-orange-600 px-3 py-2 font-semibold text-white">Xóa / thu hồi đề xuất</button></form></div>
+        @endif
         @if($request->decision_note)
             <div class="rounded border border-red-200 bg-red-50 p-5"><h2 class="font-semibold text-red-900">Lý do trả về/từ chối</h2><p class="mt-1 text-red-700">{{ $request->decision_note }}</p></div>
         @endif
@@ -90,22 +93,73 @@
             <div class="rounded border border-red-200 bg-red-50 p-5"><h2 class="font-semibold text-red-900">Lý do trả về/từ chối</h2><p class="mt-1 text-red-700">{{ $request->decision_note }}</p></div>
         @endif
         @if($request->status === 'PENDING_COMMANDER' && ((int) $request->commander_user_id === (int) auth()->id() || auth()->user()?->isSuperAdmin()))
-            <div class="rounded border border-amber-200 bg-amber-50 p-5"><h2 class="font-semibold text-amber-900">Đề xuất đang chờ chỉ huy cơ quan xử lý</h2><form method="POST" action="{{ route('leave-management.requests.decide',$request) }}" class="mt-3 flex flex-wrap gap-2">@csrf @method('PATCH')<input name="decision_note" placeholder="Ghi chú xử lý" class="rounded border px-3 py-2"><button name="status" value="PENDING_AGENCY" class="rounded bg-emerald-600 px-3 py-2 font-semibold text-white">Duyệt và gửi cơ quan quản lý</button><button name="status" value="REJECTED" class="rounded bg-red-600 px-3 py-2 font-semibold text-white">Từ chối</button></form></div>
+            <div class="rounded border border-amber-200 bg-amber-50 p-5"><h2 class="font-semibold text-amber-900">Đề xuất đang chờ chỉ huy cơ quan xử lý</h2><form method="POST" action="{{ route('leave-management.requests.decide',$request) }}" class="mt-3 flex flex-wrap gap-2">@csrf @method('PATCH')<input name="decision_note" placeholder="Ghi chú xử lý" class="rounded border px-3 py-2"><button name="status" value="PENDING_AGENCY" class="rounded bg-emerald-600 px-3 py-2 font-semibold text-white">Đề nghị nghỉ phép</button></form><form method="POST" action="{{ route('leave-management.requests.return',$request) }}" class="mt-2 flex flex-wrap gap-2">@csrf @method('PATCH')<input name="decision_note" required minlength="3" placeholder="Lý do trả lại" class="rounded border px-3 py-2"><button class="rounded bg-orange-600 px-3 py-2 font-semibold text-white">Trả lại</button></form></div>
         @elseif($request->status === 'PENDING_AGENCY' && \Modules\LeaveManagement\Support\LeaveAccess::canHandleAgency((string) $request->managing_agency, auth()->user()))
-            <div class="rounded border border-blue-200 bg-blue-50 p-5"><h2 class="font-semibold text-blue-900">Đề xuất đang chờ quân lực xử lý</h2><p class="mt-1 text-sm text-blue-800">Quân lực kiểm tra, in đơn trình Ban Giám hiệu ký, sau đó xác nhận duyệt cuối.</p><div class="mt-3 flex flex-wrap gap-2"><a target="_blank" href="{{ route('leave-management.requests.print',$request) }}" class="rounded border border-blue-300 bg-white px-3 py-2 font-semibold text-blue-700">In đơn trình BGH</a><form method="POST" action="{{ route('leave-management.requests.decide',$request) }}" class="flex flex-wrap gap-2">@csrf @method('PATCH')<input type="hidden" name="bgh_signed" value="1"><input name="bgh_note" required placeholder="Số/ngày văn bản BGH ký" class="rounded border px-3 py-2"><input name="decision_note" placeholder="Ghi chú duyệt" class="rounded border px-3 py-2"><button name="status" value="APPROVED" class="rounded bg-blue-600 px-3 py-2 font-semibold text-white">Đã ký BGH · Duyệt cuối</button><button name="status" value="REJECTED" class="rounded bg-red-600 px-3 py-2 font-semibold text-white">Từ chối</button></form></div></div>
+            <div class="rounded border border-blue-200 bg-blue-50 p-5"><h2 class="font-semibold text-blue-900">Đề xuất đang chờ cơ quan quản lý thẩm định</h2><p class="mt-1 text-sm text-blue-800">Cơ quan quản lý kiểm tra hồ sơ. Nếu đồng ý thì trình thủ trưởng ký, nếu không đồng ý thì trả lại kèm lý do.</p><div class="mt-3 flex flex-wrap gap-2"><a target="_blank" href="{{ route('leave-management.requests.print',$request) }}" class="rounded border border-blue-300 bg-white px-3 py-2 font-semibold text-blue-700">In đơn trình ký</a><form method="POST" action="{{ route('leave-management.requests.decide',$request) }}" class="flex flex-wrap gap-2">@csrf @method('PATCH')<input name="decision_note" placeholder="Ghi chú thẩm định" class="rounded border px-3 py-2"><button name="status" value="PENDING_HEAD" class="rounded bg-blue-600 px-3 py-2 font-semibold text-white">Trình ký</button></form><form method="POST" action="{{ route('leave-management.requests.return',$request) }}" class="flex flex-wrap gap-2">@csrf @method('PATCH')<input name="decision_note" required minlength="3" placeholder="Lý do trả lại" class="rounded border px-3 py-2"><button class="rounded bg-orange-600 px-3 py-2 font-semibold text-white">Trả lại</button></form></div></div>
+        @elseif($request->status === 'PENDING_HEAD' && \Modules\LeaveManagement\Support\LeaveAccess::canHeadSign(auth()->user()))
+            <div class="rounded border border-emerald-200 bg-emerald-50 p-5"><h2 class="font-semibold text-emerald-900">Đề xuất đang chờ thủ trưởng ký</h2><p class="mt-1 text-sm text-emerald-800">Sau khi ký hoặc trả lại, hệ thống sẽ thông báo lại cho cơ quan quản lý.</p><div class="mt-3 flex flex-wrap gap-2"><a target="_blank" href="{{ route('leave-management.requests.print',$request) }}" class="rounded border border-emerald-300 bg-white px-3 py-2 font-semibold text-emerald-700">Xem/In đơn</a><form method="POST" action="{{ route('leave-management.requests.decide',$request) }}" class="flex flex-wrap gap-2">@csrf @method('PATCH')<input type="hidden" name="bgh_signed" value="1"><input name="bgh_note" required placeholder="Số/ngày văn bản ký" class="rounded border px-3 py-2"><input name="decision_note" placeholder="Ghi chú ký" class="rounded border px-3 py-2"><button name="status" value="APPROVED" class="rounded bg-emerald-600 px-3 py-2 font-semibold text-white">Ký duyệt</button></form><form method="POST" action="{{ route('leave-management.requests.return',$request) }}" class="flex flex-wrap gap-2">@csrf @method('PATCH')<input name="decision_note" required minlength="3" placeholder="Lý do trả lại" class="rounded border px-3 py-2"><button class="rounded bg-orange-600 px-3 py-2 font-semibold text-white">Trả lại</button></form></div></div>
         @endif
         <div class="rounded border bg-white p-5"><h2 class="mb-3 font-semibold">Nhật ký xử lý</h2>@forelse($audit as $item)<div class="border-b p-2">{{ $item->created_at?->format('d-m-Y H:i') }} — {{ $item->action }} — {{ $item->user?->name }}</div>@empty<p class="text-slate-500">Chưa có nhật ký.</p>@endforelse</div>
     @elseif($section === 'requests' || $section === 'approvals')
         @php
             $isCommanderPersonnel = $isCommanderPersonnel ?? (\Modules\LeaveManagement\Support\LeaveAccess::isCommanderAccount(auth()->user()) || (($militaryPersonnel ?? null) && \Illuminate\Support\Str::contains(\Illuminate\Support\Str::lower(\Illuminate\Support\Str::ascii((string) ($militaryPersonnel->position ?? ''))), 'chi huy')));
         @endphp
-        @if($section === 'requests' && !$isCommanderPersonnel) @include('leave-management::partials.request-create', ['personnel' => $personnel, 'replacementPersonnel' => $replacementPersonnel, 'classes' => $classes, 'localities' => $localities, 'extraStandards' => $extraStandards, 'regulations' => $regulations]) @elseif($section === 'requests') <div class="rounded-xl border border-amber-200 bg-amber-50 p-5 text-amber-900"><p class="font-bold">Tài khoản quản lý cơ quan/đơn vị</p><p class="mt-1 text-sm">Tài khoản có vai trò quản lý sẽ tiếp nhận và xử lý đề xuất phép của thành viên cùng đơn vị, không tự đề xuất phép.</p></div> @endif
+        @if($section === 'requests' && (!$isCommanderPersonnel || ($canProposeForUnit ?? false))) @include('leave-management::partials.request-create', ['personnel' => $personnel, 'replacementPersonnel' => $replacementPersonnel, 'classes' => $classes, 'localities' => $localities, 'extraStandards' => $extraStandards, 'regulations' => $regulations]) @elseif($section === 'requests') <div class="rounded-xl border border-amber-200 bg-amber-50 p-5 text-amber-900"><p class="font-bold">Tài khoản quản lý cơ quan/đơn vị</p><p class="mt-1 text-sm">Tài khoản có vai trò quản lý sẽ tiếp nhận và xử lý đề xuất phép của thành viên cùng đơn vị. Cấp quyền Đề xuất nghỉ phép / Thêm mới nếu tài khoản này cần tự tạo đề xuất.</p></div> @endif
         @include('leave-management::partials.multistage-approvals', ['items' => $items, 'section' => $section])
         <div class="overflow-x-auto rounded border bg-white"><table class="w-full text-left text-sm"><thead class="bg-slate-100"><tr><th class="p-3">Nhân sự</th><th class="p-3">Thời gian</th><th class="p-3">Loại phép</th><th class="p-3">Số ngày</th><th class="p-3">Trạng thái</th><th class="p-3">Thao tác</th></tr></thead><tbody>@forelse($items as $item)<tr class="border-t"><td class="p-3">{{ $item->personnel?->name }}</td><td class="p-3">{{ $item->from_date?->format('d/m/Y') }} - {{ $item->to_date?->format('d/m/Y') }}</td><td class="p-3">{{ $item->leave_type }}</td><td class="p-3">{{ $item->total_days }}</td><td class="p-3">{{ $item->status }}</td><td class="p-3">@if($item->status === 'PENDING')<form method="POST" action="{{ route('leave-management.requests.decide', $item) }}" class="flex gap-2">@csrf @method('PATCH')<input name="decision_note" placeholder="Ghi chú" class="w-32 rounded border px-2 py-1"><button name="status" value="APPROVED" class="rounded bg-green-600 px-2 py-1 text-white">Duyệt</button><button name="status" value="REJECTED" class="rounded bg-red-600 px-2 py-1 text-white">Từ chối</button></form>@else<span class="text-slate-500">Đã xử lý</span>@endif</td></tr>@empty<tr><td colspan="6" class="p-6 text-center text-slate-500">Không có đơn phép.</td></tr>@endforelse</tbody></table></div>
          <script>const requestTables=document.querySelectorAll('.overflow-x-auto table');if(requestTables.length)requestTables[requestTables.length-1].closest('.overflow-x-auto').style.display='none';</script>
+        @if($section === 'requests')
+            <div class="mt-4 rounded border border-orange-200 bg-orange-50 p-4">
+                <h3 class="font-semibold text-orange-900">Thu hồi đăng ký chưa hoàn tất</h3>
+                @php
+                    $cancellableItems = $items->filter(fn($item) => in_array($item->status, ['PENDING','DRAFT','PENDING_COMMANDER','PENDING_AGENCY','PENDING_HEAD','RETURNED'], true) && ((int) $item->created_by === (int) auth()->id() || auth()->user()?->isSuperAdmin()))->values();
+                    $cancelLeaveTypeLabels = ['ANNUAL' => 'Phép năm', 'EXTRA' => 'Phép thêm', 'SHORT_LEAVE' => 'Nghỉ ngắn ngày'];
+                    $cancelLeaveStatusLabels = ['PENDING' => 'Chờ gửi', 'DRAFT' => 'Bản nháp', 'PENDING_COMMANDER' => 'Chờ chỉ huy', 'PENDING_AGENCY' => 'Chờ cơ quan quản lý', 'PENDING_HEAD' => 'Chờ thủ trưởng ký', 'RETURNED' => 'Trả lại'];
+                @endphp
+                @if($cancellableItems->isNotEmpty())
+                    <input id="leave-cancel-search" type="search" placeholder="Tìm quân nhân cần thu hồi..." class="mt-3 w-full rounded border px-3 py-2 text-sm">
+                    <div class="mt-3 overflow-x-auto rounded border border-orange-200 bg-white">
+                        <table class="w-full min-w-[760px] text-left text-sm">
+                            <thead class="bg-orange-100 text-orange-950">
+                                <tr><th class="p-2">Quân nhân</th><th class="p-2">Loại</th><th class="p-2">Trạng thái</th><th class="p-2">Ngày tạo</th><th class="p-2">Lý do thu hồi</th><th class="p-2">Thao tác</th></tr>
+                            </thead>
+                            <tbody>
+                                @foreach($cancellableItems as $item)
+                                    <tr class="border-t leave-cancel-row" data-search="{{ \Illuminate\Support\Str::lower(\Illuminate\Support\Str::ascii(($item->personnel?->name ?? $item->personnel_name ?? '').' '.($item->personnel?->staff_code ?? $item->personnel_code ?? ''))) }}">
+                                        <td class="p-2 font-semibold">{{ $item->personnel?->name ?? $item->personnel_name }}</td>
+                                        <td class="p-2">{{ $cancelLeaveTypeLabels[$item->leave_type] ?? $item->leave_type }}</td>
+                                        <td class="p-2">{{ $cancelLeaveStatusLabels[$item->status] ?? $item->status }}</td>
+                                        <td class="p-2">{{ $item->created_at?->format('d/m/Y H:i') }}</td>
+                                        <td class="p-2">
+                                            <form id="leave-cancel-form-{{ $item->id }}" method="POST" action="{{ route('leave-management.requests.cancel',$item) }}" onsubmit="return confirm('Thu hồi đăng ký nghỉ phép của {{ $item->personnel?->name ?? $item->personnel_name }}?');">
+                                                @csrf @method('PATCH')
+                                                <input name="decision_note" required minlength="3" placeholder="Nhập lý do thu hồi" class="w-full rounded border px-2 py-1 text-sm">
+                                            </form>
+                                        </td>
+                                        <td class="p-2">
+                                            <button form="leave-cancel-form-{{ $item->id }}" class="rounded bg-orange-600 px-3 py-1.5 text-sm font-semibold text-white">Thu hồi</button>
+                                        </td>
+                                    </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                    </div>
+                    <script>
+                    document.getElementById('leave-cancel-search')?.addEventListener('input', function () {
+                        const term = this.value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+                        document.querySelectorAll('.leave-cancel-row').forEach(function (row) {
+                            row.classList.toggle('hidden', term && !String(row.dataset.search || '').includes(term));
+                        });
+                    });
+                    </script>
+                @else
+                    <p class="mt-2 text-sm text-orange-800">Không có đăng ký nào đang chờ xử lý để thu hồi.</p>
+                @endif
+            </div>
+        @endif
         @php
             $leaveTypeLabels = ['ANNUAL' => 'Phép năm', 'EXTRA' => 'Phép thêm', 'SHORT_LEAVE' => 'Nghỉ ngắn ngày'];
-            $leaveStatusLabels = ['PENDING' => 'Chờ gửi', 'DRAFT' => 'Bản nháp', 'PENDING_COMMANDER' => 'Chờ chỉ huy', 'PENDING_AGENCY' => 'Chờ cơ quan quản lý', 'APPROVED' => 'Đã duyệt', 'REJECTED' => 'Từ chối', 'CANCELLED' => 'Đã hủy'];
+            $leaveStatusLabels = ['PENDING' => 'Chờ gửi', 'DRAFT' => 'Bản nháp', 'PENDING_COMMANDER' => 'Chờ chỉ huy', 'PENDING_AGENCY' => 'Chờ cơ quan quản lý', 'PENDING_HEAD' => 'Chờ thủ trưởng ký', 'RETURNED' => 'Trả lại', 'APPROVED' => 'Đã duyệt', 'REJECTED' => 'Từ chối', 'CANCELLED' => 'Đã hủy'];
         @endphp
         <div class="mt-4 overflow-x-auto rounded border bg-white"><table class="w-full min-w-[1050px] text-left text-sm"><thead class="bg-slate-100"><tr><th class="p-3">Quân nhân</th><th class="p-3">Loại</th><th class="p-3">Tổng ngày</th><th class="p-3">Nơi nghỉ</th><th class="p-3">Lý do</th><th class="p-3">Trạng thái</th><th class="p-3">Ngày tạo</th></tr></thead><tbody>@forelse($items as $item)<tr class="border-t"><td class="p-3 font-semibold">{{ $item->personnel?->name ?? $item->personnel_name }}</td><td class="p-3">{{ $leaveTypeLabels[$item->leave_type] ?? $item->leave_type }}</td><td class="p-3 font-bold">{{ $item->total_days }} ngày</td><td class="p-3">{{ $item->locality_path ?: '—' }}</td><td class="p-3">{{ $item->decision_note ?: $item->reason ?: '—' }}</td><td class="p-3">{{ $leaveStatusLabels[$item->status] ?? $item->status }}</td><td class="p-3">{{ $item->created_at?->format('d/m/Y H:i') }}</td></tr>@empty<tr><td colspan="7" class="p-6 text-center text-slate-500">Chưa có đơn phép.</td></tr>@endforelse</tbody></table></div>
      @elseif($section === 'regulations')

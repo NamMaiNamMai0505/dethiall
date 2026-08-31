@@ -96,9 +96,8 @@ class LeaveWorkflowController extends ModuleBaseController {
         $classes=LeaveClass::with(['unit.parent','personnel'=>fn($q)=>$q->where('active',true)->orderBy('name')])->where('active',true)->when(LeaveAccess::isScoped($user),fn($q)=>$q->whereIn('unit_id',LeaveAccess::unitIds($user)))->orderBy('name')->get();
         $localities=LeaveLocality::with('parent')->orderBy('level')->orderBy('name')->get();
          $linkedMilitaryPersonnel=LeaveAccess::personnelForUser($user);
-        $isMilitaryAccount=!($user->isSuperAdmin()||$user->can('leave-management.approvals.approve')||$user->can('leave-management.approve'))&&($user->hasRole(\App\Support\RoleCatalog::LEAVE_MILITARY)||(bool)$linkedMilitaryPersonnel);
-        $canProposeForUnit=$user->isSuperAdmin()||(!$linkedMilitaryPersonnel&&($user->can('leave-management.create')||$user->can('leave-management.requests.create')||$user->can('leave-management.approvals.approve')||$user->can('leave-management.approve')));
-        $isMilitaryAccount=!$user->isSuperAdmin()&&($user->hasRole(\App\Support\RoleCatalog::LEAVE_MILITARY)||(bool)$linkedMilitaryPersonnel);
+        $canProposeForUnit=$user->isSuperAdmin()||$user->can('leave-management.create')||$user->can('leave-management.requests.create')||$user->can('leave-management.approvals.approve')||$user->can('leave-management.approve');
+        $isMilitaryAccount=!$canProposeForUnit&&($user->hasRole(\App\Support\RoleCatalog::LEAVE_MILITARY)||(bool)$linkedMilitaryPersonnel);
         $militaryPersonnel=$isMilitaryAccount ? $linkedMilitaryPersonnel : $personnel->firstWhere('user_id',$user->id);
         if($isMilitaryAccount && $militaryPersonnel && !$personnel->contains('id',$militaryPersonnel->id))$personnel->push($militaryPersonnel);
          $militaryServiceYears=$militaryPersonnel?->enlistment_date ? max(0, now()->year - \Carbon\Carbon::parse($militaryPersonnel->enlistment_date)->year) : 0;
@@ -118,14 +117,14 @@ class LeaveWorkflowController extends ModuleBaseController {
     }
     public function printRequest(LeaveRequest $leaveRequest){
         $user=request()->user();
-        abort_unless(PermissionCheck::isLeaveAgency($user) || LeaveAccess::canApprove($user),403,'Chỉ tài khoản Cơ quan cán bộ hoặc Quân lực được in giấy nghỉ phép.');
+        abort_unless(PermissionCheck::isLeaveAgency($user) || LeaveAccess::canApprove($user) || LeaveAccess::canHeadSign($user),403,'Chỉ tài khoản Cơ quan cán bộ, Quân lực hoặc thủ trưởng được in giấy nghỉ phép.');
         $leaveRequest->forceFill(['printed_at'=>now()])->save();
         LeaveAuditLog::create(['user_id'=>$user->id,'action'=>'PRINT','entity_type'=>'request','entity_id'=>$leaveRequest->id,'details'=>['printed_at'=>now()->toDateTimeString()]]);
         return view('leave-management::print-request',['request'=>$leaveRequest->load(['personnel','commander'])]);
     }
     public function approvals(){
         $user=request()->user();
-         $agency=LeaveAccess::agencyForUser($user); $isUnitManager=LeaveAccess::isCommanderAccount($user); $items=LeaveRequest::with(['personnel','leaveClass'])->where(function($q)use($user,$agency){$q->where(fn($x)=>$x->where('status','PENDING_COMMANDER')->where('commander_user_id',$user->id))->orWhere(fn($x)=>$x->where('status','PENDING_AGENCY')->when(!$user->isSuperAdmin(),fn($y)=>$y->where('managing_agency',$agency ?: '__NONE__')));})->when(!$user->isSuperAdmin()&&!$isUnitManager&&!PermissionCheck::can($user,'leave-management.approvals.approve')&&!PermissionCheck::can($user,'leave-management.approve'),fn($q)=>$q->whereRaw('1=0'))->latest()->get();
+         $agency=LeaveAccess::agencyForUser($user); $isUnitManager=LeaveAccess::isCommanderAccount($user); $isHeadSigner=LeaveAccess::canHeadSign($user); $items=LeaveRequest::with(['personnel','leaveClass'])->where(function($q)use($user,$agency,$isHeadSigner){$q->where(fn($x)=>$x->where('status','PENDING_COMMANDER')->where('commander_user_id',$user->id))->orWhere(fn($x)=>$x->where('status','PENDING_AGENCY')->when(!$user->isSuperAdmin(),fn($y)=>$y->where('managing_agency',$agency ?: '__NONE__')));if($isHeadSigner)$q->orWhere('status','PENDING_HEAD');})->when(!$user->isSuperAdmin()&&!$isUnitManager&&!$isHeadSigner&&!PermissionCheck::can($user,'leave-management.approvals.approve')&&!PermissionCheck::can($user,'leave-management.approve'),fn($q)=>$q->whereRaw('1=0'))->latest()->get();
         return view('leave-management::feature',['section'=>'approvals','title'=>'Duyệt nghỉ phép','items'=>$items]);
     }
     public function regulations(){return view('leave-management::feature',['section'=>'regulations','title'=>'Quy định phép','items'=>LeaveRegulation::latest()->get(),'objects'=>LeaveObjectType::where('active',true)->orderBy('sort_order')->get()]);}

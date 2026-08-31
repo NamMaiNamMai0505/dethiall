@@ -37,24 +37,18 @@ class LeaveProposalController extends ModuleBaseController
         ]);
 
           $scope = $data['request_scope'];
+            $linkedMilitaryPersonnel = LeaveAccess::personnelForUser($request->user());
           $canProposeForUnit = $request->user()->isSuperAdmin()
+              || $request->user()->can('leave-management.create')
+              || $request->user()->can('leave-management.requests.create')
               || $request->user()->can('leave-management.approvals.approve')
               || $request->user()->can('leave-management.approve');
-           $linkedMilitaryPersonnel = LeaveAccess::personnelForUser($request->user());
-           $isCommanderPersonnel = LeaveAccess::isCommanderAccount($request->user())
-               || ($linkedMilitaryPersonnel && LeaveAccess::isCommanderPersonnel($linkedMilitaryPersonnel->position));
-           if ($isCommanderPersonnel) {
-               abort(403, 'Tài khoản quản lý cơ quan/đơn vị chỉ tiếp nhận và xử lý đề xuất phép.');
-           }
-          $canProposeForUnit = $request->user()->isSuperAdmin()
-              || (!$linkedMilitaryPersonnel && ($request->user()->can('leave-management.create')
-                  || $request->user()->can('leave-management.requests.create')
-                  || $request->user()->can('leave-management.approvals.approve')
-                  || $request->user()->can('leave-management.approve')));
-          $isMilitaryAccount = !$request->user()->isSuperAdmin() && $linkedMilitaryPersonnel;
+            $isCommanderPersonnel = LeaveAccess::isCommanderAccount($request->user())
+                || ($linkedMilitaryPersonnel && LeaveAccess::isCommanderPersonnel($linkedMilitaryPersonnel->position));
+            if ($isCommanderPersonnel && !$canProposeForUnit) {
+                abort(403, 'Tài khoản quản lý cơ quan/đơn vị chỉ tiếp nhận và xử lý đề xuất phép.');
+            }
           $isMilitaryAccount = !$canProposeForUnit && ($request->user()->hasRole(\App\Support\RoleCatalog::LEAVE_MILITARY) || $linkedMilitaryPersonnel);
-           $isMilitaryAccount = !$request->user()->isSuperAdmin()
-               && ($request->user()->hasRole(\App\Support\RoleCatalog::LEAVE_MILITARY) || (bool) $linkedMilitaryPersonnel);
            if ($isMilitaryAccount && $linkedMilitaryPersonnel) {
                // Hồ sơ quân nhân của tài khoản là nguồn chuẩn; không tin personnel_id
                // có thể bị thay đổi bởi form/JavaScript phía trình duyệt.
@@ -125,7 +119,7 @@ class LeaveProposalController extends ModuleBaseController
         }
 
         $from = Carbon::parse($data['from_date']);
-        $to = $data['to_date'] ? Carbon::parse($data['to_date']) : null;
+        $to = ($data['to_date'] ?? null) ? Carbon::parse($data['to_date']) : null;
         if ($scope === 'SHORT_LEAVE') {
             $from = $from->setTime(18, 0);
             $to = $from->copy()->addDays(2)->setTime(15, 0);
