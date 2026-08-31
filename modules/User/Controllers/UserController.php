@@ -17,6 +17,7 @@ use Illuminate\Support\Str;
 use Maatwebsite\Excel\Facades\Excel;
 use Modules\Class\Models\ClassModel;
 use Modules\Instructor\Models\Instructor;
+use Modules\LeaveManagement\Models\LeavePosition;
 use Modules\LeaveManagement\Models\LeavePersonnel;
 use Modules\StandardHours\Models\ObjectType;
 use Modules\StandardHours\Models\Position;
@@ -145,9 +146,10 @@ class UserController extends ModuleBaseController
             ->where('active', true)
             ->orderBy('name')
             ->get(['id', 'staff_code', 'name', 'rank', 'position', 'unit', 'email', 'gmail', 'user_id']);
+        $leavePositions = $this->leavePositionOptions();
 
         return view('user::create', array_merge(
-            compact('units', 'roles', 'instructors', 'classes', 'militaryLinkRoleIds', 'militaryPersonnel'),
+            compact('units', 'roles', 'instructors', 'classes', 'militaryLinkRoleIds', 'militaryPersonnel', 'leavePositions'),
             $formExtras
         ));
     }
@@ -160,6 +162,9 @@ class UserController extends ModuleBaseController
         // Permission already checked by middleware
 
         $data = $request->validated();
+        $leavePersonnelId = $data['leave_personnel_id'] ?? null;
+        $leavePosition = $data['leave_position'] ?? null;
+        unset($data['leave_position']);
         $linkedPersonnel = ! empty($data['leave_personnel_id'])
             ? LeavePersonnel::withoutGlobalScopes()->where('active', true)->findOrFail($data['leave_personnel_id'])
             : null;
@@ -191,7 +196,8 @@ class UserController extends ModuleBaseController
             $user->syncRoles([$role->name]);
         }
 
-        $this->syncMilitaryPersonnelLink($user, $data['leave_personnel_id'] ?? null);
+        $this->syncMilitaryPersonnelLink($user, $leavePersonnelId);
+        $this->syncMilitaryPersonnelPosition($leavePersonnelId, $leavePosition);
 
         $this->syncInstructorStandardHours($user, $data);
 
@@ -238,13 +244,14 @@ class UserController extends ModuleBaseController
         $militaryPersonnel = LeavePersonnel::withoutGlobalScopes()->where('active', true)->orderBy('name')->get(['id', 'staff_code', 'name', 'rank', 'position', 'unit', 'email', 'gmail', 'user_id']);
         $selectedLeavePersonnelId = LeavePersonnel::withoutGlobalScopes()->where('user_id', $user->id)->value('id');
         $formExtras = $this->userFormExtras($user);
+        $leavePositions = $this->leavePositionOptions();
 
         // Ưu tiên giá trị user; fallback hồ sơ GV (để edit thấy đúng Chức danh / Đối tượng)
         $selectedPositionId = old('position_id', $user->position_id ?: $user->instructor?->position_id);
         $selectedObjectTypeId = old('object_type_id', $user->object_type_id ?: $user->instructor?->object_type_id);
 
         return view('user::edit', array_merge(
-            compact('user', 'units', 'roles', 'instructors', 'classes', 'militaryPersonnel', 'selectedLeavePersonnelId', 'selectedPositionId', 'selectedObjectTypeId'),
+            compact('user', 'units', 'roles', 'instructors', 'classes', 'militaryPersonnel', 'selectedLeavePersonnelId', 'selectedPositionId', 'selectedObjectTypeId', 'leavePositions'),
             $formExtras
         ));
     }
@@ -382,6 +389,29 @@ class UserController extends ModuleBaseController
         $personnel->update($update);
     }
 
+    private function syncMilitaryPersonnelPosition(?int $personnelId, ?string $position): void
+    {
+        if (! $personnelId || $position === null) {
+            return;
+        }
+
+        LeavePersonnel::withoutGlobalScopes()
+            ->whereKey($personnelId)
+            ->where('active', true)
+            ->update(['position' => $position ?: null]);
+    }
+
+    /** @return array<string, string> */
+    private function leavePositionOptions(): array
+    {
+        return LeavePosition::query()
+            ->where('active', true)
+            ->orderBy('sort_order')
+            ->orderBy('name')
+            ->pluck('name', 'name')
+            ->all();
+    }
+
     /** @return array<int, string> */
     private function unitOptions(): array
     {
@@ -407,6 +437,9 @@ class UserController extends ModuleBaseController
         // Permission already checked by middleware
 
         $data = $request->validated();
+        $leavePersonnelId = $data['leave_personnel_id'] ?? null;
+        $leavePosition = $data['leave_position'] ?? null;
+        unset($data['leave_position']);
         if (! empty($data['leave_personnel_id'])) {
             $linkedPersonnel = LeavePersonnel::withoutGlobalScopes()->where('active', true)->findOrFail($data['leave_personnel_id']);
             abort_unless(! $linkedPersonnel->user_id || (int) $linkedPersonnel->user_id === (int) $user->id, 422, 'Hồ sơ quân nhân này đã được liên kết với một tài khoản khác.');
@@ -434,7 +467,8 @@ class UserController extends ModuleBaseController
             $user->syncRoles([$role->name]);
         }
 
-        $this->syncMilitaryPersonnelLink($user, $data['leave_personnel_id'] ?? null);
+        $this->syncMilitaryPersonnelLink($user, $leavePersonnelId);
+        $this->syncMilitaryPersonnelPosition($leavePersonnelId, $leavePosition);
 
         $this->syncInstructorStandardHours($user->fresh(), $data);
 

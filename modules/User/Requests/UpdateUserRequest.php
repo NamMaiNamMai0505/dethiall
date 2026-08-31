@@ -65,6 +65,7 @@ class UpdateUserRequest extends FormRequest
                 'integer',
                 Rule::exists('leave_personnel', 'id')->where(fn ($query) => $query->where('active', true)),
             ],
+            'leave_position' => ['nullable', 'string', 'max:255', Rule::exists('leave_positions', 'name')->where(fn ($query) => $query->where('active', true))],
         ];
     }
 

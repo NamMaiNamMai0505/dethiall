@@ -62,6 +62,16 @@
                                 </option>
                             @endforeach
                         </select>
+                        <div class="mt-3">
+                            <label for="leave_position" class="block text-sm font-semibold text-slate-700">Chức vụ quân nhân</label>
+                            <select name="leave_position" id="leave_position" class="mt-1 w-full rounded-lg border-slate-200 px-3 py-2.5">
+                                <option value="">Chọn chức vụ</option>
+                                @foreach($leavePositions ?? [] as $value => $label)
+                                    <option value="{{ $value }}" @selected(old('leave_position') === $value)>{{ $label }}</option>
+                                @endforeach
+                            </select>
+                            @error('leave_position')<p class="mt-1 text-sm text-red-600">{{ $message }}</p>@enderror
+                        </div>
                         @error('leave_personnel_id')<p class="mt-1 text-sm text-red-600">{{ $message }}</p>@enderror
                     </div>
 
@@ -377,6 +387,7 @@ function togglePassword(fieldId, btn) {
         const militaryLinkField = document.getElementById('military_personnel_link_field');
         const militaryPersonnelSelect = document.getElementById('leave_personnel_id');
         const militaryPersonnelSearch = document.getElementById('military_personnel_search');
+        const leavePositionSelect = document.getElementById('leave_position');
         const militaryLinkRoleIds = @json($militaryLinkRoleIds ?? []);
         if (!roleSelect || !userTypeSelect || !instructorField) return;
         if (boundRoleSelects.has(roleSelect)) return;
@@ -445,6 +456,9 @@ function togglePassword(fieldId, btn) {
 
         function syncMilitaryPersonnelToUserFields() {
             const option = selectedMilitaryPersonnelOption();
+            if (leavePositionSelect) {
+                setSelectValue(leavePositionSelect, option?.dataset.position || '', true);
+            }
             if (!option) return;
 
             setFromPersonnel(nameInput, option.dataset.name);

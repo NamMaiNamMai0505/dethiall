@@ -56,9 +56,21 @@
                         <select name="leave_personnel_id" id="leave_personnel_id" class="mt-2 w-full rounded-lg border-slate-200 px-3 py-2.5">
                             <option value="">Không liên kết</option>
                             @foreach($militaryPersonnel ?? [] as $person)
-                                <option value="{{ $person->id }}" @selected((int) old('leave_personnel_id', $selectedLeavePersonnelId ?? 0) === (int) $person->id)>{{ $person->name }} — {{ $person->position ?: 'Chưa có chức vụ' }} — {{ $person->unit ?: 'Chưa có đơn vị' }}</option>
+                                <option value="{{ $person->id }}"
+                                        data-position="{{ $person->position }}"
+                                        @selected((int) old('leave_personnel_id', $selectedLeavePersonnelId ?? 0) === (int) $person->id)>{{ $person->name }} — {{ $person->position ?: 'Chưa có chức vụ' }} — {{ $person->unit ?: 'Chưa có đơn vị' }}</option>
                             @endforeach
                         </select>
+                        <div class="mt-3">
+                            <label for="leave_position" class="block text-sm font-semibold text-slate-700">Chức vụ quân nhân</label>
+                            <select name="leave_position" id="leave_position" class="mt-1 w-full rounded-lg border-slate-200 px-3 py-2.5">
+                                <option value="">Chọn chức vụ</option>
+                                @foreach($leavePositions ?? [] as $value => $label)
+                                    <option value="{{ $value }}" @selected(old('leave_position', optional(($militaryPersonnel ?? collect())->firstWhere('id', $selectedLeavePersonnelId ?? null))->position) === $value)>{{ $label }}</option>
+                                @endforeach
+                            </select>
+                            @error('leave_position')<p class="mt-1 text-sm text-red-600">{{ $message }}</p>@enderror
+                        </div>
                     </div>
                     <div id="unit_field_wrap">
                         <x-form.select
@@ -223,6 +235,8 @@
         const instructorField = form.querySelector('#instructor_field');
         const classField = form.querySelector('#class_field');
         const unitHelp = form.querySelector('#unit_help_manager');
+        const militaryPersonnelSelect = form.querySelector('#leave_personnel_id');
+        const leavePositionSelect = form.querySelector('#leave_position');
 
         function val(el) {
             if (!el) return '';
@@ -259,8 +273,40 @@
             }
         }
 
+        function setSelectValue(el, value, silent) {
+            if (!el) return;
+            const v = value == null ? '' : String(value);
+            if (typeof window.setTomValues === 'function') {
+                window.setTomValues(el, v, silent !== false);
+                return;
+            }
+            if (el.tomselect) {
+                el.tomselect.setValue(v, silent !== false);
+                return;
+            }
+            el.value = v;
+            if (!silent) el.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+
+        function syncMilitaryPositionDisplay() {
+            if (!militaryPersonnelSelect || !leavePositionSelect) return;
+            const selected = militaryPersonnelSelect.options[militaryPersonnelSelect.selectedIndex];
+            setSelectValue(leavePositionSelect, selected?.dataset.position || '', true);
+        }
+
+        function bindSelectChange(el, handler) {
+            if (!el) return;
+            if (typeof window.onTomChange === 'function') {
+                window.onTomChange(el, handler);
+                return;
+            }
+            el.addEventListener('change', handler);
+            if (el.tomselect) el.tomselect.on('change', handler);
+        }
+
         userTypeSelect?.addEventListener('change', toggle);
         roleSelect?.addEventListener('change', toggle);
+        bindSelectChange(militaryPersonnelSelect, syncMilitaryPositionDisplay);
         positionSelect?.addEventListener('change', function () {
             if (!managerRoleId || !positionSelect) return;
             if (val(userTypeSelect) !== 'internal_user') return;
@@ -271,6 +317,7 @@
             }
         });
         toggle();
+        syncMilitaryPositionDisplay();
     }
 
     document.addEventListener('DOMContentLoaded', boot);
