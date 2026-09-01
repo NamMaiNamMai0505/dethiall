@@ -102,7 +102,7 @@ class BuildingController extends ModuleBaseController
 
             $building->update($data);
 
-            return redirect()->route('buildings.index')
+            return redirect()->back()
                 ->with('success', 'Giảng đường đã được cập nhật thành công!');
         } catch (\Exception $e) {
             return redirect()->back()

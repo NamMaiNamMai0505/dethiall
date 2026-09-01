@@ -63,7 +63,9 @@ class UpdateTrainingScheduleRequest extends FormRequest
             ],
             'class_code' => [
                 'nullable',
-                'exists:classes,code'
+                Rule::exists('classes', 'code')->where(fn ($query) =>
+                    $query->where('specialization_id', (int) $this->input('specialization_id'))
+                ),
             ],
             'classroom_id' => [
                 'nullable',

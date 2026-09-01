@@ -54,48 +54,9 @@
         @include('leave-management::partials.personnel-detail-list')
     @endif
     @if($section === 'directory')
-        @if($section === 'personnel')
-            @include('leave-management::partials.personnel-create', ['users' => $users, 'units' => $units, 'objects' => $objects])
-            <script>document.querySelectorAll('select[name="hometown"],select[name="permanent_residence"]').forEach(function(select){Array.from(select.options).forEach(function(option){if(option.value && !option.textContent.includes('—'))option.remove();});});</script>
-            @include('leave-management::partials.personnel-detail-list')
-        @endif
-        <div class="overflow-x-auto rounded border bg-white">
-            <table class="w-full min-w-[980px] text-left text-sm">
-                <thead class="bg-slate-100">
-                    <tr>
-                        <th class="p-3">Mã</th>
-                        <th class="p-3">Họ tên</th>
-                        <th class="p-3">Cấp 2</th>
-                        <th class="p-3">Cấp 3</th>
-                        <th class="p-3">Cấp 4 / Lớp</th>
-                        <th class="p-3">Chức vụ / đối tượng</th>
-                        <th class="p-3">Ngày phép đã duyệt</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @forelse($items as $item)
-                        @php
-                            $classUnit = $item->leaveClass?->unit;
-                            $baseUnit = $item->unitRelation;
-                            $level2 = $classUnit?->parent?->name ?: $baseUnit?->parent?->name;
-                            $level3 = $classUnit?->name ?: $baseUnit?->name ?: $item->unit;
-                            $level4 = $item->leaveClass?->name ?: $item->class_name;
-                        @endphp
-                        <tr class="border-t">
-                            <td class="p-3">{{ $item->staff_code }}</td>
-                            <td class="p-3 font-medium">{{ $item->name }}</td>
-                            <td class="p-3">{{ $level2 ?: '—' }}</td>
-                            <td class="p-3">{{ $level3 ?: '—' }}</td>
-                            <td class="p-3">{{ $level4 ?: '—' }}</td>
-                            <td class="p-3">{{ $item->position }} / {{ $item->object_type }}</td>
-                            <td class="p-3">{{ $item->approved_leave_days ?? 0 }}</td>
-                        </tr>
-                    @empty
-                        <tr><td colspan="7" class="p-6 text-center text-slate-500">Chưa có nhân sự quản lý phép.</td></tr>
-                    @endforelse
-                </tbody>
-            </table>
-        </div>
+        @include('leave-management::partials.personnel-create', ['users' => $users, 'units' => $units, 'objects' => $objects, 'positions' => $positions])
+        <script>document.querySelectorAll('select[name="hometown"],select[name="permanent_residence"]').forEach(function(select){Array.from(select.options).forEach(function(option){if(option.value && !/\s[—–-]\s/.test(option.textContent))option.remove();});});</script>
+        @include('leave-management::partials.personnel-detail-list')
     @elseif($section === 'classes')
         @php
             $units = $units->filter(fn($unit) => str_contains(mb_strtolower((string) $unit->name, 'UTF-8'), 'đại đội') && $unit->parent && str_contains(mb_strtolower((string) $unit->parent->name, 'UTF-8'), 'tiểu đoàn'))->values();
@@ -128,7 +89,7 @@
         @if($request->decision_note)
             <div class="rounded border border-red-200 bg-red-50 p-5"><h2 class="font-semibold text-red-900">Lý do trả về/từ chối</h2><p class="mt-1 text-red-700">{{ $request->decision_note }}</p></div>
         @endif
-        @if($request->status === 'PENDING_COMMANDER' && ((int) $request->commander_user_id === (int) auth()->id() || auth()->user()?->isSuperAdmin()))
+        @if($request->status === 'PENDING_COMMANDER' && \Modules\LeaveManagement\Support\LeaveAccess::canCommandRequest($request, auth()->user()))
             <div class="rounded border border-amber-200 bg-amber-50 p-5"><h2 class="font-semibold text-amber-900">Đề xuất đang chờ chỉ huy cơ quan xử lý</h2><form method="POST" action="{{ route('leave-management.requests.decide',$request) }}" class="mt-3 flex flex-wrap gap-2">@csrf @method('PATCH')<input name="decision_note" placeholder="Ghi chú xử lý" class="rounded border px-3 py-2"><button name="status" value="PENDING_AGENCY" class="rounded bg-emerald-600 px-3 py-2 font-semibold text-white">Đề nghị nghỉ phép</button></form><form method="POST" action="{{ route('leave-management.requests.return',$request) }}" class="mt-2 flex flex-wrap gap-2">@csrf @method('PATCH')<input name="decision_note" required minlength="3" placeholder="Lý do trả lại" class="rounded border px-3 py-2"><button class="rounded bg-orange-600 px-3 py-2 font-semibold text-white">Trả lại</button></form></div>
         @elseif($request->status === 'PENDING_AGENCY' && \Modules\LeaveManagement\Support\LeaveAccess::canHandleAgency((string) $request->managing_agency, auth()->user()))
             <div class="rounded border border-blue-200 bg-blue-50 p-5"><h2 class="font-semibold text-blue-900">Đề xuất đang chờ cơ quan quản lý thẩm định</h2><p class="mt-1 text-sm text-blue-800">Cơ quan quản lý kiểm tra hồ sơ. Nếu đồng ý thì trình thủ trưởng ký, nếu không đồng ý thì trả lại kèm lý do.</p><div class="mt-3 flex flex-wrap gap-2"><a target="_blank" href="{{ route('leave-management.requests.print',$request) }}" class="rounded border border-blue-300 bg-white px-3 py-2 font-semibold text-blue-700">In đơn trình ký</a><form method="POST" action="{{ route('leave-management.requests.decide',$request) }}" class="flex flex-wrap gap-2">@csrf @method('PATCH')<input name="decision_note" placeholder="Ghi chú thẩm định" class="rounded border px-3 py-2"><button name="status" value="PENDING_HEAD" class="rounded bg-blue-600 px-3 py-2 font-semibold text-white">Trình ký</button></form><form method="POST" action="{{ route('leave-management.requests.return',$request) }}" class="flex flex-wrap gap-2">@csrf @method('PATCH')<input name="decision_note" required minlength="3" placeholder="Lý do trả lại" class="rounded border px-3 py-2"><button class="rounded bg-orange-600 px-3 py-2 font-semibold text-white">Trả lại</button></form></div></div>

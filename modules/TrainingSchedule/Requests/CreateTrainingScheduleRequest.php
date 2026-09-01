@@ -3,6 +3,7 @@
 namespace Modules\TrainingSchedule\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class CreateTrainingScheduleRequest extends FormRequest
 {
@@ -50,7 +51,9 @@ class CreateTrainingScheduleRequest extends FormRequest
             ],
             'class_code' => [
                 'required',
-                'exists:classes,code'
+                Rule::exists('classes', 'code')->where(fn ($query) =>
+                    $query->where('specialization_id', (int) $this->input('specialization_id'))
+                ),
             ],
             'classroom_id' => [
                 'nullable',

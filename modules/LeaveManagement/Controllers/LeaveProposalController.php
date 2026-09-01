@@ -200,7 +200,7 @@ class LeaveProposalController extends ModuleBaseController
             $to = $from->copy();
         }
         $totalDays = $from->copy()->startOfDay()->diffInDays($to->copy()->startOfDay()) + 1;
-        $locality = !empty($data['locality_id']) ? LeaveLocality::find($data['locality_id']) : null;
+        $locality = !empty($data['locality_id']) ? LeaveLocality::with('parent')->find($data['locality_id']) : null;
         $standards = LeaveRegulation::where('leave_type', 'EXTRA')->where('active', true)->whereIn('id', $data['extra_standard_ids'] ?? [])->orderBy('sort_order')->get();
         $extraDays = $standards->sum('base_days');
         $created = 0;
@@ -245,7 +245,7 @@ class LeaveProposalController extends ModuleBaseController
                     ? $data['managing_agency']
                     : LeaveAccess::agencyForObject($person->object_type);
                 $personLocality = !empty($data['class_leave_locations'][$person->id] ?? null)
-                    ? LeaveLocality::find($data['class_leave_locations'][$person->id])
+                    ? LeaveLocality::with('parent')->find($data['class_leave_locations'][$person->id])
                     : $locality;
                 if ($isMilitaryAccount && !$personLocality && $person->permanent_residence) {
                     $personLocality = LeaveLocality::where('name', $person->permanent_residence)->first();
@@ -279,7 +279,7 @@ class LeaveProposalController extends ModuleBaseController
                     'service_years' => $serviceYears, 'base_days' => $baseDays, 'travel_days' => $travelDays,
                     'extra_days' => $personExtraDays, 'extra_reasons' => $personStandards->map(fn ($s) => ['id' => $s->id, 'label' => $s->label, 'days' => $s->base_days])->values()->all(),
                     'total_days' => $fixedHsqbsDays ?? ($scope === 'CLASS' || $scope === 'SHORT_LEAVE' ? $personRangeDays : $personTotalDays),
-                    'leave_year' => $from->year, 'locality_id' => $personLocality?->id, 'locality_path' => $personLocality?->name ?: $person->permanent_residence,
+                    'leave_year' => $from->year, 'locality_id' => $personLocality?->id, 'locality_path' => $personLocality?->pathName() ?: $person->permanent_residence,
                     'replacement_personnel_id' => $data['replacement_personnel_id'] ?? null,
                     'commander_user_id' => $commander, 'commander_name' => $person->commander?->name ?: ($person->commander_name ?: $commanderUser?->name), 'managing_agency' => $managingAgency,
                 ];

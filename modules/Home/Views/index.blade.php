@@ -14,6 +14,8 @@
         $dashboardRoute = null;
         $lmsRoute = null;
         $gradesRoute = null;
+        $inventoryRoute = null;
+        $leaveRoute = null;
         if (auth()->check()) {
             $u = Auth::user();
             // Học viên: chỉ LMS (không Dashboard / không Quản lý điểm)
@@ -55,6 +57,12 @@
                 }
                 if ($canGrades && Route::has('grades.hub')) {
                     $gradesRoute = route('grades.hub');
+                }
+                if (($u->isSuperAdmin() || $u->can('inventory.index')) && Route::has('inventory.portal')) {
+                    $inventoryRoute = route('inventory.portal');
+                }
+                if (($u->isSuperAdmin() || $u->can('leave-management.index') || $u->can('leave-management.access.index')) && Route::has('leave-management.portal')) {
+                    $leaveRoute = route('leave-management.portal');
                 }
             }
         }
@@ -351,6 +359,35 @@
             flex-shrink: 0;
             display: block;
         }
+        .btn-inventory-home {
+            background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%) !important;
+            color: #fff !important;
+        }
+        .btn-leave-home {
+            background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%) !important;
+            color: #fff !important;
+        }
+        .portal-action {
+            display: inline-flex !important;
+            align-items: center;
+            gap: .65rem;
+        }
+        .portal-action .portal-action-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 2.25rem;
+            height: 2.25rem;
+            flex: 0 0 2.25rem;
+            border-radius: .75rem;
+            background: rgba(255,255,255,.2);
+            box-shadow: inset 0 1px 0 rgba(255,255,255,.3), 0 5px 12px rgba(15,23,42,.12);
+        }
+        .portal-action .portal-action-copy { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.1; }
+        .portal-action .portal-action-copy small { margin-top: .2rem; font-size: .68rem; font-weight: 500; opacity: .82; }
+        .btn-hero.portal-action { justify-content: flex-start; text-align: left; min-width: 15rem; }
+        .btn-hero.portal-action .portal-action-icon { width: 2.75rem; height: 2.75rem; flex-basis: 2.75rem; border-radius: .9rem; }
+        .btn-hero.portal-action .portal-action-icon svg { width: 1.45rem; height: 1.45rem; }
 
         /* —— Hero rộng + 3D —— */
         .hero-shell {
@@ -883,6 +920,18 @@
                                 Quản lý điểm
                             </a>
                         @endif
+                        @if($inventoryRoute)
+                            <a href="{{ $inventoryRoute }}" class="btn-solid btn-inventory-home portal-action" data-turbo="false">
+                                <span class="portal-action-icon" aria-hidden="true"><svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5v-9Zm0 0 8 4.5 8-4.5M12 12v9M8 5.25l8 4.5"/></svg></span>
+                                <span class="portal-action-copy"><strong>Quản lý vật tư</strong><small>Kho · tài sản · đề xuất</small></span>
+                            </a>
+                        @endif
+                        @if($leaveRoute)
+                            <a href="{{ $leaveRoute }}" class="btn-solid btn-leave-home portal-action" data-turbo="false">
+                                <span class="portal-action-icon" aria-hidden="true"><svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M7 3h10v18H7zM9.5 7h5M9.5 11h5M9.5 15h3M9 3v-1h6v1"/></svg></span>
+                                <span class="portal-action-copy"><strong>Quản lý phép</strong><small>Đề xuất · duyệt · hồ sơ</small></span>
+                            </a>
+                        @endif
                         <form method="POST" action="{{ route('logout') }}">
                             @csrf
                             <button type="submit" class="nav-link">Đăng xuất</button>
@@ -966,6 +1015,18 @@
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                                 </svg>
                                 Quản lý điểm
+                            </a>
+                        @endif
+                        @if($inventoryRoute)
+                            <a href="{{ $inventoryRoute }}" class="btn-solid btn-hero btn-inventory-home portal-action" data-turbo="false">
+                                <span class="portal-action-icon" aria-hidden="true"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5v-9Zm0 0 8 4.5 8-4.5M12 12v9M8 5.25l8 4.5"/></svg></span>
+                                <span class="portal-action-copy"><strong>Vào Quản lý vật tư</strong><small>Kho · tài sản · điều động</small></span>
+                            </a>
+                        @endif
+                        @if($leaveRoute)
+                            <a href="{{ $leaveRoute }}" class="btn-solid btn-hero btn-leave-home portal-action" data-turbo="false">
+                                <span class="portal-action-icon" aria-hidden="true"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M7 3h10v18H7zM9.5 7h5M9.5 11h5M9.5 15h3M9 3v-1h6v1"/></svg></span>
+                                <span class="portal-action-copy"><strong>Vào Quản lý phép</strong><small>Đề xuất · duyệt · hồ sơ</small></span>
                             </a>
                         @endif
                     @endguest

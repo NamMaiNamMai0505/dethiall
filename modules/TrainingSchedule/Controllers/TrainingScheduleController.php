@@ -28,7 +28,6 @@ use Modules\TrainingSchedule\Requests\CreateTrainingScheduleRequest;
 use Modules\TrainingSchedule\Requests\UpdateTrainingScheduleRequest;
 use Modules\TrainingSchedule\Services\TrainingExportService;
 use Modules\TrainingSchedule\Services\TrainingScheduleService;
-use Modules\Unit\Models\Unit;
 use PhpOffice\PhpWord\SimpleType\Jc;
 
 class TrainingScheduleController extends ModuleBaseController
@@ -2009,42 +2008,17 @@ class TrainingScheduleController extends ModuleBaseController
      */
     private function attachFacultyInstructors($subjects): void
     {
-        $facultyCodes = $subjects
-            ->map(fn (Subject $s) => $s->faculty_code ? strtoupper($s->faculty_code) : null)
-            ->filter()
-            ->unique()
-            ->values();
+        // teaching_assignment là nguồn dữ liệu chính cho quan hệ môn - GV.
+        // Không suy diễn toàn bộ GV trong khoa từ faculty_code vì sẽ bỏ qua
+        // các GV đã được phân công thực tế cho môn.
+        $subjects->load(['instructors' => function ($query) {
+            $query->where('instructors.status', Instructor::STATUS_ACTIVE)
+                ->select('instructors.id', 'instructors.name', 'instructors.code', 'instructors.unit_id');
+        }]);
 
-        if ($facultyCodes->isEmpty()) {
-            $subjects->each(fn (Subject $s) => $s->setRelation('instructors', collect()));
-
-            return;
-        }
-
-        $units = Unit::query()
-            ->whereIn(DB::raw('UPPER(COALESCE(faculty_code, code))'), $facultyCodes->all())
-            ->get(['id', 'faculty_code', 'code']);
-
-        $unitIdByFacultyCode = [];
-        foreach ($units as $unit) {
-            $code = strtoupper($unit->faculty_code ?: $unit->code);
-            $unitIdByFacultyCode[$code] = $unit->id;
-        }
-
-        $instructorsByUnit = Instructor::query()
-            ->where('status', Instructor::STATUS_ACTIVE)
-            ->whereIn('unit_id', array_values($unitIdByFacultyCode))
-            ->get(['id', 'name', 'code', 'unit_id'])
-            ->groupBy('unit_id');
-
-        foreach ($subjects as $subject) {
-            $code = $subject->faculty_code ? strtoupper($subject->faculty_code) : null;
-            $unitId = $code ? ($unitIdByFacultyCode[$code] ?? null) : null;
-            $subject->setRelation(
-                'instructors',
-                $unitId ? ($instructorsByUnit->get($unitId) ?? collect())->values() : collect()
-            );
-        }
+        $subjects->each(function (Subject $subject) {
+            $subject->setRelation('instructors', $subject->instructors->values());
+        });
     }
 
     private function getSubjectsWithAvailability(TrainingSchedule $trainingSchedule)

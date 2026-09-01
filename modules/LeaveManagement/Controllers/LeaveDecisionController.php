@@ -20,7 +20,7 @@ class LeaveDecisionController extends ModuleBaseController
         $status=$leaveRequest->status==='PENDING'?'PENDING_COMMANDER':$leaveRequest->status;
 
         if ($status==='PENDING_COMMANDER') {
-            abort_unless($user->isSuperAdmin() || (int)$leaveRequest->commander_user_id===(int)$user->id,403,'Chỉ chỉ huy cơ quan được xử lý bước này.');
+            abort_unless(LeaveAccess::canCommandRequest($leaveRequest->loadMissing('personnel'),$user),403,'Chỉ chỉ huy cơ quan/đơn vị theo cây đơn vị được xử lý bước này.');
             abort_unless($decision['status']==='PENDING_AGENCY',422,'Đơn đang chờ chỉ huy đề nghị nghỉ phép hoặc trả lại.');
             $leaveRequest->update(['status'=>$decision['status'],'decision_note'=>$decision['decision_note']??null,'decided_by_user_id'=>$user->id,'decided_by_username'=>$user->email,'decided_at'=>now()]);
             LeaveAuditLog::create(['user_id'=>$user->id,'action'=>'COMMANDER_PROPOSED_LEAVE','entity_type'=>'request','entity_id'=>$leaveRequest->id,'details'=>$decision]);
@@ -95,7 +95,7 @@ class LeaveDecisionController extends ModuleBaseController
         $status = $leaveRequest->status === 'PENDING' ? 'PENDING_COMMANDER' : $leaveRequest->status;
 
         if ($status === 'PENDING_COMMANDER') {
-            abort_unless($user->isSuperAdmin() || (int) $leaveRequest->commander_user_id === (int) $user->id, 403, 'Chỉ chỉ huy cơ quan được trả hồ sơ.');
+            abort_unless(LeaveAccess::canCommandRequest($leaveRequest->loadMissing('personnel'), $user), 403, 'Chỉ chỉ huy cơ quan/đơn vị theo cây đơn vị được trả hồ sơ.');
             $action = 'COMMANDER_RETURNED';
             $message = 'Đề xuất nghỉ phép đã được chỉ huy trả lại để bổ sung/chỉnh sửa.';
         } elseif ($status === 'PENDING_AGENCY') {

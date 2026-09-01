@@ -223,4 +223,18 @@ class Unit extends Model
         return implode(' > ', $path);
 
     }
+
+    public function leafFirstHierarchyPath(string $separator = ', '): string
+    {
+        $path = [];
+
+        for ($unit = $this; $unit; $unit = $unit->parent) {
+            $name = trim((string) $unit->name);
+            if ($name !== '') {
+                $path[] = $name;
+            }
+        }
+
+        return implode($separator, $path);
+    }
 }

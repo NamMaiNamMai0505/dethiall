@@ -771,8 +771,15 @@
         }
     }
 
-    window.addEventListener('app:tom-select-ready', hydrateInitialForm, { once: true });
-    requestAnimationFrame(hydrateInitialForm);
+    // The Vite module normally runs before this pushed script, so the ready
+    // event may already have fired. Always hydrate immediately when the
+    // constructor is available and keep the event path for slow loads.
+    if (typeof window.TomSelect !== 'undefined') {
+        hydrateInitialForm();
+    } else {
+        window.addEventListener('app:tom-select-ready', hydrateInitialForm, { once: true });
+        requestAnimationFrame(hydrateInitialForm);
+    }
 })();
 </script>
 @endpush

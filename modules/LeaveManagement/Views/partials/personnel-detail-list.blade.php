@@ -4,6 +4,29 @@
         $account = $person->user?->status === 1 ? $person->user : \App\Models\User::where('status', 1)->where('name', $person->name)->first();
         return ['id' => $account?->id, 'name' => $account?->name ?: $person->name, 'code' => $account?->code ?: $person->staff_code, 'unit_id' => (int) $person->unit_id];
     })->filter(fn ($record) => $record['id'])->unique('id')->values();
+    $unitLevels = function ($person) {
+        $path = [];
+        for ($unit = $person->leaveClass?->unit ?: $person->unitRelation; $unit; $unit = $unit->parent) {
+            array_unshift($path, trim((string) $unit->name));
+        }
+        $path = array_values(array_filter($path));
+        if (!$path || mb_strtolower($path[0], 'UTF-8') !== 'trường cao đẳng hậu cần 2') {
+            array_unshift($path, 'Trường Cao đẳng Hậu cần 2');
+        }
+        return [
+            $path[0] ?? 'Trường Cao đẳng Hậu cần 2',
+            $path[1] ?? null,
+            $path[2] ?? ($person->unitRelation?->name ?: $person->unit),
+            $person->leaveClass?->name ?: $person->class_name ?: ($path[3] ?? null),
+        ];
+    };
+    $unitFilterOptions = ($units ?? collect())->map(function ($unit) {
+        return [
+            'id' => (int) $unit->id,
+            'label' => str_repeat('— ', max(0, ((int) ($unit->level ?: 1)) - 1)).($unit->code ? $unit->code.' — ' : '').$unit->leafFirstHierarchyPath(' / '),
+            'ids' => \App\Support\ManagerUnitScope::unitAndDescendantIds((int) $unit->id),
+        ];
+    });
 @endphp
 <section class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
     <div class="border-b border-slate-100 bg-gradient-to-r from-blue-50 to-white px-5 py-4">
@@ -18,6 +41,14 @@
         <label class="min-w-[200px] text-xs font-bold text-slate-600">Cơ quan tiếp nhận phép
             <select id="personnel-filter-agency" class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal">
                 <option value="">Tất cả cơ quan</option><option value="QUAN_LUC">Quân lực</option><option value="CO_QUAN_CAN_BO">Cơ quan cán bộ</option>
+            </select>
+        </label>
+        <label class="min-w-[260px] flex-1 text-xs font-bold text-slate-600">Đơn vị
+            <select id="personnel-filter-unit" class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-normal">
+                <option value="" data-unit-ids="">Tất cả đơn vị</option>
+                @foreach($unitFilterOptions as $option)
+                    <option value="{{ $option['id'] }}" data-unit-ids="{{ implode(',', $option['ids']) }}">{{ $option['label'] }}</option>
+                @endforeach
             </select>
         </label>
         <button type="button" id="personnel-filter-reset" class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100">Xóa lọc</button>
@@ -42,6 +73,10 @@
                     <th class="whitespace-nowrap px-4 py-3">STT</th>
                     <th class="whitespace-nowrap px-4 py-3">Họ tên</th>
                     <th class="whitespace-nowrap px-4 py-3">Mã quân nhân</th>
+                    <th class="whitespace-nowrap px-4 py-3">Cấp 1</th>
+                    <th class="whitespace-nowrap px-4 py-3">Cấp 2</th>
+                    <th class="whitespace-nowrap px-4 py-3">Cấp 3</th>
+                    <th class="whitespace-nowrap px-4 py-3">Cấp 4 / Lớp</th>
                     <th class="whitespace-nowrap px-4 py-3">Đối tượng</th>
                     <th class="whitespace-nowrap px-4 py-3">Cấp bậc</th>
                     <th class="whitespace-nowrap px-4 py-3">Chức vụ</th>
@@ -66,11 +101,17 @@
                             ? (int) $person->commander_user_id
                             : (!$isTopLeadership && !$isDepartmentCommander ? data_get($unitCommanders->first(), 'id') : null);
                         if ($isTopLeadership) $defaultCommanderId = null;
+                        [$level1, $level2, $level3, $level4] = $unitLevels($person);
+                        $unitSearch = trim(implode(' ', array_filter([$level1, $level2, $level3, $level4])));
                     @endphp
-                    <tr class="personnel-row align-top hover:bg-blue-50/40" data-object="{{ trim((string) ($person->object_type ?: '__EMPTY__')) }}" data-search="{{ mb_strtolower(($person->name ?? '').' '.($person->staff_code ?? '').' '.($person->unitRelation?->name ?? $person->unit ?? ''), 'UTF-8') }}" data-agency="{{ \Modules\LeaveManagement\Support\LeaveAccess::agencyForObject($person->object_type) }}">
+                    <tr class="personnel-row align-top hover:bg-blue-50/40" data-object="{{ trim((string) ($person->object_type ?: '__EMPTY__')) }}" data-search="{{ mb_strtolower(($person->name ?? '').' '.($person->staff_code ?? '').' '.$unitSearch, 'UTF-8') }}" data-agency="{{ \Modules\LeaveManagement\Support\LeaveAccess::agencyForObject($person->object_type) }}" data-unit-id="{{ (int) $person->unit_id }}">
                         <td class="whitespace-nowrap px-4 py-3 font-bold text-blue-700">{{ $i + 1 }}</td>
                         <td class="whitespace-nowrap px-4 py-3"><div class="font-bold text-slate-900">{{ $person->name }}</div><div class="text-xs text-slate-500">{{ $person->staff_code ?: 'Chưa có mã' }}</div></td>
                         <td class="whitespace-nowrap px-4 py-3">{{ $person->staff_code ?: '—' }}</td>
+                        <td class="px-4 py-3">{{ $level1 ?: '—' }}</td>
+                        <td class="px-4 py-3">{{ $level2 ?: '—' }}</td>
+                        <td class="px-4 py-3">{{ $level3 ?: '—' }}</td>
+                        <td class="px-4 py-3">{{ $level4 ?: '—' }}</td>
                         <td class="whitespace-nowrap px-4 py-3">{{ $person->object_type ?: '—' }}</td>
                         <td class="whitespace-nowrap px-4 py-3">{{ $person->rank ?: '—' }}</td>
                         <td class="whitespace-nowrap px-4 py-3">{{ $person->position ?: '—' }}</td>
@@ -87,7 +128,7 @@
                         </td>
                     </tr>
                     <tr class="personnel-edit-row hidden bg-slate-50/70">
-                        <td colspan="12" class="px-4 py-4">
+                        <td colspan="16" class="px-4 py-4">
                             <form method="POST" action="{{ route('leave-management.personnel.update', $person) }}" class="grid w-full gap-3 rounded-xl border border-blue-100 bg-blue-50/40 p-4 md:grid-cols-2">
                                     @csrf
                                     @method('PATCH')
@@ -97,7 +138,7 @@
                                     <label class="block text-xs font-bold text-slate-600">Cấp bậc<input name="rank" value="{{ $person->rank }}" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"></label>
                                     <label class="block text-xs font-bold text-slate-600">Chức vụ<input name="position" value="{{ $person->position }}" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"></label>
                                     <label class="block text-xs font-bold text-slate-600">Ngày nhập ngũ<input name="enlistment_date" type="date" value="{{ $person->enlistment_date?->format('Y-m-d') }}" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"></label>
-                                    <label class="block text-xs font-bold text-slate-600">Đơn vị<input name="unit" value="{{ $person->unitRelation?->name ?? $person->unit }}" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"></label>
+                                    <label class="block text-xs font-bold text-slate-600">Đơn vị theo cây<select name="unit_id" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"><option value="">Giữ nguyên đơn vị hiện tại</option>@foreach(($units ?? collect()) as $unit)@php($level=max(1,(int)($unit->level ?: 1)))<option value="{{ $unit->id }}" @selected((int)$person->unit_id === (int)$unit->id)>{{ str_repeat('— ', max(0, $level - 1)) }}{{ $unit->code ? $unit->code.' — ' : '' }}{{ $unit->leafFirstHierarchyPath(' / ') }}</option>@endforeach</select></label>
                                     <label class="block text-xs font-bold text-slate-600">Quê quán<input name="hometown" value="{{ $person->hometown }}" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"></label>
                                     <label class="block text-xs font-bold text-slate-600">Thường trú<input name="permanent_residence" value="{{ $person->permanent_residence }}" class="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm"></label>
                                      <div class="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">Chỉ huy tiếp nhận được tự động xác định theo đơn vị và role <strong>Chỉ huy cơ quan / đơn vị</strong>; không cần liên kết thủ công.</div>
@@ -107,7 +148,7 @@
                         </td>
                     </tr>
                 @empty
-                    <tr><td colspan="12" class="px-5 py-10 text-center text-slate-500">Chưa có quân nhân.</td></tr>
+                    <tr><td colspan="16" class="px-5 py-10 text-center text-slate-500">Chưa có quân nhân.</td></tr>
                 @endforelse
             </tbody>
         </table>
@@ -132,18 +173,20 @@
 (() => {
     const text = document.getElementById('personnel-filter-text');
     const agency = document.getElementById('personnel-filter-agency');
+    const unit = document.getElementById('personnel-filter-unit');
     const reset = document.getElementById('personnel-filter-reset');
     const count = document.getElementById('personnel-filter-count');
     const tabs = [...document.querySelectorAll('.personnel-object-tab')];
     const rows = [...document.querySelectorAll('.personnel-row')];
-    if (!text || !agency) return;
+    if (!text || !agency || !unit) return;
     let selectedObject = '__ALL__';
     const apply = () => {
         const needle = text.value.trim().toLocaleLowerCase('vi');
         const selected = agency.value;
+        const selectedUnitIds = new Set(String(unit.selectedOptions[0]?.dataset.unitIds || '').split(',').filter(Boolean));
         let visible = 0;
         rows.forEach(row => {
-            const match = (selectedObject === '__ALL__' || row.dataset.object === selectedObject) && (!needle || (row.dataset.search || '').toLocaleLowerCase('vi').includes(needle)) && (!selected || row.dataset.agency === selected);
+            const match = (selectedObject === '__ALL__' || row.dataset.object === selectedObject) && (!needle || (row.dataset.search || '').toLocaleLowerCase('vi').includes(needle)) && (!selected || row.dataset.agency === selected) && (!selectedUnitIds.size || selectedUnitIds.has(row.dataset.unitId || ''));
             row.classList.toggle('hidden', !match);
             row.nextElementSibling?.classList.toggle('hidden', !match || !row.nextElementSibling.classList.contains('personnel-edit-row') || row.nextElementSibling.dataset.open !== 'true');
             if (match) visible++;
@@ -171,8 +214,8 @@
             button.setAttribute('aria-expanded', 'true');
         }
     }));
-    text.addEventListener('input', apply); agency.addEventListener('change', apply);
-    reset.addEventListener('click', () => { text.value = ''; agency.value = ''; apply(); });
+    text.addEventListener('input', apply); agency.addEventListener('change', apply); unit.addEventListener('change', apply);
+    reset.addEventListener('click', () => { text.value = ''; agency.value = ''; unit.value = ''; apply(); });
     apply();
 })();
 </script>

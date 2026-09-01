@@ -12,7 +12,8 @@
     <select name="unit_id" class="rounded border px-3 py-2">
         <option value="">Tất cả đơn vị</option>
         @foreach(($units ?? collect()) as $unit)
-            <option value="{{ $unit->id }}" @selected((string)($recordUnitId ?? request('unit_id')) === (string) $unit->id)>{{ $unit->code ? $unit->code.' — ' : '' }}{{ $unit->name }}</option>
+            @php($level = max(1, (int) ($unit->level ?: 1)))
+            <option value="{{ $unit->id }}" @selected((string)($recordUnitId ?? request('unit_id')) === (string) $unit->id)>{{ str_repeat('— ', max(0, $level - 1)) }}{{ $unit->code ? $unit->code.' — ' : '' }}{{ $unit->leafFirstHierarchyPath(' / ') }}</option>
         @endforeach
     </select>
     <div class="flex gap-2">
@@ -73,8 +74,8 @@ document.addEventListener('DOMContentLoaded', function () {
                     <td class="p-3">{{ $leaveStatusLabels[$item->status] ?? $item->status }} @if($item->archived_at)<span class="text-xs text-slate-500">(đã lưu trữ)</span>@endif</td>
                     <td class="p-3">
                         <div class="flex flex-wrap gap-2">
-                            @if($canPrintLeavePermit && $item->request_id)
-                                <a target="_blank" href="{{ route('leave-management.requests.print', $item->request_id) }}" class="rounded bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700">In phép</a>
+                            @if($canPrintLeavePermit)
+                                <a target="_blank" href="{{ route('leave-management.records.print', ['record' => $item, 'format' => 'print']) }}" class="rounded bg-emerald-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700">In phép</a>
                             @endif
 
                             @if($canEditLeaveRecord)

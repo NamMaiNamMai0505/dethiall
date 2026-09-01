@@ -377,6 +377,7 @@
                     return {
                         value: c.code,
                         text: c.name + (c.code ? ' (' + c.code + ')' : ''),
+                        specialization_id: String(specId),
                     };
                 });
                 setClassOptions(items, '');
@@ -384,6 +385,20 @@
             .catch(function (err) {
                 console.error('Error fetching classes:', err);
             });
+    }
+
+    function syncSpecializationFromClass() {
+        const specializationSelect = document.getElementById('specialization_id');
+        const classSelect = document.getElementById('class_code');
+        const selected = classSelect?.selectedOptions?.[0];
+        const specializationId = selected?.dataset?.specializationId || '';
+        if (!specializationSelect || !specializationId || getVal(specializationSelect) === specializationId) return;
+        if (specializationSelect.tomselect) {
+            specializationSelect.tomselect.setValue(specializationId, true);
+        } else {
+            specializationSelect.value = specializationId;
+        }
+        specializationSelect.dispatchEvent(new Event('change', { bubbles: true }));
     }
 
     function boot() {
@@ -398,6 +413,7 @@
         }
 
         bindChange(specializationSelect, filterClassesBySpecialization);
+        bindChange(classSelect, syncSpecializationFromClass);
 
         // Nếu đã có ngành (old input) → lọc lớp ngay
         if (getVal(specializationSelect)) {

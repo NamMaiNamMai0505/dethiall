@@ -42,7 +42,6 @@
                 ['label' => 'Tổng quan', 'items' => [
                     ['label' => 'Tổng quan', 'route' => 'leave-management.index', 'icon' => 'bi-grid-1x2'],
                     ['label' => 'Danh sách nhân sự', 'route' => 'leave-management.personnel', 'icon' => 'bi-people'],
-                    ['label' => 'Danh bạ phép', 'route' => 'leave-management.directory', 'icon' => 'bi-journal-text'],
                     ['label' => 'Đề xuất nghỉ phép', 'route' => 'leave-management.requests', 'icon' => 'bi-file-earmark-plus'],
                     ['label' => 'Duyệt phép', 'route' => 'leave-management.approvals', 'icon' => 'bi-check2-circle'],
                 ]],
@@ -61,6 +60,7 @@
                 ]],
                 ['label' => 'Báo cáo', 'items' => [
                     ['label' => 'Báo cáo phép', 'route' => 'leave-management.reports', 'icon' => 'bi-bar-chart-line'],
+                    ['label' => 'Thông báo', 'route' => 'leave-management.alerts', 'icon' => 'bi-bell'],
                     ['label' => 'Mẫu báo cáo', 'route' => 'leave-management.report-templates', 'icon' => 'bi-file-earmark-word'],
                 ]],
             ],
@@ -101,7 +101,6 @@
         'inventory.' => 'inventory.index',
         'leave-management.index' => 'leave-management.index',
         'leave-management.personnel' => 'leave-management.personnel.index',
-        'leave-management.directory' => 'leave-management.personnel.show',
         'leave-management.requests' => ['leave-management.requests.index', 'leave-management.requests.create', 'leave-management.create'],
         'leave-management.approvals' => 'leave-management.approvals.index',
         'leave-management.units' => 'leave-management.catalogs.index',

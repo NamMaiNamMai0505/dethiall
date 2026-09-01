@@ -38,10 +38,10 @@
         <div class="row"><span class="label">Họ và tên:</span><span class="name">{{ $request->personnel?->name ?? $request->personnel_name }}</span></div>
         <div class="row"><span class="label">Cấp bậc:</span><span>{{ $request->personnel?->rank ?? $request->rank ?? '—' }}</span></div>
         <div class="row"><span class="label">Chức vụ:</span><span>{{ $request->personnel?->position ?? $request->position ?? '—' }}</span></div>
-        <div class="row"><span class="label">Đơn vị:</span><span>{{ $request->unit_name ?? $request->personnel?->unitRelation?->name ?? '—' }}</span></div>
+        <div class="row"><span class="label">Đơn vị:</span><span>{{ ($printUnitPath ?? $request->unit_name ?? $request->personnel?->unitRelation?->name) ?: '—' }}</span></div>
         <div class="row"><span class="label">Được nghỉ từ:</span><span>07h00 ngày {{ $request->from_date?->format('d/m/Y') }}</span></div>
         <div class="row"><span class="label">Đến:</span><span>17h00 ngày {{ $request->to_date?->format('d/m/Y') }}</span></div>
-        <div class="row"><span class="label">Nơi nghỉ phép:</span><span>{{ $request->locality_path ?: '—' }}</span></div>
+        <div class="row"><span class="label">Nơi nghỉ phép:</span><span>{{ ($printLocalityPath ?? $request->locality_path) ?: '—' }}</span></div>
         @php
             $printReason = trim((string) ($request->reason ?? ''));
             if ($request->leave_type === 'ANNUAL') {
@@ -61,5 +61,12 @@
     </div>
 </main>
 <div class="actions"><button onclick="window.print()">In giấy nghỉ phép</button><a href="{{ route('leave-management.approvals') }}">← Quay lại trang duyệt</a></div>
+@if(request()->boolean('autoprint'))
+<script>
+window.addEventListener('load', function () {
+    window.print();
+});
+</script>
+@endif
 </body>
 </html>
