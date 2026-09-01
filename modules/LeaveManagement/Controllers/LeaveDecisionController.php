@@ -16,35 +16,34 @@ class LeaveDecisionController extends ModuleBaseController
     public function decide(Request $request, LeaveRequest $leaveRequest)
     {
         $user=$request->user();
-        $decision=$request->validate(['status'=>'required|in:PENDING_AGENCY,APPROVED,REJECTED','decision_note'=>'nullable|string|max:2000','bgh_signed'=>'nullable|boolean','bgh_note'=>'nullable|string|max:2000']);
-        if ($decision['status']==='REJECTED') {
-            abort_if(trim((string)($decision['decision_note']??''))==='',422,'Khi trả về/từ chối phải nêu rõ lý do.');
-        }
+        $decision=$request->validate(['status'=>'required|in:PENDING_AGENCY,PENDING_HEAD,APPROVED','decision_note'=>'nullable|string|max:2000','bgh_signed'=>'nullable|boolean','bgh_note'=>'nullable|string|max:2000']);
         $status=$leaveRequest->status==='PENDING'?'PENDING_COMMANDER':$leaveRequest->status;
 
         if ($status==='PENDING_COMMANDER') {
             abort_unless($user->isSuperAdmin() || (int)$leaveRequest->commander_user_id===(int)$user->id,403,'Chỉ chỉ huy cơ quan được xử lý bước này.');
-            abort_unless(in_array($decision['status'],['PENDING_AGENCY','REJECTED'],true),422,'Đơn đang chờ chỉ huy chuyển bước hoặc từ chối.');
+            abort_unless($decision['status']==='PENDING_AGENCY',422,'Đơn đang chờ chỉ huy đề nghị nghỉ phép hoặc trả lại.');
             $leaveRequest->update(['status'=>$decision['status'],'decision_note'=>$decision['decision_note']??null,'decided_by_user_id'=>$user->id,'decided_by_username'=>$user->email,'decided_at'=>now()]);
-            LeaveAuditLog::create(['user_id'=>$user->id,'action'=>$decision['status']==='PENDING_AGENCY'?'COMMANDER_APPROVED':'COMMANDER_REJECTED','entity_type'=>'request','entity_id'=>$leaveRequest->id,'details'=>$decision]);
-            if ($decision['status']==='PENDING_AGENCY') $this->notifyManagement($leaveRequest);
-            else $this->notifyProposer($leaveRequest,'Đề xuất nghỉ phép đã bị chỉ huy từ chối.');
-            return back()->with('success',$decision['status']==='PENDING_AGENCY'?'Đã chuyển đơn lên cơ quan cán bộ hoặc Quân lực theo đối tượng.':'Đã từ chối đề xuất nghỉ phép.');
+            LeaveAuditLog::create(['user_id'=>$user->id,'action'=>'COMMANDER_PROPOSED_LEAVE','entity_type'=>'request','entity_id'=>$leaveRequest->id,'details'=>$decision]);
+            $this->notifyManagement($leaveRequest);
+            return back()->with('success','Đã đề nghị nghỉ phép và chuyển đơn lên cơ quan cán bộ hoặc Quân lực theo đối tượng.');
         }
 
-        abort_unless($status==='PENDING_AGENCY',422,'Đơn không ở bước chờ cơ quan quản lý.');
-        abort_unless(LeaveAccess::canHandleAgency((string) $leaveRequest->managing_agency, $user),403,'Tài khoản không thuộc cơ quan quản lý của quân nhân này.');
-        abort_unless(in_array($decision['status'],['APPROVED','REJECTED'],true),422,'Cơ quan cán bộ hoặc Quân lực chỉ được duyệt hoặc từ chối đơn.');
+        if ($status==='PENDING_AGENCY') {
+            abort_unless(LeaveAccess::canHandleAgency((string) $leaveRequest->managing_agency, $user),403,'Tài khoản không thuộc cơ quan quản lý của quân nhân này.');
+            abort_unless($decision['status']==='PENDING_HEAD',422,'Cơ quan cán bộ hoặc Quân lực chỉ được trình ký hoặc trả lại đơn.');
 
-        if ($decision['status']==='REJECTED') {
-            $leaveRequest->update(['status'=>'REJECTED','decision_note'=>$decision['decision_note']??null,'decided_by_user_id'=>$user->id,'decided_by_username'=>$user->email,'decided_at'=>now()]);
-            LeaveAuditLog::create(['user_id'=>$user->id,'action'=>'AGENCY_REJECTED','entity_type'=>'request','entity_id'=>$leaveRequest->id,'details'=>$decision]);
-            $this->notifyProposer($leaveRequest,'Đề xuất nghỉ phép đã bị cơ quan quản lý từ chối.');
-            return back()->with('success','Đã từ chối đề xuất nghỉ phép.');
+            abort_unless($leaveRequest->printed_at,422,'Phải in đơn trước khi trình thủ trưởng ký.');
+            $leaveRequest->update(['status'=>'PENDING_HEAD','decision_note'=>$decision['decision_note']??null,'decided_by_user_id'=>$user->id,'decided_by_username'=>$user->email,'decided_at'=>now()]);
+            LeaveAuditLog::create(['user_id'=>$user->id,'action'=>'AGENCY_SUBMITTED_TO_HEAD','entity_type'=>'request','entity_id'=>$leaveRequest->id,'details'=>$decision]);
+            $this->notifyHeadSigners($leaveRequest);
+            return back()->with('success','Đã thẩm định và trình thủ trưởng ký.');
         }
 
-        abort_unless($leaveRequest->printed_at,422,'Phải in đơn trình Ban Giám hiệu trước khi duyệt.');
-        abort_unless($request->boolean('bgh_signed') || $leaveRequest->bgh_signed_at,422,'Chưa xác nhận Ban Giám hiệu đã ký.');
+        abort_unless($status==='PENDING_HEAD',422,'Đơn không ở bước chờ thủ trưởng ký.');
+        abort_unless(LeaveAccess::canHeadSign($user),403,'Chỉ thủ trưởng/Ban Giám hiệu được ký bước này.');
+        abort_unless($decision['status']==='APPROVED',422,'Thủ trưởng chỉ được ký duyệt hoặc trả lại đơn.');
+
+        abort_unless($request->boolean('bgh_signed') || $leaveRequest->bgh_signed_at,422,'Chưa xác nhận thủ trưởng/Ban Giám hiệu đã ký.');
         DB::transaction(function () use ($leaveRequest,$user,$decision): void {
             if (!$leaveRequest->bgh_signed_at) {
                 $leaveRequest->bgh_signed_at=now();
@@ -76,16 +75,72 @@ class LeaveDecisionController extends ModuleBaseController
             }
             LeaveRecord::updateOrCreate(['request_id'=>$leaveRequest->id],$recordData);
             LeaveBatch::firstOrCreate(['request_id'=>$leaveRequest->id],['personnel_id'=>$leaveRequest->personnel_id,'personnel_code'=>$leaveRequest->personnel_code,'personnel_name'=>$leaveRequest->personnel_name,'leave_type'=>$leaveRequest->leave_type,'batch_label'=>'Đơn nghỉ phép #'.$leaveRequest->id,'label'=>'Đơn nghỉ phép #'.$leaveRequest->id,'start_date'=>$leaveRequest->from_date,'end_date'=>$leaveRequest->to_date,'total_days'=>$leaveRequest->total_days,'created_by'=>$user->id,'created_by_user_id'=>$user->id]);
-            LeaveAuditLog::create(['user_id'=>$user->id,'action'=>'AGENCY_APPROVED','entity_type'=>'request','entity_id'=>$leaveRequest->id,'details'=>$decision]);
+            LeaveAuditLog::create(['user_id'=>$user->id,'action'=>'HEAD_SIGNED','entity_type'=>'request','entity_id'=>$leaveRequest->id,'details'=>$decision]);
         });
+        $this->notifyManagement($leaveRequest,'Đơn nghỉ phép #'.$leaveRequest->id.' đã được thủ trưởng/Ban Giám hiệu ký.');
         $this->notifyProposer($leaveRequest,'Đề xuất nghỉ phép đã được Ban Giám hiệu ký và cơ quan quản lý duyệt.');
         $this->sendFinalApprovalMail($leaveRequest);
         return back()->with('success','Đã duyệt phép cuối cùng và gửi thông báo cho quân nhân.');
     }
 
-    private function notifyManagement(LeaveRequest $leave): void
+    /**
+     * Trả hồ sơ về đúng người đề xuất, không dùng chung với từ chối.
+     */
+    public function returnRequest(Request $request, LeaveRequest $leaveRequest)
     {
-        $agency=(string)($leave->managing_agency ?: LeaveAccess::QUAN_LUC); \App\Models\User::where('status',1)->get()->filter(fn($u)=>LeaveAccess::canHandleAgency($agency,$u))->each(fn($u)=>LeaveAlert::create(['user_id'=>$u->id,'request_id'=>$leave->id,'kind'=>'PENDING_AGENCY','title'=>'Đơn nghỉ phép chờ cơ quan quản lý xử lý','body'=>$leave->personnel_name.' đã được chỉ huy cơ quan duyệt chuyển lên cơ quan quản lý.']));
+        $user = $request->user();
+        $data = $request->validate([
+            'decision_note' => 'required|string|min:3|max:2000',
+        ]);
+        $status = $leaveRequest->status === 'PENDING' ? 'PENDING_COMMANDER' : $leaveRequest->status;
+
+        if ($status === 'PENDING_COMMANDER') {
+            abort_unless($user->isSuperAdmin() || (int) $leaveRequest->commander_user_id === (int) $user->id, 403, 'Chỉ chỉ huy cơ quan được trả hồ sơ.');
+            $action = 'COMMANDER_RETURNED';
+            $message = 'Đề xuất nghỉ phép đã được chỉ huy trả lại để bổ sung/chỉnh sửa.';
+        } elseif ($status === 'PENDING_AGENCY') {
+            abort_unless(LeaveAccess::canHandleAgency((string) $leaveRequest->managing_agency, $user), 403, 'Tài khoản không thuộc cơ quan quản lý của quân nhân này.');
+            $action = 'AGENCY_RETURNED';
+            $message = 'Đề xuất nghỉ phép đã được cơ quan quản lý trả lại để bổ sung/chỉnh sửa.';
+        } else {
+            abort_unless($status === 'PENDING_HEAD', 422, 'Đơn không ở bước có thể trả lại.');
+            abort_unless(LeaveAccess::canHeadSign($user), 403, 'Chỉ thủ trưởng/Ban Giám hiệu được trả lại hồ sơ.');
+            $action = 'HEAD_RETURNED';
+            $message = 'Đề xuất nghỉ phép đã được thủ trưởng/Ban Giám hiệu trả lại cơ quan quản lý.';
+        }
+
+        $leaveRequest->update([
+            'status' => $action === 'HEAD_RETURNED' ? 'PENDING_AGENCY' : 'RETURNED',
+            'decision_note' => $data['decision_note'],
+            'decided_by_user_id' => $user->id,
+            'decided_by_username' => $user->email,
+            'decided_at' => now(),
+        ]);
+        LeaveAuditLog::create([
+            'user_id' => $user->id,
+            'action' => $action,
+            'entity_type' => 'request',
+            'entity_id' => $leaveRequest->id,
+            'details' => $data,
+        ]);
+        if ($action === 'HEAD_RETURNED') {
+            $this->notifyManagement($leaveRequest, 'Đơn nghỉ phép #'.$leaveRequest->id.' đã được thủ trưởng/Ban Giám hiệu trả lại. Lý do: '.$data['decision_note']);
+        }
+        if ($action !== 'HEAD_RETURNED') {
+            $this->notifyProposer($leaveRequest, $message);
+        }
+
+        return back()->with('success', 'Đã trả lại đề xuất nghỉ phép và lưu rõ lý do.');
+    }
+
+    private function notifyManagement(LeaveRequest $leave, ?string $body = null): void
+    {
+        $agency=(string)($leave->managing_agency ?: LeaveAccess::QUAN_LUC); \App\Models\User::where('status',1)->get()->filter(fn($u)=>LeaveAccess::canHandleAgency($agency,$u))->each(fn($u)=>LeaveAlert::create(['user_id'=>$u->id,'request_id'=>$leave->id,'kind'=>'PENDING_AGENCY','title'=>'Cập nhật xử lý phép','body'=>$body ?: $leave->personnel_name.' đã được chỉ huy cơ quan duyệt chuyển lên cơ quan quản lý.']));
+    }
+
+    private function notifyHeadSigners(LeaveRequest $leave): void
+    {
+        \App\Models\User::where('status',1)->get()->filter(fn($u)=>LeaveAccess::canHeadSign($u))->each(fn($u)=>LeaveAlert::create(['user_id'=>$u->id,'request_id'=>$leave->id,'kind'=>'PENDING_HEAD','title'=>'Đơn nghỉ phép chờ thủ trưởng ký','body'=>$leave->personnel_name.' đã được cơ quan quản lý thẩm định và trình ký.']));
     }
 
     private function notifyProposer(LeaveRequest $leave,string $body): void

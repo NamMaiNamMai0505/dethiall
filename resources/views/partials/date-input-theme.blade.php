@@ -344,6 +344,7 @@
 
         const control = ensureDateControlWrap(input) || input.closest('.date-input-control');
         const field = input.closest('.date-input-field');
+        const floatingCalendar = input.hasAttribute('data-floating-calendar');
 
         const fp = flatpickr(input, {
             locale: (flatpickr.l10ns && flatpickr.l10ns.vn) ? flatpickr.l10ns.vn : 'vn',
@@ -354,8 +355,9 @@
             allowInput: true,
             disableMobile: true,
             // static: calendar nằm cạnh input trong DOM — bám khi scroll
-            static: true,
-            // KHÔNG appendTo: document.body
+            static: !floatingCalendar,
+            appendTo: floatingCalendar ? document.body : undefined,
+            positionElement: floatingCalendar ? (control || input) : undefined,
             onReady: function (_d, _s, instance) {
                 // Flatpickr static tạo .flatpickr-wrapper (inline-block) — ép full width
                 const wrappers = [];
@@ -382,6 +384,10 @@
 
                 if (instance.altInput) {
                     instance.altInput.classList.add('date-input', 'date-input--ready');
+                    instance.altInput.placeholder = 'dd/mm/yyyy';
+                    instance.altInput.setAttribute('aria-label', 'Ngày tháng năm');
+                    instance.altInput.style.display = 'block';
+                    instance.altInput.style.width = '100%';
                     // Đưa altInput vào control (cạnh icon)
                     if (control && instance.altInput.parentNode !== control) {
                         const icon = control.querySelector('.date-input-icon');
@@ -400,19 +406,38 @@
                 if (instance.input) {
                     instance.input.classList.add('date-input');
                 }
-                lockCalendarToField(instance);
+                if (!floatingCalendar) lockCalendarToField(instance);
             },
             onOpen: function (_d, _s, instance) {
-                lockCalendarToField(instance);
-                requestAnimationFrame(function () {
+                if (!floatingCalendar) {
                     lockCalendarToField(instance);
+                    requestAnimationFrame(function () {
+                        lockCalendarToField(instance);
+                    });
+                    return;
+                }
+                requestAnimationFrame(function(){
+                    if (instance.calendarContainer) {
+                        instance.calendarContainer.style.setProperty('z-index', '10090', 'important');
+                    }
+                    if (typeof instance.positionCalendar === 'function') instance.positionCalendar();
+                });
+            },
+            onMonthChange: function (_d, _s, instance) {
+                if (floatingCalendar) requestAnimationFrame(function () {
+                    if (typeof instance.positionCalendar === 'function') instance.positionCalendar();
+                });
+            },
+            onYearChange: function (_d, _s, instance) {
+                if (floatingCalendar) requestAnimationFrame(function () {
+                    if (typeof instance.positionCalendar === 'function') instance.positionCalendar();
                 });
             },
             onClose: function (_d, _s, instance) {
-                clearFieldOpenState(instance);
+                if (!floatingCalendar) clearFieldOpenState(instance);
             },
             onDestroy: function (_d, _s, instance) {
-                clearFieldOpenState(instance);
+                if (!floatingCalendar) clearFieldOpenState(instance);
             },
         });
 

@@ -1,4 +1,4 @@
-@if(in_array($request->status,['PENDING','DRAFT','PENDING_COMMANDER','PENDING_AGENCY'],true))
+@if(in_array($request->status,['PENDING','DRAFT','PENDING_COMMANDER','PENDING_AGENCY','RETURNED'],true))
     @php
         $selectedExtraIds = collect($request->extra_reasons ?? [])->pluck('id')->map(fn($id) => (int) $id)->all();
         $leaveTypeLabels = ['ANNUAL'=>'Phép hàng năm','EXTRA'=>'Phép thêm','SICK'=>'Nghỉ ốm','PERSONAL'=>'Nghỉ việc riêng','SHORT_LEAVE'=>'Nghỉ tranh thủ'];

@@ -1,4 +1,3 @@
-@if(auth()->user()?->isSuperAdmin() || auth()->user()?->can('leave-management.create') || auth()->user()?->can('leave-management.requests.create') || auth()->user()?->hasRole(\App\Support\RoleCatalog::LEAVE_MILITARY))
 @php
     $user = auth()->user();
     $militaryPersonnel = $militaryPersonnel ?? \Modules\LeaveManagement\Models\LeavePersonnel::withoutGlobalScopes()
@@ -34,8 +33,74 @@
         'label' => ($item->staff_code ? $item->staff_code.' — ' : '').$item->name,
         'unit_id' => (int) $item->unit_id,
     ])->values();
+    $proposalPersonnel = collect($personnel ?? [])->filter(fn($person) => $person?->active !== false);
+    $normalizeClassName = fn($name) => \Illuminate\Support\Str::lower(trim((string) $name));
+    $personToRow = fn($person, $className = null) => [
+        'id' => (int) $person->id,
+        'name' => $person->name,
+        'code' => $person->staff_code,
+        'class' => $className ?: ($person->leaveClass?->name ?? $person->class_name),
+        'class_id' => (int) ($person->class_id ?? 0),
+        'class_name' => $person->class_name ?? $person->leaveClass?->name,
+        'unit_id' => (int) ($person->unit_id ?? 0),
+    ];
+    $proposalPeopleData = $proposalPersonnel
+        ->sortBy('name')
+        ->map(fn($person) => $personToRow($person))
+        ->values();
+    $classProposalOptions = $classes->map(function ($class) use ($proposalPersonnel, $normalizeClassName, $personToRow) {
+        $className = $normalizeClassName($class->name);
+        $people = collect($class->personnel ?? [])
+            ->merge($proposalPersonnel->filter(fn($person) =>
+                (int) ($person->class_id ?? 0) === (int) $class->id
+                || ($className !== '' && $normalizeClassName($person->class_name ?? $person->leaveClass?->name) === $className)
+            ))
+            ->filter(fn($person) => $person?->id)
+            ->unique('id')
+            ->sortBy('name')
+            ->map(fn($person) => $personToRow($person, $class->name))
+            ->values();
+
+        return [
+            'id' => (int) $class->id,
+            'name' => $class->name,
+            'unit_name' => $class->unit?->name,
+            'people' => $people,
+        ];
+    })->values();
+    $unitProposalOptions = $personnel->filter(fn($person) => $person->unit_id)->groupBy('unit_id')->map(function ($people) {
+        $first = $people->first();
+        return [
+            'id' => (int) $first->unit_id,
+            'name' => $first->unitRelation?->name ?? $first->unit ?? 'Chưa có đơn vị',
+            'people' => $people->sortBy('name')->map(fn($person) => [
+                'id' => (int) $person->id,
+                'name' => $person->name,
+                'code' => $person->staff_code,
+                'class' => $person->leaveClass?->name ?? $person->class_name,
+            ])->values(),
+        ];
+    })->sortBy('name')->values();
 @endphp
 <section class="mb-5 overflow-visible rounded-2xl border border-blue-100 bg-white shadow-sm">
+    <style>
+        #class-info-panel,
+        #class-info-panel .date-input-field,
+        #class-info-panel .date-input-control {
+            overflow: visible;
+        }
+        #class-info-panel .flatpickr-calendar {
+            z-index: 10080 !important;
+            min-width: 18rem;
+        }
+        #class-students-table-wrap {
+            transition: min-height 0.18s ease;
+        }
+        #class-students-table-wrap.is-datepicker-open,
+        #class-students-table-wrap:focus-within {
+            min-height: 24rem;
+        }
+    </style>
     <div class="border-b border-blue-100 bg-gradient-to-r from-blue-50 via-white to-sky-50 px-5 py-4">
         <p class="text-xs font-bold uppercase tracking-[.16em] text-blue-600">Quy trình đề xuất</p>
         <h2 class="mt-1 text-lg font-extrabold text-slate-900">Đề xuất nghỉ phép</h2>
@@ -46,7 +111,7 @@
             {{ $errors->first() }}
         </div>
     @endif
-    <form id="leave-proposal-form" method="POST" action="{{ route('leave-management.requests.store') }}" class="grid gap-x-4 gap-y-3 p-4 md:grid-cols-2 md:p-5">
+    <form id="leave-proposal-form" method="POST" action="{{ route('leave-management.requests.store') }}" novalidate class="grid gap-x-4 gap-y-3 p-4 md:grid-cols-2 md:p-5">
         @csrf
         @if($isMilitaryAccount)
             <input type="hidden" name="personnel_id" value="{{ $militaryPersonnel?->id }}">
@@ -64,8 +129,10 @@
         <div id="class-scope-panel" class="hidden rounded-2xl border border-slate-200 bg-white p-4 md:col-span-2">
             <div class="mb-4 text-sm font-extrabold text-slate-900">Phạm vi đề xuất</div>
             <div class="grid gap-4 md:grid-cols-2">
-                <label class="block"><span class="mb-1.5 block text-sm font-semibold text-slate-700">Đề xuất cho <b class="text-red-500">*</b></span><select id="class-scope-select" class="w-full rounded-lg border-slate-200 px-3 py-2.5 shadow-sm"><option value="CLASS">Cả lớp — phép năm</option><option value="SHORT_LEAVE">Phép tranh thủ</option><option value="PERSONAL">Phép năm cá nhân</option></select></label>
-                <label class="block"><span class="mb-1.5 block text-sm font-semibold text-slate-700">Lớp <b class="text-red-500">*</b></span><select id="class-class-select" class="w-full rounded-lg border-slate-200 px-3 py-2.5 shadow-sm"><option value="">Chọn lớp</option>@foreach($classes as $class)<option value="{{ $class->id }}" data-people='@json($class->personnel->map(fn($p)=>["id"=>$p->id,"name"=>$p->name,"code"=>$p->staff_code]))'>{{ $class->name }} — {{ $class->unit?->name }}</option>@endforeach</select></label>
+                <label class="block"><span class="mb-1.5 block text-sm font-semibold text-slate-700">Đề xuất cho <b class="text-red-500">*</b></span><select id="class-scope-select" class="w-full rounded-lg border-slate-200 px-3 py-2.5 shadow-sm"><option value="CLASS">Phép hằng năm của học viên</option><option value="HSQBS_ANNUAL">Phép hằng năm của HSQBS</option><option value="HSQBS_SPECIAL">Phép đặc biệt của HSQBS</option><option value="SHORT_LEAVE">Phép tranh thủ</option></select></label>
+                <label id="class-class-field" class="block"><span class="mb-1.5 block text-sm font-semibold text-slate-700">Lớp <b class="text-red-500">*</b></span><select id="class-class-select" class="w-full rounded-lg border-slate-200 px-3 py-2.5 shadow-sm"><option value="">Chọn lớp</option>@foreach($classProposalOptions as $classOption)<option value="{{ $classOption['id'] }}" data-people='@json($classOption['people'], JSON_UNESCAPED_UNICODE)'>{{ $classOption['name'] }} — {{ $classOption['unit_name'] }}</option>@endforeach</select></label>
+                <label id="class-unit-field" class="hidden block"><span class="mb-1.5 block text-sm font-semibold text-slate-700">Đơn vị <b class="text-red-500">*</b></span><select id="class-unit-select" name="unit_id" class="w-full rounded-lg border-slate-200 px-3 py-2.5 shadow-sm"><option value="">Chọn đơn vị</option>@foreach($unitProposalOptions as $unit)<option value="{{ $unit['id'] }}" data-people='@json($unit['people'], JSON_UNESCAPED_UNICODE)'>{{ $unit['name'] }}</option>@endforeach</select></label>
+                <label id="class-agency-field" class="block md:col-span-2"><span class="mb-1.5 block text-sm font-semibold text-slate-700">Cơ quan quản lý tiếp nhận <b class="text-red-500">*</b></span><select id="class-agency-select" name="managing_agency" disabled class="w-full rounded-lg border-slate-200 px-3 py-2.5 shadow-sm"><option value="">Chọn cơ quan quản lý</option><option value="QUAN_LUC">Quân lực</option><option value="CO_QUAN_CAN_BO">Cơ quan cán bộ</option></select><span class="mt-1 block text-xs text-slate-500">Đơn vị chọn cơ quan thẩm định; cơ quan quản lý sẽ trình Ban Giám hiệu ký và thông báo xuống.</span></label>
             </div>
         </div>
         <div id="class-info-panel" class="hidden rounded-2xl border border-slate-200 bg-white p-4 md:col-span-2">
@@ -74,34 +141,35 @@
                 <label class="block md:col-span-2"><span class="mb-1 block text-sm font-semibold text-slate-700">Đối tượng</span><input id="class-object" readonly class="w-full rounded-lg border-slate-200 bg-slate-50 px-3 py-2.5"></label>
                 <label class="block md:col-span-2"><span class="mb-1 block text-sm font-semibold text-slate-700">Lý do <b class="text-red-500">*</b></span><input id="class-reason" placeholder="Nghỉ hè" class="w-full rounded-lg border-slate-200 px-3 py-2.5"></label>
                 <label class="block"><span class="mb-1 block text-sm font-semibold text-slate-700">Đơn vị</span><input id="class-unit" readonly class="w-full rounded-lg border-slate-200 bg-slate-50 px-3 py-2.5"></label>
-                <label class="block"><span class="mb-1 block text-sm font-semibold text-slate-700">Số ngày nghỉ <b class="text-red-500">*</b></span><input id="class-days" type="number" min="1" value="1" class="w-full rounded-lg border-slate-200 px-3 py-2.5"><span class="mt-1 block text-xs text-slate-500">Đại đội nhập trực tiếp, không tính theo thâm niên.</span></label>
-                <label class="block"><span class="mb-1 block text-sm font-semibold text-slate-700">Ngày bắt đầu</span><input id="class-from" type="date" class="w-full rounded-lg border-slate-200 px-3 py-2.5"></label>
-                <label class="block"><span class="mb-1 block text-sm font-semibold text-slate-700">Ngày kết thúc</span><input id="class-to" type="text" disabled readonly tabindex="-1" aria-readonly="true" placeholder="Tự động tính" class="w-full rounded-lg border-slate-200 bg-slate-50 px-3 py-2.5"></label>
+                <label class="block"><span id="class-days-label" class="mb-1 block text-sm font-semibold text-slate-700">Số ngày nghỉ <b class="text-red-500">*</b></span><input id="class-days" type="number" min="1" value="1" class="w-full rounded-lg border-slate-200 px-3 py-2.5"><span id="class-days-help" class="mt-1 block text-xs text-slate-500">Đại đội nhập trực tiếp, không tính theo thâm niên.</span></label>
+                <label id="class-travel-field" class="hidden block"><span class="mb-1 block text-sm font-semibold text-slate-700">Ngày đi đường</span><input id="class-travel" type="number" min="0" step="1" value="0" class="w-full rounded-lg border-slate-200 px-3 py-2.5"></label>
+                <label id="class-from-field" class="block"><span class="mb-1 block text-sm font-semibold text-slate-700">Ngày bắt đầu</span><input id="class-from" type="date" class="w-full rounded-lg border-slate-200 px-3 py-2.5"></label>
+                <label id="class-to-field" class="block"><span class="mb-1 block text-sm font-semibold text-slate-700">Ngày kết thúc</span><input id="class-to" type="date" placeholder="Tự động tính" class="w-full rounded-lg border-slate-200 px-3 py-2.5"></label>
             </div>
             <div class="mt-4 flex items-center justify-between gap-3"><div class="text-sm font-semibold text-slate-700">Nơi nghỉ của học viên trong lớp</div><button type="button" id="select-all-short-students" class="hidden rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-700">Tích tất cả học viên</button></div>
-            <div class="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-                <table class="w-full min-w-[620px] text-left text-sm">
+            <div id="class-students-table-wrap" class="mt-3 overflow-x-auto overflow-y-visible rounded-xl border border-slate-200 bg-white shadow-sm">
+                <table class="w-full min-w-[980px] text-left text-sm">
                     <thead class="bg-slate-50 text-xs font-extrabold uppercase tracking-wide text-slate-600">
-                        <tr><th id="class-student-select-head" class="hidden w-14 px-4 py-3">Chọn</th><th class="w-[42%] px-4 py-3">Học viên</th><th class="w-[18%] px-4 py-3">Lớp</th><th class="px-4 py-3">Nơi nghỉ</th></tr>
+                        <tr><th id="class-student-select-head" class="hidden w-14 px-4 py-3">Chọn</th><th class="w-[22%] px-4 py-3">Quân nhân</th><th class="w-[12%] px-4 py-3">Lớp</th><th class="min-w-[190px] px-4 py-3">Ngày đi</th><th class="min-w-[190px] px-4 py-3">Ngày kết thúc</th><th class="min-w-[280px] px-4 py-3">Nơi nghỉ</th></tr>
                     </thead>
                     <tbody id="class-students" class="divide-y divide-slate-100"></tbody>
                 </table>
             </div>
         </div>
         <div class="md:col-span-2 border-b border-slate-100 pb-2 text-sm font-extrabold text-slate-900">Thông tin đề xuất</div>
-        <label class="block"><span class="mb-1.5 block text-sm font-semibold text-slate-700">Đối tượng</span><select id="proposal-scope" name="request_scope" required class="w-full rounded-lg border-slate-200 px-3 py-2.5 shadow-sm">@if($canProposeForUnit)<option value="CLASS">Phép lớp — đại đội đề xuất cho toàn bộ học viên</option><option value="SHORT_LEAVE">Phép tranh thủ — đại đội tích chọn học viên</option>@endif<option value="PERSONAL">Sĩ quan</option></select></label>
+        <label class="block"><span class="mb-1.5 block text-sm font-semibold text-slate-700">Đối tượng</span><select id="proposal-scope" name="request_scope" required class="w-full rounded-lg border-slate-200 px-3 py-2.5 shadow-sm">@if($canProposeForUnit)<option value="CLASS">Phép hằng năm của học viên</option><option value="HSQBS_ANNUAL">Phép hằng năm của HSQBS</option><option value="HSQBS_SPECIAL">Phép đặc biệt của HSQBS</option><option value="SHORT_LEAVE">Phép tranh thủ — đại đội tích chọn học viên</option>@endif<option value="PERSONAL">Sĩ quan</option></select></label>
         <label id="personnel-field" class="hidden block"><span class="mb-1.5 block text-sm font-semibold text-slate-700">Quân nhân</span><select id="proposal-personnel" name="personnel_id" class="w-full rounded-xl border-slate-200 px-3 py-2.5 shadow-sm"><option value="">Chọn quân nhân</option>@foreach($personnel as $person)<option value="{{ $person->id }}" data-unit-id="{{ $person->unit_id }}">{{ $person->staff_code }} — {{ $person->name }}</option>@endforeach</select></label>
         <label id="replacement-field" class="block"><span class="mb-1.5 block text-sm font-semibold text-slate-700">Người thay thế trong thời gian nghỉ</span><select id="proposal-replacement" name="replacement_personnel_id" class="w-full rounded-xl border-slate-200 px-3 py-2.5 shadow-sm"><option value="">Chọn quân nhân thay thế...</option>@foreach($replacementPersonnel as $replacement)<option value="{{ $replacement->id }}" data-unit-id="{{ $replacement->unit_id }}">{{ $replacement->staff_code }} — {{ $replacement->name }}</option>@endforeach</select><span class="mt-1 block text-xs text-slate-500">Chỉ hiển thị quân nhân cùng đơn vị với người nghỉ.</span></label>
-         <label id="class-field" class="block"><span class="mb-1.5 block text-sm font-semibold text-slate-700">Lớp / đại đội <b class="text-red-500">*</b></span><select id="proposal-class" name="class_id" class="w-full rounded-xl border-slate-200 px-3 py-2.5 shadow-sm"><option value="">Chọn lớp</option>@foreach($classes as $class)<option value="{{ $class->id }}" data-people='@json($class->personnel->map(fn($p)=>["id"=>$p->id,"name"=>$p->name,"code"=>$p->staff_code]))'>{{ $class->unit?->name }} — {{ $class->name }} ({{ $class->personnel->count() }} học viên)</option>@endforeach</select></label>
+         <label id="class-field" class="block"><span class="mb-1.5 block text-sm font-semibold text-slate-700">Lớp / đại đội <b class="text-red-500">*</b></span><select id="proposal-class" name="class_id" class="w-full rounded-xl border-slate-200 px-3 py-2.5 shadow-sm"><option value="">Chọn lớp</option>@foreach($classProposalOptions as $classOption)<option value="{{ $classOption['id'] }}" data-people='@json($classOption['people'], JSON_UNESCAPED_UNICODE)'>{{ $classOption['unit_name'] }} — {{ $classOption['name'] }} ({{ count($classOption['people']) }} học viên)</option>@endforeach</select></label>
         <label id="leave-type-field" class="block"><span class="mb-1.5 block text-sm font-semibold text-slate-700">Loại phép</span><select id="proposal-leave-type" name="leave_type" class="w-full rounded-lg border-slate-200 px-3 py-2.5 shadow-sm"><option value="ANNUAL">Phép hàng năm</option><option value="SICK">Nghỉ ốm</option><option value="PERSONAL">Nghỉ việc riêng</option></select></label>
         <div id="short-people" class="hidden rounded-xl border border-blue-100 bg-blue-50/60 p-4 md:col-span-3"><div class="mb-3 flex items-center justify-between"><div><h3 class="font-bold text-slate-900">Danh sách học viên nghỉ tranh thủ</h3><p class="text-xs text-slate-500">Tích đúng những học viên được nghỉ từ tối thứ Sáu đến chiều Chủ nhật.</p></div><button type="button" id="check-all-short" class="rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white">Tích tất cả</button></div><div id="short-people-list" class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3"></div></div>
         <label class="block"><span class="mb-1.5 block text-sm font-semibold text-slate-700">Ngày bắt đầu <b class="text-red-500">*</b></span><input id="proposal-from" name="from_date" type="date" required class="w-full rounded-lg border-slate-200 px-3 py-2.5 shadow-sm"></label>
-         <label class="block"><span class="mb-1.5 block text-sm font-semibold text-slate-700">Ngày kết thúc <b class="text-red-500">*</b></span><input id="proposal-to" type="text" readonly disabled placeholder="Tự động tính ngày kết thúc" class="w-full rounded-lg border-slate-200 bg-slate-100 px-3 py-2.5 shadow-sm"><input id="proposal-to-hidden" type="hidden" name="to_date" value=""></label>
+         <label class="block"><span class="mb-1.5 block text-sm font-semibold text-slate-700">Ngày kết thúc <b class="text-red-500">*</b></span><input id="proposal-to" name="to_date" type="date" required placeholder="Tự động tính ngày kết thúc" class="w-full rounded-lg border-slate-200 px-3 py-2.5 shadow-sm"><input id="proposal-to-hidden" type="hidden" value=""></label>
         <label id="annual-fields" class="block"><span class="mb-1.5 block text-sm font-semibold text-slate-700">Ngày đi đường</span><input id="proposal-travel" name="travel_days" type="number" min="0" step="1" inputmode="numeric" value="0" class="w-full rounded-xl border-slate-200 px-3 py-2.5 shadow-sm"></label>
         <label class="block md:col-span-2"><span class="mb-1.5 block text-sm font-semibold text-slate-700">Ghi chú / lý do nghỉ <b id="reason-required-mark" class="hidden text-red-500">*</b></span><textarea id="proposal-reason" name="reason" rows="2" class="w-full rounded-lg border-slate-200 px-3 py-2.5 shadow-sm" placeholder="Nhập lý do nghỉ..."></textarea></label>
         <label id="proposal-locality-field" class="block md:col-span-2"><span class="mb-1.5 block text-sm font-semibold text-slate-700">Nơi nghỉ (phường / xã)</span><select id="proposal-locality" name="locality_id" class="w-full rounded-xl border-slate-200 px-3 py-2.5 shadow-sm"><option value="">Chọn phường / xã</option>@foreach($localities->whereNotNull('parent_id') as $locality)<option value="{{ $locality->id }}">{{ $locality->parent?->name }} — {{ $locality->name }}</option>@endforeach</select></label>
         <div class="overflow-x-auto rounded-lg border border-slate-200 bg-slate-100 px-4 py-3 text-sm font-bold text-slate-800 shadow-sm md:col-span-2"><span id="leave-summary-text">Thâm niên: 0 năm &nbsp; Phép cơ bản: 0 ngày &nbsp; Đi đường: 0 ngày &nbsp; Nghỉ thêm: 0 ngày &nbsp; Tổng: 0 ngày</span></div>
-         <div class="flex justify-start md:col-span-2"><button type="submit" id="leave-proposal-submit" class="rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-bold text-white hover:bg-slate-800"><i class="bi bi-send mr-1"></i> Gửi đề xuất</button></div>
+         <div class="flex justify-start md:col-span-2"><button type="submit" id="leave-proposal-submit" class="rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-bold text-white hover:bg-slate-800"><i class="bi bi-send mr-1"></i> Gửi đăng ký</button></div>
     @if($isMilitaryAccount || $canProposeForUnit)<div id="server-military-extra" class="mt-4 rounded-xl border border-slate-200 bg-white p-3 md:col-span-2"><div class="mb-3 text-sm font-extrabold text-slate-800">Ph&eacute;p th&ecirc;m</div><div class="flex border-b border-slate-200 bg-slate-50">@foreach([5,10] as $tabDays)<button type="button" class="server-extra-tab px-5 py-3 text-sm font-extrabold {{ $loop->first ? 'bg-white text-blue-700' : 'text-slate-500' }}" data-tab-days="{{ $tabDays }}">{{ $tabDays }} ng&agrave;y</button>@endforeach</div>@foreach([5,10] as $tabDays)<div class="server-extra-panel space-y-2 p-3 {{ $loop->first ? '' : 'hidden' }}" data-panel-days="{{ $tabDays }}">@foreach($extraStandards->where('base_days',$tabDays) as $rule)<label class="flex cursor-pointer items-start gap-3 rounded-lg border border-slate-200 p-3"><input type="checkbox" name="extra_standard_ids[]" value="{{ $rule->id }}" data-days="{{ $rule->base_days }}" class="server-extra-check mt-1 h-4 w-4 accent-blue-600"><span><span class="block font-semibold text-slate-700">{{ $rule->label ?: $rule->description }}</span><span class="mt-1 block text-xs text-slate-500">{{ $rule->base_days }} ngày</span></span></label>@endforeach</div>@endforeach</div>@endif
 </form>
 </section>
@@ -122,14 +190,16 @@
   const label=scope.closest('label');
   if(label){label.classList.add('md:col-span-2');label.style.order='-20';const title=label.querySelector('span');if(title)title.textContent='Phạm vi đề xuất';}
   const labels={
-    PERSONAL:'Phép năm cá nhân — phép của quân nhân',
+    PERSONAL:'Phép của quân nhân',
     SHORT_LEAVE:'Phép tranh thủ — phép của đại đội',
-    CLASS:'Phép lớp — phép của đại đội'
+    CLASS:'Phép hằng năm của học viên',
+    HSQBS_ANNUAL:'Phép hằng năm của HSQBS',
+    HSQBS_SPECIAL:'Phép đặc biệt của HSQBS'
   };
   Array.from(scope.options).forEach(option=>{if(labels[option.value])option.textContent=labels[option.value];});
   scope.value='PERSONAL';
   const cleanAdminOptions=()=>{
-    Array.from(scope.options).forEach(option=>{if(option.value==='ADMIN_ANNUAL'||option.value==='ADMIN_EXTRA')option.remove();});
+    Array.from(scope.options).forEach(option=>{if(option.value==='ADMIN_EXTRA')option.remove();});
     Array.from(scope.options).forEach(option=>{if(labels[option.value])option.textContent=labels[option.value];});
   };
   setTimeout(cleanAdminOptions,0);
@@ -141,8 +211,11 @@
    if(!scope)return;
    const syncGroupRequired=()=>{
      const value=scope.tomselect?scope.tomselect.getValue():scope.value;
-     const group=value==='CLASS'||value==='SHORT_LEAVE';
-     ['proposal-class','class-class-select','class-reason','class-days','class-from'].forEach(id=>document.getElementById(id)?.toggleAttribute('required',group));
+     const group=['CLASS','SHORT_LEAVE','HSQBS_ANNUAL','HSQBS_SPECIAL'].includes(value);
+     const hsqbs=['HSQBS_ANNUAL','HSQBS_SPECIAL'].includes(value);
+     ['proposal-class','class-class-select','class-reason','class-days'].forEach(id=>document.getElementById(id)?.toggleAttribute('required',group&&!hsqbs));
+     document.getElementById('class-from')?.removeAttribute('required');
+     document.getElementById('class-unit-select')?.toggleAttribute('required',hsqbs);
    };
    scope.addEventListener('change',syncGroupRequired);
    scope.tomselect?.on('change',syncGroupRequired);
@@ -161,7 +234,7 @@
     }
     const end=document.getElementById('proposal-to');
     if(end){
-      end.type='text';end.readOnly=true;end.disabled=true;end.setAttribute('readonly','readonly');end.setAttribute('disabled','disabled');end.style.pointerEvents='none';end.style.userSelect='none';end.tabIndex=-1;end.placeholder='Tự động tính ngày kết thúc';
+      window.initDateInputs?.(end.closest('label')||document);end.readOnly=false;end.disabled=false;end.removeAttribute('readonly');end.removeAttribute('disabled');end.style.pointerEvents='';end.style.userSelect='';end.tabIndex=0;end.placeholder='Tự động tính ngày kết thúc';
       let hidden=document.getElementById('proposal-to-hidden');
       if(!hidden){hidden=document.createElement('input');hidden.type='hidden';hidden.id='proposal-to-hidden';hidden.name='to_date';end.removeAttribute('name');end.after(hidden);}
       hidden.value=end.value||'';
@@ -191,12 +264,11 @@
     if(extra)extra.classList.toggle('hidden',event.target.value!=='PERSONAL');
   });
   fixLeaveFields();
-  const timer=setInterval(fixLeaveFields,100);
-  setTimeout(()=>clearInterval(timer),10000);
+  [50,250,750].forEach(delay=>setTimeout(fixLeaveFields,delay));
 })();
 </script>
 <script>
-(()=>{const form=document.getElementById('leave-proposal-form'),scope=document.getElementById('proposal-scope'),cls=document.getElementById('proposal-class'),classField=document.getElementById('class-field'),personField=document.getElementById('personnel-field'),shortBox=document.getElementById('short-people'),shortList=document.getElementById('short-people-list'),typeField=document.getElementById('leave-type-field'),from=document.getElementById('proposal-from'),to=document.getElementById('proposal-to'),reason=document.getElementById('proposal-reason'),annual=document.getElementById('annual-fields');function selectedPeople(){const option=cls.options[cls.selectedIndex];try{return JSON.parse(option?.dataset.people||'[]')}catch(e){return[]}}function setWeekend(){if(scope.value!=='SHORT_LEAVE'||!from.value)return;const d=new Date(from.value+'T00:00:00'),fr=new Date(d);fr.setDate(d.getDate()+(5-d.getDay()+7)%7);from.value=fr.toISOString().slice(0,10);const su=new Date(fr);su.setDate(fr.getDate()+2);to.value=su.toISOString().slice(0,10)}function render(){const s=scope.value,isPersonal=s==='PERSONAL',isShort=s==='SHORT_LEAVE';classField.classList.toggle('hidden',isPersonal);personField.classList.toggle('hidden',!isPersonal);shortBox.classList.toggle('hidden',!isShort);typeField.classList.toggle('hidden',!isPersonal);annual.classList.toggle('hidden',!isPersonal);cls.required=!isPersonal;shortList.innerHTML='';if(isShort)selectedPeople().forEach(p=>{const label=document.createElement('label');label.className='flex items-center gap-2 rounded-lg bg-white p-3';label.innerHTML=`<input type="checkbox" name="personnel_ids[]" value="${p.id}" class="short-person h-4 w-4 accent-blue-600"><span class="font-semibold text-slate-700">${p.code||''} — ${p.name}</span>`;shortList.appendChild(label)});if(s==='CLASS'){reason.value='Nghỉ hè theo kế hoạch của lớp';reason.placeholder='Lý do lớp nghỉ';}else if(isShort){reason.value='';reason.placeholder='Ghi chú nghỉ tranh thủ (nếu có)';setWeekend()}else{reason.value='';reason.placeholder='Nhập lý do nghỉ cá nhân';}}document.getElementById('check-all-short').addEventListener('click',()=>document.querySelectorAll('.short-person').forEach(x=>x.checked=true));scope.addEventListener('change',render);cls.addEventListener('change',render);from.addEventListener('change',()=>{if(scope.value==='SHORT_LEAVE')setWeekend()});render()})();
+(()=>{const form=document.getElementById('leave-proposal-form'),scope=document.getElementById('proposal-scope'),cls=document.getElementById('proposal-class'),classField=document.getElementById('class-field'),personField=document.getElementById('personnel-field'),shortBox=document.getElementById('short-people'),shortList=document.getElementById('short-people-list'),typeField=document.getElementById('leave-type-field'),from=document.getElementById('proposal-from'),to=document.getElementById('proposal-to'),reason=document.getElementById('proposal-reason'),annual=document.getElementById('annual-fields');function selectedPeople(){const option=cls.options[cls.selectedIndex];try{return JSON.parse(option?.dataset.people||'[]')}catch(e){return[]}}function setDate(input,value){if(window.setDateInputValue)window.setDateInputValue(input,value,false);else input.value=value;}function setWeekend(){if(scope.value!=='SHORT_LEAVE'||!from.value)return;const d=new Date(from.value+'T00:00:00'),fr=new Date(d);fr.setDate(d.getDate()+(5-d.getDay()+7)%7);setDate(from,fr.toISOString().slice(0,10));const su=new Date(fr);su.setDate(fr.getDate()+2);setDate(to,su.toISOString().slice(0,10))}function render(){const s=scope.value,isPersonal=s==='PERSONAL',isShort=s==='SHORT_LEAVE';classField.classList.toggle('hidden',isPersonal);personField.classList.toggle('hidden',!isPersonal);shortBox.classList.toggle('hidden',!isShort);typeField.classList.toggle('hidden',!isPersonal);annual.classList.toggle('hidden',!isPersonal);cls.required=!isPersonal;shortList.innerHTML='';if(isShort)selectedPeople().forEach(p=>{const label=document.createElement('label');label.className='flex items-center gap-2 rounded-lg bg-white p-3';label.innerHTML=`<input type="checkbox" name="personnel_ids[]" value="${p.id}" class="short-person h-4 w-4 accent-blue-600"><span class="font-semibold text-slate-700">${p.code||''} — ${p.name}</span>`;shortList.appendChild(label)});if(s==='CLASS'){reason.value='Nghỉ hè theo kế hoạch của lớp';reason.placeholder='Lý do lớp nghỉ';}else if(isShort){reason.value='';reason.placeholder='Ghi chú nghỉ tranh thủ (nếu có)';setWeekend()}else{reason.value='';reason.placeholder='Nhập lý do nghỉ cá nhân';}}document.getElementById('check-all-short').addEventListener('click',()=>document.querySelectorAll('.short-person').forEach(x=>x.checked=true));scope.addEventListener('change',render);cls.addEventListener('change',render);from.addEventListener('change',()=>{if(scope.value==='SHORT_LEAVE')setWeekend()});render()})();
 </script>
 <script>
 (()=>{
@@ -216,7 +288,7 @@
   const scope=document.getElementById('proposal-scope');
   const configuredBase=Number(@json($militaryAnnualDays ?? 0)),service=Number(@json($militaryServiceYears ?? 0));
   const syncFinalSummary=()=>{
-    if(scope&&['CLASS','SHORT_LEAVE'].includes(scope.value))return;
+    if(scope&&['CLASS','SHORT_LEAVE','HSQBS_ANNUAL','HSQBS_SPECIAL'].includes(scope.value))return;
     const travel=Number(form.querySelector('input[name="travel_days"]')?.value||0);
     const extra=Array.from(form.querySelectorAll('input[name="extra_standard_ids[]"]:checked'))
       .reduce((sum,item)=>sum+Number(item.dataset.days||0),0);
@@ -231,8 +303,8 @@
       <div class="whitespace-nowrap rounded-lg bg-blue-50 px-3 py-2 text-slate-900"><span class="mr-2 text-xs font-semibold text-slate-500">Tổng</span><span>${total} ngày</span></div>
     </div>`;
     const from=document.getElementById('proposal-from'),to=document.getElementById('proposal-to');
-    if(to){const toLabel=to.closest('label');if(toLabel){toLabel.classList.remove('hidden');toLabel.style.display='block';}to.style.display='block';}
-    if(from?.value&&to){const date=new Date(`${from.value}T00:00:00`);date.setDate(date.getDate()+total);const iso=date.toISOString().slice(0,10);const displayDate=iso.slice(8,10)+'-'+iso.slice(5,7)+'-'+iso.slice(0,4);to.type='text';to.readOnly=true;to.disabled=true;to.value=displayDate;const hidden=document.getElementById('proposal-to-hidden');if(hidden)hidden.value=iso;const display=document.getElementById('proposal-to-display');if(display)display.textContent=displayDate;}
+    if(to){const toLabel=to.closest('label');if(toLabel){toLabel.classList.remove('hidden');toLabel.style.display='block';}}
+    if(from?.value&&to&&to.dataset.manualEdited!=='1'){const date=new Date(`${from.value}T00:00:00`);date.setDate(date.getDate()+total-1);const iso=date.toISOString().slice(0,10);to.readOnly=false;to.disabled=false;window.setDateInputValue?window.setDateInputValue(to,iso,false):to.value=iso;const hidden=document.getElementById('proposal-to-hidden');if(hidden)hidden.value=iso;const display=document.getElementById('proposal-to-display');if(display)display.textContent=iso;}
     const totalBox=document.getElementById('military-total-days');
     if(totalBox)totalBox.textContent=`${total} ngày`;
   };
@@ -241,7 +313,7 @@
   const annualInputSelector='#proposal-from,#proposal-travel,input[name="extra_standard_ids[]"]';
   const blockLegacyAnnualHandlers=event=>{
     const target=event.target;
-    if(scope&&['CLASS','SHORT_LEAVE'].includes(scope.value))return;
+    if(scope&&['CLASS','SHORT_LEAVE','HSQBS_ANNUAL','HSQBS_SPECIAL'].includes(scope.value))return;
     if(target?.matches?.(annualInputSelector)){
       if(target.matches('input[name="extra_standard_ids[]"]')&&target.checked){
         form.querySelectorAll('input[name="extra_standard_ids[]"]').forEach(item=>{if(item!==target)item.checked=false;});
@@ -253,7 +325,6 @@
   form.addEventListener('input',blockLegacyAnnualHandlers,true);
   form.addEventListener('change',blockLegacyAnnualHandlers,true);
   setTimeout(syncFinalSummary,0);
-  setInterval(syncFinalSummary,25);
   const observer=new MutationObserver(records=>{
     if(records.some(record=>Array.from(record.addedNodes).some(node=>node.nodeType===1&&(node.id==='proposal-to'||node.querySelector?.('#proposal-to')))))setTimeout(syncFinalSummary,0);
   });
@@ -305,7 +376,6 @@
   ['proposal-scope','proposal-personnel','proposal-replacement','proposal-class','proposal-leave-type','proposal-locality'].forEach(id=>document.getElementById(id)?.addEventListener('change',()=>setTimeout(boot,0)));
 })();
 </script>
-@endif
 @php
     // This script is outside the permission block, so define the data here as well.
     $replacementData = ($replacementPersonnel ?? collect())->map(fn($item) => [
@@ -352,6 +422,40 @@
     setTimeout(syncReplacementOptions, 300);
 })();
 </script>
+<script>
+(() => {
+    const tableWrap = document.getElementById('class-students-table-wrap');
+    if (!tableWrap) return;
+
+    let closeTimer = null;
+    const openTable = () => {
+        clearTimeout(closeTimer);
+        tableWrap.classList.add('is-datepicker-open');
+    };
+    const closeTable = () => {
+        clearTimeout(closeTimer);
+        closeTimer = setTimeout(() => {
+            if (!tableWrap.querySelector(':focus')) {
+                tableWrap.classList.remove('is-datepicker-open');
+            }
+        }, 160);
+    };
+
+    tableWrap.addEventListener('focusin', event => {
+        if (event.target.matches('.row-from, .row-to, .flatpickr-input')) openTable();
+    });
+    tableWrap.addEventListener('click', event => {
+        if (event.target.closest('.date-input-control') || event.target.matches('.row-from, .row-to')) openTable();
+    });
+    document.addEventListener('click', event => {
+        if (!tableWrap.contains(event.target) && !event.target.closest('.flatpickr-calendar')) closeTable();
+        if (event.target.closest('.flatpickr-day')) closeTable();
+    });
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Escape') closeTable();
+    });
+})();
+</script>
 @if($canProposeForUnit)
 @php
   $adminProfilePeople = $personnel->map(function ($person) {
@@ -392,7 +496,7 @@
     const rules=@json($adminProfileRules);
     const matched=rules.filter(rule=>rule.type==='ANNUAL'&&(!rule.object_type||rule.object_type===person.object_type)&&(rule.min===null||rule.min===undefined||rule.min===''||rule.min<=years)&&(rule.max===null||rule.max===undefined||rule.max===''||rule.max>=years)).sort((a,b)=>Number(Boolean(b.object_type&&b.object_type===person.object_type))-Number(Boolean(a.object_type&&a.object_type===person.object_type))||Number(b.min||0)-Number(a.min||0))[0];
     const field=(label,value)=>`<div><div class="text-xs font-semibold text-slate-500">${label}</div><div class="mt-1 rounded-lg bg-white px-3 py-2.5 font-semibold text-slate-800">${value||'—'}</div></div>`;
-    profile.innerHTML='<div class="mb-3 text-sm font-extrabold text-slate-900">Thông tin phép năm cá nhân</div><div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">'+field('Họ tên',person.name)+field('Ngày nhập ngũ / tuyển dụng',person.enlistment_date?person.enlistment_date.split('-').reverse().join('/'):'—')+field('Cấp bậc',person.rank)+field('Chức vụ',person.position)+field('Đơn vị',person.unit)+field('Thâm niên / Phép cơ bản',years+' năm — '+Number(matched?.days||0)+' ngày')+'</div>';
+    profile.innerHTML='<div class="mb-3 text-sm font-extrabold text-slate-900">Thông tin phép của quân nhân</div><div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">'+field('Họ tên',person.name)+field('Ngày nhập ngũ / tuyển dụng',person.enlistment_date?person.enlistment_date.split('-').reverse().join('/'):'—')+field('Cấp bậc',person.rank)+field('Chức vụ',person.position)+field('Đơn vị',person.unit)+field('Thâm niên / Phép cơ bản',years+' năm — '+Number(matched?.days||0)+' ngày')+'</div>';
     updateSummary(years,Number(matched?.days||0));
   };
   scope.addEventListener('change',()=>setTimeout(render,0));personnel.addEventListener('change',()=>setTimeout(render,0));form.addEventListener('input',()=>setTimeout(render,0));form.addEventListener('change',()=>setTimeout(render,0));render();
@@ -434,15 +538,13 @@
   const addScope = (value, label) => {
     if (Array.from(scope.options).some(option => option.dataset.leaveType === value)) return;
     const option = document.createElement('option');
-    option.value = value === 'ANNUAL' ? 'ADMIN_ANNUAL' : 'ADMIN_EXTRA';
+    option.value = 'ADMIN_EXTRA';
     option.dataset.leaveType = value;
     option.textContent = label;
     scope.appendChild(option);
   };
-  addScope('ANNUAL', 'Phép năm — một quân nhân');
   addScope('EXTRA', 'Phép đặc biệt — một quân nhân');
   const adminOptions = [
-    { value: 'ADMIN_ANNUAL', text: 'Phép năm — một quân nhân' },
     { value: 'ADMIN_EXTRA', text: 'Phép đặc biệt — một quân nhân' },
   ];
   if (scope.tomselect) {
@@ -450,21 +552,20 @@
     scope.tomselect.refreshOptions(false);
   }
   const applyAdminScope = (value) => {
-    const isPersonal = value === 'PERSONAL' || value === 'ADMIN_ANNUAL' || value === 'ADMIN_EXTRA';
+    const isPersonal = value === 'PERSONAL' || value === 'ADMIN_EXTRA';
     document.getElementById('class-field')?.classList.toggle('hidden', isPersonal);
     document.getElementById('personnel-field')?.classList.toggle('hidden', !isPersonal);
     document.getElementById('leave-type-field')?.classList.toggle('hidden', !isPersonal);
     document.getElementById('annual-fields')?.classList.toggle('hidden', !isPersonal);
     const classSelect = document.getElementById('proposal-class');
     if (classSelect) classSelect.required = !isPersonal;
-    if (value === 'ADMIN_ANNUAL') leaveType.value = 'ANNUAL';
     if (value === 'ADMIN_EXTRA') leaveType.value = 'EXTRA';
   };
   if (scope.tomselect) scope.tomselect.on('change', applyAdminScope);
   scope.addEventListener('change', () => applyAdminScope(scope.value));
   const syncReasonRequired=()=>{
     const value=scope.tomselect?scope.tomselect.getValue():scope.value;
-    const personal=value==='PERSONAL'||value==='ADMIN_ANNUAL'||value==='ADMIN_EXTRA';
+    const personal=value==='PERSONAL'||value==='ADMIN_EXTRA';
     const leaveType=document.getElementById('proposal-leave-type')?.value||'';
     const needsReason=personal&&!['ANNUAL','EXTRA'].includes(leaveType);
     const reason=document.getElementById('proposal-reason'),mark=document.getElementById('reason-required-mark');
@@ -476,7 +577,7 @@
   document.getElementById('proposal-leave-type')?.addEventListener('change',syncReasonRequired);
   syncReasonRequired();
   document.getElementById('leave-proposal-form')?.addEventListener('submit', () => {
-    if (scope.value === 'ADMIN_ANNUAL' || scope.value === 'ADMIN_EXTRA') {
+    if (scope.value === 'ADMIN_EXTRA') {
       if (scope.tomselect) scope.tomselect.setValue('PERSONAL', true);
       else scope.value = 'PERSONAL';
     }
@@ -485,32 +586,212 @@
 </script>
 <script>
 (()=>{
-  const form=document.getElementById('leave-proposal-form'),scope=document.getElementById('proposal-scope'),classPanel=document.getElementById('class-scope-panel'),infoPanel=document.getElementById('class-info-panel'),classScope=document.getElementById('class-scope-select'),classSelect=document.getElementById('class-class-select'),oldClass=document.getElementById('proposal-class'),genericHeading=Array.from(form?.children||[]).find(el=>el.classList.contains('border-b')),classLocalities=@json($localityData);
-  if(!form||!scope||!classPanel||!infoPanel||!classSelect||!oldClass)return;
-  const genericFields=[document.getElementById('proposal-scope'),document.getElementById('proposal-class'),document.getElementById('proposal-personnel'),document.getElementById('proposal-replacement'),document.getElementById('proposal-leave-type'),document.getElementById('proposal-from'),document.getElementById('proposal-to'),document.getElementById('proposal-travel'),document.getElementById('proposal-reason')];
+  const form=document.getElementById('leave-proposal-form');
+  const scope=document.getElementById('proposal-scope');
+  const classPanel=document.getElementById('class-scope-panel');
+  const infoPanel=document.getElementById('class-info-panel');
+  const classScope=document.getElementById('class-scope-select');
+  const classSelect=document.getElementById('class-class-select');
+  const unitSelect=document.getElementById('class-unit-select');
+  const agencySelect=document.getElementById('class-agency-select');
+  const oldClass=document.getElementById('proposal-class');
+  const classLocalities=@json($localityData);
+  const allProposalPeople=@json($proposalPeopleData, JSON_UNESCAPED_UNICODE);
+  if(!form||!scope||!classPanel||!infoPanel||!classSelect||!unitSelect||!oldClass)return;
+
+  const groupScopes=['CLASS','SHORT_LEAVE','HSQBS_ANNUAL','HSQBS_SPECIAL'];
+  const fixedDaysByScope={HSQBS_ANNUAL:10,HSQBS_SPECIAL:5};
+  const reasonByScope={
+    CLASS:'Phép hằng năm của học viên',
+    HSQBS_ANNUAL:'Phép hàng năm của HSQBS',
+    HSQBS_SPECIAL:'Phép đặc biệt của HSQBS',
+    SHORT_LEAVE:''
+  };
+  const genericHeading=Array.from(form.children||[]).find(el=>el.classList.contains('border-b'));
+  const genericFields=['proposal-scope','proposal-class','proposal-personnel','proposal-replacement','proposal-leave-type','proposal-from','proposal-to','proposal-travel','proposal-reason','proposal-locality'].map(id=>document.getElementById(id));
   const wrapper=el=>el?.closest('label');
-  const hiddenManual=document.createElement('input');hiddenManual.type='hidden';hiddenManual.name='manual_days';hiddenManual.id='class-manual-days-hidden';form.appendChild(hiddenManual);
+  const hiddenManual=document.createElement('input');
+  hiddenManual.type='hidden';
+  hiddenManual.name='manual_days';
+  hiddenManual.id='class-manual-days-hidden';
+  form.appendChild(hiddenManual);
+
+  const selectedScope=()=>scope.tomselect?scope.tomselect.getValue():scope.value;
+  const isGroupScope=value=>groupScopes.includes(value);
+  const isHsqbsScope=value=>value==='HSQBS_ANNUAL'||value==='HSQBS_SPECIAL';
+  const activeGroupSelect=()=>isHsqbsScope(selectedScope())?unitSelect:classSelect;
+  const syncRowSelection=()=>{
+    document.querySelectorAll('#class-students tr').forEach(row=>{
+      const checked=!!row.querySelector('.selected-person')?.checked;
+      row.classList.toggle('bg-blue-50/40',checked);
+      row.querySelectorAll('.row-from,.row-to,select[name^="class_leave_locations"]').forEach(input=>{
+        input.disabled=!checked;
+        input.classList.toggle('bg-slate-100',!checked);
+        input.classList.toggle('cursor-not-allowed',!checked);
+        if(input._flatpickr?.altInput){
+          input._flatpickr.altInput.disabled=!checked;
+          input._flatpickr.altInput.classList.toggle('bg-slate-100',!checked);
+          input._flatpickr.altInput.classList.toggle('cursor-not-allowed',!checked);
+        }
+      });
+      row.querySelectorAll('.row-from,.flatpickr-input').forEach(input=>input.removeAttribute('required'));
+    });
+  };
+
   const syncStudents=()=>{
-    const option=classSelect.options[classSelect.selectedIndex],body=document.getElementById('class-students');
+    const value=selectedScope(),hsqbs=isHsqbsScope(value),selector=activeGroupSelect(),option=selector.options[selector.selectedIndex],body=document.getElementById('class-students');
     let people=[];try{people=JSON.parse(option?.dataset.people||'[]');}catch(e){}
-     const isShort=(scope.tomselect?scope.tomselect.getValue():scope.value)==='SHORT_LEAVE';document.getElementById('class-student-select-head')?.classList.toggle('hidden',!isShort);document.getElementById('select-all-short-students')?.classList.toggle('hidden',!isShort);body.innerHTML=people.map(p=>`<tr class="transition-colors hover:bg-blue-50/50">${isShort?`<td class="px-4 py-3"><input type="checkbox" name="personnel_ids[]" value="${p.id}" class="short-person h-4 w-4 accent-blue-600"></td>`:''}<td class="px-4 py-3"><div class="font-bold text-slate-800">${p.name||''}</div><div class="mt-0.5 text-xs font-medium text-slate-400">${p.code||''}</div></td><td class="px-4 py-3"><span class="inline-flex rounded-full bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700">${option?.textContent.split(' — ')[0]||''}</span></td><td class="px-4 py-3"><select name="class_leave_locations[${p.id}]" class="w-full rounded-lg border-slate-200 bg-slate-50 px-3 py-2 text-sm shadow-sm outline-none transition focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-100"><option value="">Chọn phường/xã — tỉnh/thành...</option>${classLocalities.filter(locality=>locality.parent_name).map(locality=>`<option value="${locality.id}">${locality.label}</option>`).join('')}</select></td></tr>`).join('');
-    document.getElementById('class-object').value=option?.textContent.trim()||'';document.getElementById('class-unit').value=option?.textContent.split(' — ')[1]||'';
+    if(!people.length&&selector.value){
+      const selectedText=(option?.textContent||'').split(' — ')[0].trim().toLowerCase();
+      people=allProposalPeople.filter(p=>hsqbs?String(p.unit_id)===String(selector.value):(String(p.class_id)===String(selector.value)||String(p.class||p.class_name||'').trim().toLowerCase()===selectedText));
+    }
+    document.getElementById('class-student-select-head')?.classList.remove('hidden');
+    const selectAllButton=document.getElementById('select-all-short-students');
+    if(selectAllButton){
+      selectAllButton.classList.remove('hidden');
+      selectAllButton.textContent='Tích tất cả';
+    }
+    body.innerHTML=people.map(p=>`<tr class="transition-colors hover:bg-blue-50/50" data-person-id="${p.id}"><td class="px-4 py-3"><input type="checkbox" name="personnel_ids[]" value="${p.id}" class="selected-person short-person h-4 w-4 accent-blue-600"></td><td class="px-4 py-3"><div class="font-bold text-slate-800">${p.name||''}</div><div class="mt-0.5 text-xs font-medium text-slate-400">${p.code||''}</div></td><td class="px-4 py-3"><span class="inline-flex rounded-full bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700">${p.class||(!hsqbs?option?.textContent.split(' — ')[0]:'')}</span></td><td class="px-4 py-3"><input type="date" data-floating-calendar name="person_from_dates[${p.id}]" class="row-from w-full rounded-lg border-slate-200 px-3 py-2 text-sm shadow-sm"></td><td class="px-4 py-3"><input type="date" data-floating-calendar name="person_to_dates[${p.id}]" class="row-to w-full rounded-lg border-slate-200 px-3 py-2 text-sm shadow-sm"></td><td class="px-4 py-3"><select name="class_leave_locations[${p.id}]" class="w-full rounded-lg border-slate-200 bg-slate-50 px-3 py-2 text-sm shadow-sm outline-none transition focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-100"><option value="">Chọn phường/xã — tỉnh/thành...</option>${classLocalities.filter(locality=>locality.parent_name).map(locality=>`<option value="${locality.id}">${locality.label}</option>`).join('')}</select></td></tr>`).join('');
+    window.initDateInputs?.(body);
+    body.querySelectorAll('.selected-person').forEach(input=>input.addEventListener('change',syncRowSelection));
+    syncRowSelection();
+    if(isGroupScope(value)){
+      body.querySelectorAll('.row-from').forEach(input=>['input','change'].forEach(eventName=>input.addEventListener(eventName,()=>{const row=input.closest('tr');row.querySelector('.row-to')?.removeAttribute('data-manual-edited');calculateEnd();})));
+      body.querySelectorAll('.row-to').forEach(input=>['input','change'].forEach(eventName=>input.addEventListener(eventName,()=>{input.dataset.manualEdited='1';syncValues();})));
+    }
+    document.getElementById('class-object').value=option?.textContent.trim()||'';
+    document.getElementById('class-unit').value=hsqbs?(option?.textContent.trim()||''):(option?.textContent.split(' — ')[1]||'');
   };
+
   const syncValues=()=>{
-    const reason=document.getElementById('class-reason'),days=document.getElementById('class-days'),from=document.getElementById('class-from'),to=document.getElementById('class-to'),oldFrom=document.getElementById('proposal-from'),oldTo=document.getElementById('proposal-to'),oldReason=document.getElementById('proposal-reason');
-     oldClass.value=classSelect.value;hiddenManual.value=days.value||1;oldFrom.value=from.value||'';oldReason.value=reason.value||'';oldTo.value=to.dataset.isoValue||'';document.getElementById('proposal-to-hidden')?.setAttribute('value',to.dataset.isoValue||'');if(document.getElementById('proposal-to-hidden'))document.getElementById('proposal-to-hidden').value=to.dataset.isoValue||'';
+    const reason=document.getElementById('class-reason'),days=document.getElementById('class-days'),travel=document.getElementById('class-travel'),from=document.getElementById('class-from'),to=document.getElementById('class-to'),oldFrom=document.getElementById('proposal-from'),oldTo=document.getElementById('proposal-to'),oldReason=document.getElementById('proposal-reason'),oldTravel=document.getElementById('proposal-travel'),hiddenTo=document.getElementById('proposal-to-hidden');
+    const firstRow=document.querySelector('#class-students .selected-person:checked')?.closest('tr')||document.querySelector('#class-students tr');
+    const firstFrom=firstRow?.querySelector('.row-from')?.value||from.value||'';
+    const firstTo=firstRow?.querySelector('.row-to')?.value||to.value||'';
+    oldClass.value=isHsqbsScope(selectedScope())?'':classSelect.value;
+    hiddenManual.value=days.value||1;
+    oldFrom.value=firstFrom;
+    oldReason.value=reason.value||'';
+    if(oldTravel)oldTravel.value=isHsqbsScope(selectedScope())?0:(travel?.value||0);
+    oldTo.value=firstTo;
+    if(hiddenTo)hiddenTo.value=firstTo;
   };
-   const calculateEnd=()=>{const from=document.getElementById('class-from'),to=document.getElementById('class-to'),days=Number(document.getElementById('class-days').value||0);if(from.value&&days>0){const parts=from.value.split('-').map(Number),d=new Date(parts[0],parts[1]-1,parts[2]);d.setDate(d.getDate()+days);const iso=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');to.value=[String(d.getDate()).padStart(2,'0'),String(d.getMonth()+1).padStart(2,'0'),d.getFullYear()].join('/');to.setAttribute('data-iso-value',iso);}else{to.value='';to.removeAttribute('data-iso-value');}syncValues();};
-  const render=()=>{const selectedScope=scope.tomselect?scope.tomselect.getValue():scope.value,isGroup=selectedScope==='CLASS'||selectedScope==='SHORT_LEAVE';classPanel.classList.toggle('hidden',!isGroup);infoPanel.classList.toggle('hidden',!isGroup);genericHeading?.classList.toggle('hidden',isGroup);genericFields.forEach(el=>wrapper(el)?.classList.toggle('hidden',isGroup));document.getElementById('leave-summary-text')?.parentElement.classList.toggle('hidden',isGroup);Array.from(form.querySelectorAll('div')).find(el=>el.textContent.includes('Phép lớp tạo một đề xuất'))?.classList.toggle('hidden',isGroup);document.getElementById('short-people')?.classList.add('hidden');if(isGroup){classSelect.value=oldClass.value||classSelect.value;syncStudents();calculateEnd();}else{oldClass.required=false;}};
-  classScope.addEventListener('change',()=>{if(scope.tomselect)scope.tomselect.setValue(classScope.value);else{scope.value=classScope.value;scope.dispatchEvent(new Event('change'));}render();});document.getElementById('select-all-short-students')?.addEventListener('click',()=>document.querySelectorAll('#class-students .short-person').forEach(input=>input.checked=true));classSelect.addEventListener('change',()=>{syncStudents();syncValues();});document.getElementById('class-reason').addEventListener('input',syncValues);document.getElementById('class-days').addEventListener('input',calculateEnd);document.getElementById('class-days').addEventListener('change',calculateEnd);document.getElementById('class-from').addEventListener('input',calculateEnd);document.getElementById('class-from').addEventListener('change',calculateEnd);form.addEventListener('submit',event=>{const value=scope.tomselect?scope.tomselect.getValue():scope.value;if(value==='CLASS'||value==='SHORT_LEAVE'){syncValues();if(value==='SHORT_LEAVE'&&!document.querySelector('#class-students .short-person:checked')){event.preventDefault();alert('Vui lòng tích ít nhất một học viên được nghỉ tranh thủ.');}}});scope.addEventListener('change',()=>{classScope.value=scope.tomselect?scope.tomselect.getValue():scope.value;render();});scope.tomselect?.on('change',render);render();setTimeout(calculateEnd,0);setInterval(calculateEnd,500);
+
+  const calculateEnd=()=>{
+    const value=selectedScope(),from=document.getElementById('class-from'),to=document.getElementById('class-to'),daysInput=document.getElementById('class-days'),travelInput=document.getElementById('class-travel');
+    const days=Number(daysInput?.value||0);
+    const travel=isHsqbsScope(value)?0:Number(travelInput?.value||0);
+    if(isGroupScope(value)){
+      document.querySelectorAll('#class-students tr').forEach(row=>{
+        const rowFrom=row.querySelector('.row-from'),rowTo=row.querySelector('.row-to');
+        if(rowFrom&&!rowFrom.value&&from.value){
+          if(window.setDateInputValue)window.setDateInputValue(rowFrom,from.value,false);
+          else rowFrom.value=from.value;
+        }
+        if(rowFrom?.value&&rowTo&&rowTo.dataset.manualEdited!=='1'){
+          const parts=rowFrom.value.split('-').map(Number),d=new Date(parts[0],parts[1]-1,parts[2]);
+          d.setDate(d.getDate()+days+travel-1);
+          const iso=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');
+          window.setDateInputValue?window.setDateInputValue(rowTo,iso,false):rowTo.value=iso;
+        }
+      });
+      syncValues();
+      return;
+    }
+    if(to?.dataset.manualEdited==='1'){syncValues();return;}
+    if(from.value&&days>0){
+      const parts=from.value.split('-').map(Number),d=new Date(parts[0],parts[1]-1,parts[2]);
+      d.setDate(d.getDate()+days+travel-1);
+      const iso=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');
+      window.setDateInputValue?window.setDateInputValue(to,iso,false):to.value=iso;
+    }else{
+      window.setDateInputValue?window.setDateInputValue(to,'',false):to.value='';
+    }
+    syncValues();
+  };
+
+  const render=()=>{
+    const value=selectedScope(),isGroup=isGroupScope(value),hsqbs=isHsqbsScope(value),fixedDays=fixedDaysByScope[value]||0;
+    classPanel.classList.toggle('hidden',!isGroup);
+    infoPanel.classList.toggle('hidden',!isGroup);
+    document.getElementById('class-class-field')?.classList.toggle('hidden',hsqbs);
+    document.getElementById('class-unit-field')?.classList.toggle('hidden',!hsqbs);
+    if(agencySelect){
+      agencySelect.disabled=!isGroup;
+      agencySelect.required=isGroup;
+    }
+    document.getElementById('class-from-field')?.classList.toggle('hidden',isGroup);
+    document.getElementById('class-to-field')?.classList.toggle('hidden',isGroup);
+    genericHeading?.classList.toggle('hidden',isGroup);
+    genericFields.forEach(el=>wrapper(el)?.classList.toggle('hidden',isGroup));
+    document.getElementById('leave-summary-text')?.parentElement.classList.toggle('hidden',isGroup);
+    Array.from(form.querySelectorAll('div')).find(el=>el.textContent.includes('Phép lớp tạo một đề xuất'))?.classList.toggle('hidden',isGroup);
+    document.getElementById('short-people')?.classList.add('hidden');
+    document.getElementById('class-travel-field')?.classList.toggle('hidden',hsqbs||!fixedDays);
+    const days=document.getElementById('class-days'),daysLabel=document.getElementById('class-days-label'),daysHelp=document.getElementById('class-days-help'),reason=document.getElementById('class-reason');
+    if(fixedDays){days.value=fixedDays;days.readOnly=true;days.classList.add('bg-slate-100');daysLabel.innerHTML='Tổng phép <b class="text-red-500">*</b>';daysHelp.textContent='Theo quy định HSQBS.';const travel=document.getElementById('class-travel');if(travel)travel.value=0;}
+    else{days.readOnly=false;days.classList.remove('bg-slate-100');daysLabel.innerHTML='Số ngày nghỉ <b class="text-red-500">*</b>';daysHelp.textContent='Đại đội nhập trực tiếp, không tính theo thâm niên.';}
+    if(isGroup&&reasonByScope[value]!==undefined)reason.value=reasonByScope[value];
+    if(isGroup){if(!hsqbs)classSelect.value=oldClass.value||classSelect.value;syncStudents();calculateEnd();}else{oldClass.required=false;}
+  };
+
+  const resetManualEnd=()=>document.getElementById('class-to')?.removeAttribute('data-manual-edited');
+  classScope.addEventListener('change',()=>{resetManualEnd();if(scope.tomselect)scope.tomselect.setValue(classScope.value);else{scope.value=classScope.value;scope.dispatchEvent(new Event('change'));}render();});
+  document.getElementById('select-all-short-students')?.addEventListener('click',()=>{document.querySelectorAll('#class-students .selected-person').forEach(input=>input.checked=true);syncRowSelection();});
+  classSelect.addEventListener('change',()=>{resetManualEnd();syncStudents();calculateEnd();});
+  unitSelect.addEventListener('change',()=>{resetManualEnd();syncStudents();calculateEnd();});
+  document.getElementById('class-reason').addEventListener('input',syncValues);
+  document.getElementById('class-days').addEventListener('input',()=>{resetManualEnd();calculateEnd();});
+  document.getElementById('class-days').addEventListener('change',()=>{resetManualEnd();calculateEnd();});
+  document.getElementById('class-travel')?.addEventListener('input',()=>{resetManualEnd();calculateEnd();});
+  document.getElementById('class-travel')?.addEventListener('change',()=>{resetManualEnd();calculateEnd();});
+  document.getElementById('class-from').addEventListener('input',()=>{resetManualEnd();calculateEnd();});
+  document.getElementById('class-from').addEventListener('change',()=>{resetManualEnd();calculateEnd();});
+  document.getElementById('class-to').addEventListener('input',()=>{document.getElementById('class-to').dataset.manualEdited='1';syncValues();});
+  form.addEventListener('submit',event=>{const value=selectedScope();if(isGroupScope(value)){syncRowSelection();syncValues();const checkedRows=Array.from(document.querySelectorAll('#class-students .selected-person:checked')).map(input=>input.closest('tr'));if(!agencySelect?.value){event.preventDefault();alert('Vui lòng chọn cơ quan quản lý tiếp nhận đề xuất.');return;}if(!checkedRows.length){event.preventDefault();alert('Vui lòng tích ít nhất một quân nhân/học viên cần đề xuất nghỉ phép.');return;}if(checkedRows.some(row=>!row.querySelector('.row-from')?.value)){event.preventDefault();alert('Vui lòng nhập ngày đi cho quân nhân/học viên đã tích.');}}});
+  scope.addEventListener('change',()=>{classScope.value=selectedScope();render();});
+  scope.tomselect?.on('change',render);
+  render();
+  setTimeout(calculateEnd,0);
+})();
+</script>
+<script>
+(()=>{
+  const form=document.getElementById('leave-proposal-form');
+  if(!form)return;
+  const selectedScope=()=>{
+    const scope=document.getElementById('proposal-scope');
+    return scope?.tomselect?scope.tomselect.getValue():scope?.value;
+  };
+  const syncSelectableRows=()=>{
+    const tableScope=['CLASS','SHORT_LEAVE','HSQBS_ANNUAL','HSQBS_SPECIAL'].includes(selectedScope());
+    document.querySelectorAll('#class-students tr').forEach(row=>{
+      const checked=tableScope&&!!row.querySelector('.selected-person')?.checked;
+      row.querySelectorAll('.row-from,.flatpickr-input').forEach(input=>input.removeAttribute('required'));
+      row.querySelectorAll('.row-from,.row-to,select[name^="class_leave_locations"]').forEach(input=>{
+        input.disabled=!checked;
+        input.removeAttribute('required');
+        if(input._flatpickr?.altInput){
+          input._flatpickr.altInput.disabled=!checked;
+          input._flatpickr.altInput.removeAttribute('required');
+        }
+      });
+    });
+  };
+  document.addEventListener('change',event=>{
+    if(event.target.matches('#class-students .selected-person'))syncSelectableRows();
+  },true);
+  document.getElementById('leave-proposal-submit')?.addEventListener('click',syncSelectableRows,true);
+  form.addEventListener('submit',syncSelectableRows,true);
+  [0,50,250,750].forEach(delay=>setTimeout(syncSelectableRows,delay));
 })();
 </script>
 <script>
 (()=>{
   const form=document.getElementById('leave-proposal-form'),scope=document.getElementById('proposal-scope'),classField=document.getElementById('class-field'),shortPeople=document.getElementById('short-people'),classScopePanel=document.getElementById('class-scope-panel'),classInfoPanel=document.getElementById('class-info-panel');
   if(!scope)return;
-   const sync=()=>{const value=scope.tomselect?scope.tomselect.getValue():scope.value;const isClass=value==='CLASS',isShort=value==='SHORT_LEAVE',isGroup=isClass||isShort,personal=value==='PERSONAL'||value==='ADMIN_ANNUAL'||value==='ADMIN_EXTRA';const genericIds=['proposal-scope','proposal-personnel','proposal-replacement','proposal-leave-type','proposal-from','proposal-to','proposal-travel','proposal-reason'];classField?.classList.toggle('hidden',personal||isGroup);scope.required=false;document.getElementById('proposal-class')?.removeAttribute('required');document.getElementById('class-class-select')?.toggleAttribute('required',isGroup);document.getElementById('class-from')?.toggleAttribute('required',isGroup);['proposal-from','proposal-to'].forEach(id=>{const input=document.getElementById(id);if(input)input.required=!isGroup;});shortPeople?.classList.add('hidden');classScopePanel?.classList.toggle('hidden',!isGroup);classInfoPanel?.classList.toggle('hidden',!isGroup);Array.from(form?.children||[]).find(el=>el.classList.contains('border-b'))?.classList.toggle('hidden',isGroup);genericIds.forEach(id=>document.getElementById(id)?.closest('label')?.classList.toggle('hidden',isGroup));document.getElementById('leave-summary-text')?.parentElement.classList.toggle('hidden',isGroup);};
-  scope.addEventListener('change',()=>setTimeout(sync,0));scope.tomselect?.on('change',()=>setTimeout(sync,0));sync();setInterval(sync,250);
+   const sync=()=>{const value=scope.tomselect?scope.tomselect.getValue():scope.value;const isClass=value==='CLASS',isShort=value==='SHORT_LEAVE',isHsqbs=value==='HSQBS_ANNUAL'||value==='HSQBS_SPECIAL',isGroup=isClass||isShort||isHsqbs,personal=value==='PERSONAL'||value==='ADMIN_EXTRA';const genericIds=['proposal-scope','proposal-personnel','proposal-replacement','proposal-leave-type','proposal-from','proposal-to','proposal-travel','proposal-reason','proposal-locality'];classField?.classList.toggle('hidden',personal||isGroup);scope.required=false;document.getElementById('proposal-class')?.removeAttribute('required');document.getElementById('class-class-select')?.toggleAttribute('required',isGroup&&!isHsqbs);document.getElementById('class-unit-select')?.toggleAttribute('required',isHsqbs);const agency=document.getElementById('class-agency-select');if(agency){agency.disabled=!isGroup;agency.required=isGroup;}document.getElementById('class-from')?.removeAttribute('required');['proposal-from','proposal-to'].forEach(id=>{const input=document.getElementById(id);if(input)input.required=!isGroup;});shortPeople?.classList.add('hidden');classScopePanel?.classList.toggle('hidden',!isGroup);classInfoPanel?.classList.toggle('hidden',!isGroup);Array.from(form?.children||[]).find(el=>el.classList.contains('border-b'))?.classList.toggle('hidden',isGroup);genericIds.forEach(id=>document.getElementById(id)?.closest('label')?.classList.toggle('hidden',isGroup));document.getElementById('proposal-locality-field')?.classList.toggle('hidden',isGroup);document.getElementById('leave-summary-text')?.parentElement.classList.toggle('hidden',isGroup);};
+  scope.addEventListener('change',()=>setTimeout(sync,0));scope.tomselect?.on('change',()=>setTimeout(sync,0));sync();[50,250,750].forEach(delay=>setTimeout(sync,delay));
 })();
 </script>
 <script>
@@ -528,8 +809,8 @@
     box.innerHTML=html;note.closest('label')?.after(box);
     box.querySelectorAll('[data-extra-tab]').forEach(tab=>tab.addEventListener('click',()=>{box.querySelectorAll('[data-extra-tab]').forEach(item=>{item.classList.remove('bg-white','text-blue-700');item.classList.add('text-slate-500');});tab.classList.add('bg-white','text-blue-700');tab.classList.remove('text-slate-500');box.querySelectorAll('[data-extra-panel]').forEach(panel=>panel.classList.toggle('hidden',panel.dataset.extraPanel!==tab.dataset.extraTab));}));
   }
-  const update=()=>{const travelDays=Number(travel?.value||0),extraDays=Array.from(form.querySelectorAll('#military-extra-standards .military-extra:checked')).reduce((sum,item)=>sum+Number(item.dataset.days||0),0),total=baseDays+travelDays+extraDays;summary.innerHTML='<div class="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm font-bold text-slate-900"><span>Th&acirc;m ni&ecirc;n: '+serviceYears+' n&#x103;m</span><span>Ph&eacute;p c&#x1a1; b&#x1ea3;n: '+baseDays+' ng&agrave;y</span><span>&#x110;i &#x111;&#x1b0;&#x7901;ng: '+travelDays+' ng&agrave;y</span><span>Ngh&#x1ec9; th&ecirc;m: '+extraDays+' ng&agrave;y</span><span>T&#x1ed5;ng: '+total+' ng&agrave;y</span></div>';if(from?.value&&to){const date=new Date(from.value+'T00:00:00');date.setDate(date.getDate()+total);to.value=date.toISOString().slice(0,10);}};
-  const refreshServerExtra=()=>{const travelDays=Number(travel?.value||0),extraDays=Array.from(form.querySelectorAll('.server-extra-check:checked')).reduce((sum,item)=>sum+Number(item.dataset.days||0),0),total=baseDays+travelDays+extraDays;summary.innerHTML='<div class="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm font-bold text-slate-900"><span>Th&acirc;m ni&ecirc;n: '+serviceYears+' n&#x103;m</span><span>Ph&eacute;p c&#x1a1; b&#x1ea3;n: '+baseDays+' ng&agrave;y</span><span>&#x110;i &#x111;&#x1b0;&#x7901;ng: '+travelDays+' ng&agrave;y</span><span>Ngh&#x1ec9; th&ecirc;m: '+extraDays+' ng&agrave;y</span><span>T&#x1ed5;ng: '+total+' ng&agrave;y</span></div>';if(from?.value&&to){const date=new Date(from.value+'T00:00:00');date.setDate(date.getDate()+total);to.value=date.toISOString().slice(0,10);}};serverBox?.querySelectorAll('.server-extra-check').forEach(item=>item.addEventListener('change',refreshServerExtra));
+  const update=()=>{const travelDays=Number(travel?.value||0),extraDays=Array.from(form.querySelectorAll('#military-extra-standards .military-extra:checked')).reduce((sum,item)=>sum+Number(item.dataset.days||0),0),total=baseDays+travelDays+extraDays;summary.innerHTML='<div class="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm font-bold text-slate-900"><span>Th&acirc;m ni&ecirc;n: '+serviceYears+' n&#x103;m</span><span>Ph&eacute;p c&#x1a1; b&#x1ea3;n: '+baseDays+' ng&agrave;y</span><span>&#x110;i &#x111;&#x1b0;&#x7901;ng: '+travelDays+' ng&agrave;y</span><span>Ngh&#x1ec9; th&ecirc;m: '+extraDays+' ng&agrave;y</span><span>T&#x1ed5;ng: '+total+' ng&agrave;y</span></div>';if(from?.value&&to&&to.dataset.manualEdited!=='1'){const date=new Date(from.value+'T00:00:00');date.setDate(date.getDate()+Math.max(0,total-1));const iso=date.toISOString().slice(0,10);window.setDateInputValue?window.setDateInputValue(to,iso,false):to.value=iso;}};
+  const refreshServerExtra=()=>{const travelDays=Number(travel?.value||0),extraDays=Array.from(form.querySelectorAll('.server-extra-check:checked')).reduce((sum,item)=>sum+Number(item.dataset.days||0),0),total=baseDays+travelDays+extraDays;summary.innerHTML='<div class="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm font-bold text-slate-900"><span>Th&acirc;m ni&ecirc;n: '+serviceYears+' n&#x103;m</span><span>Ph&eacute;p c&#x1a1; b&#x1ea3;n: '+baseDays+' ng&agrave;y</span><span>&#x110;i &#x111;&#x1b0;&#x7901;ng: '+travelDays+' ng&agrave;y</span><span>Ngh&#x1ec9; th&ecirc;m: '+extraDays+' ng&agrave;y</span><span>T&#x1ed5;ng: '+total+' ng&agrave;y</span></div>';if(from?.value&&to&&to.dataset.manualEdited!=='1'){const date=new Date(from.value+'T00:00:00');date.setDate(date.getDate()+Math.max(0,total-1));const iso=date.toISOString().slice(0,10);window.setDateInputValue?window.setDateInputValue(to,iso,false):to.value=iso;}};serverBox?.querySelectorAll('.server-extra-check').forEach(item=>item.addEventListener('change',refreshServerExtra));
   form.addEventListener('input',update);form.addEventListener('change',update);update();
 })();
 </script>
@@ -537,6 +818,35 @@
   (()=>{const textWalker=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);let textNode;while(textNode=textWalker.nextNode())textNode.nodeValue=textNode.nodeValue.replace(/\u0110i\s+\S+ng/g,'\u0110i \u0111\u01b0\u1eddng').replace(/\u0111i\s+\S+ng/g,'\u0111i \u0111\u01b0\u1eddng');})();
 </script>
 @endif
+<script>
+(()=>{
+  const form=document.getElementById('leave-proposal-form');
+  const scope=document.getElementById('proposal-scope');
+  if(!form||!scope)return;
+  const value=()=>{
+    const classScope=document.getElementById('class-scope-select');
+    const classPanel=document.getElementById('class-scope-panel');
+    if(classScope&&classPanel&&!classPanel.classList.contains('hidden'))return classScope.value;
+    return scope.tomselect?scope.tomselect.getValue():scope.value;
+  };
+  const isTableScope=()=>['CLASS','SHORT_LEAVE','HSQBS_ANNUAL','HSQBS_SPECIAL'].includes(value());
+  const isHsqbs=()=>['HSQBS_ANNUAL','HSQBS_SPECIAL'].includes(value());
+  const sync=()=>{
+    const tableScope=isTableScope();
+    const hsqbs=isHsqbs();
+    ['class-travel-field','class-from-field','class-to-field','proposal-locality-field'].forEach(id=>document.getElementById(id)?.classList.toggle('hidden',tableScope));
+    ['proposal-from','proposal-to','proposal-travel','proposal-locality'].forEach(id=>document.getElementById(id)?.closest('label')?.classList.toggle('hidden',tableScope));
+    const travel=document.getElementById('proposal-travel');
+    if(hsqbs&&travel)travel.value=0;
+  };
+  scope.addEventListener('change',()=>setTimeout(sync,0));
+  scope.tomselect?.on('change',()=>setTimeout(sync,0));
+  form.addEventListener('input',()=>setTimeout(sync,0));
+  form.addEventListener('change',()=>setTimeout(sync,0));
+  sync();
+  [50,250,750].forEach(delay=>setTimeout(sync,delay));
+})();
+</script>
 @if($canProposeForUnit)
 <script>
 (()=>{
@@ -549,8 +859,10 @@
    const years=p=>p?.enlistment_date?Math.max(0,new Date().getFullYear()-new Date(p.enlistment_date+'T00:00:00').getFullYear()):0;
   const matches=(r,p,y)=>r.type==='ANNUAL'&&(!r.object_type||r.object_type===p?.object_type)&&(r.min===null||r.min===undefined||r.min===''||r.min<=y)&&(r.max===null||r.max===undefined||r.max===''||r.max>=y);
    const baseDays=(p)=>{const y=years(p),matched=regulations.filter(r=>matches(r,p,y)),exact=matched.filter(r=>r.object_type===p?.object_type),rules=exact.length?exact:matched;return Number(rules.sort((a,b)=>Number(b.min||0)-Number(a.min||0))[0]?.days||0);};
-  const panel=document.createElement('div');panel.id='personal-leave-summary';panel.className='hidden md:col-span-3 rounded-2xl border border-blue-100 bg-blue-50/40 p-4';
-   panel.innerHTML='<div class="mb-3 flex items-center justify-between"><h3 class="font-extrabold text-slate-900">Thông tin phép cá nhân</h3><span id="personal-service-years" class="rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-700"></span></div><div id="personal-info-fields" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"></div><div id="personal-extra-box" class="mt-4 hidden overflow-x-auto rounded-xl border border-slate-200 bg-white"></div><div class="mt-4 grid gap-3 md:grid-cols-2"><label class="block text-sm font-bold text-slate-700">Nơi nghỉ<select id="personal-locality" name="locality_id" class="mt-1 w-full rounded-xl border-slate-200 px-3 py-2.5"><option value="">Chọn phường / xã</option>@foreach($localities->whereNotNull('parent_id') as $locality)<option value="{{ $locality->id }}">{{ $locality->parent?->name }} — {{ $locality->name }}</option>@endforeach</select></label><div><div class="text-sm font-bold text-slate-700">Tổng ngày phép</div><div id="personal-total-days" class="mt-1 rounded-xl border border-blue-200 bg-white px-3 py-2.5 text-lg font-extrabold text-blue-700">—</div></div></div>';
+   const panel=document.createElement('div');panel.id='personal-leave-summary';panel.className='hidden md:col-span-3 rounded-2xl border border-blue-100 bg-blue-50/40 p-4';
+   const localityOptions=@json($localityData);
+   const serviceYears=0, annualDays=0, localities=localityOptions, defaultLocality=null;
+   panel.innerHTML='<div class="mb-3 flex items-center justify-between"><h3 class="font-extrabold text-slate-900">Thông tin phép cá nhân</h3><span id="personal-service-years" class="rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-700"></span></div><div id="personal-info-fields" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"></div><div id="personal-extra-box" class="mt-4 hidden overflow-x-auto rounded-xl border border-slate-200 bg-white"></div><div class="mt-4 grid gap-3 md:grid-cols-2"><label class="block text-sm font-bold text-slate-700">Nơi nghỉ<select id="personal-locality" name="locality_id" class="mt-1 w-full rounded-xl border-slate-200 px-3 py-2.5"><option value="">Chọn phường / xã</option>'+localityOptions.filter(item=>item.parent_id).map(item=>'<option value="'+item.id+'">'+item.label+'</option>').join('')+'</select></label><div><div class="text-sm font-bold text-slate-700">Tổng ngày phép</div><div id="personal-total-days" class="mt-1 rounded-xl border border-blue-200 bg-white px-3 py-2.5 text-lg font-extrabold text-blue-700">—</div></div></div>';
    panel.className='md:col-span-2 rounded-xl border border-slate-200 bg-white p-4';
    panel.innerHTML=`<div class="mb-3 flex items-center justify-between"><div><h3 class="font-extrabold text-slate-900">Thông tin phép cá nhân</h3><p class="text-xs text-slate-500">Đơn phép này dành cho quân nhân đang đăng nhập.</p></div><span id="military-service-years" class="rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-700">${serviceYears} năm thâm niên</span></div><div id="personal-info-fields" class="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"></div><div id="personal-extra-box" class="mt-4 hidden overflow-x-auto rounded-xl border border-slate-200 bg-white"></div><div class="mt-4 grid gap-3 md:grid-cols-2"><label class="block"><span class="mb-1 block text-sm font-bold text-slate-700">Địa chỉ nghỉ phép</span><select id="military-locality" name="locality_id" class="w-full rounded-lg border-slate-200 px-3 py-2.5"><option value="">Chọn địa chỉ nghỉ phép</option>${localities.map(x=>`<option value="${x.id}" ${defaultLocality&&String(defaultLocality.id)===String(x.id)?'selected':''}>${x.name}</option>`).join('')}</select></label><div><span class="mb-1 block text-sm font-bold text-slate-700">Tổng ngày phép</span><div id="military-total-days" class="rounded-lg border border-blue-200 bg-white px-3 py-2.5 text-lg font-extrabold text-blue-700">${annualDays} ngày</div></div></div>`;
    panel.className='md:col-span-2 p-0';
@@ -577,7 +889,7 @@
     from?.closest('label')?.before(panel);
    panel.dataset.baseDays=String(annualDays);
    panel.dataset.serviceYears=String(serviceYears);
-  const render=()=>{const p=findPerson(),s=scope.tomselect?scope.tomselect.getValue():scope.value,annual=s==='ADMIN_ANNUAL'||(s==='PERSONAL'&&type?.value==='ANNUAL'),show=s==='PERSONAL'||s==='ADMIN_ANNUAL'||s==='ADMIN_EXTRA';panel.classList.toggle('hidden',!show);if(!p||!show)return;const y=years(p);document.getElementById('personal-service-years').textContent=`${y} năm thâm niên`;document.getElementById('personal-info-fields').innerHTML=`<label class="block text-xs font-bold text-slate-600">Họ tên<input readonly value="${p.name||''}" class="mt-1 w-full rounded-xl border-slate-200 bg-slate-100 px-3 py-2.5"></label><label class="block text-xs font-bold text-slate-600">Cấp bậc<input readonly value="${p.rank||''}" class="mt-1 w-full rounded-xl border-slate-200 bg-slate-100 px-3 py-2.5"></label><label class="block text-xs font-bold text-slate-600">Chức vụ<input readonly value="${p.position||''}" class="mt-1 w-full rounded-xl border-slate-200 bg-slate-100 px-3 py-2.5"></label><label class="block text-xs font-bold text-slate-600">Cơ quan quản lý<input readonly value="${p.unit||''}" class="mt-1 w-full rounded-xl border-slate-200 bg-slate-100 px-3 py-2.5"></label><label class="block text-xs font-bold text-slate-600">Cơ quan chỉ huy<input readonly value="${p.commander||''}" class="mt-1 w-full rounded-xl border-slate-200 bg-slate-100 px-3 py-2.5"></label>`;const box=document.getElementById('personal-extra-box');box.classList.toggle('hidden',!annual);if(annual)box.innerHTML=`<table class="w-full text-left text-sm"><thead class="bg-slate-100"><tr><th class="p-3">Chọn</th><th class="p-3">Phép thêm theo quy định</th><th class="p-3">Số ngày</th></tr></thead><tbody>${extras.map(x=>`<tr class="border-t"><td class="p-3"><input type="checkbox" name="extra_standard_ids[]" value="${x.id}" data-days="${x.days}" class="generic-extra h-4 w-4 accent-blue-600"></td><td class="p-3">${x.label||'Phép thêm'}</td><td class="p-3">${x.days} ngày</td></tr>`).join('')}</tbody></table>`;const total=annual?baseDays(p)+Number(travel?.value||0)+Array.from(form.querySelectorAll('.generic-extra:checked')).reduce((a,x)=>a+Number(x.dataset.days||0),0):null;document.getElementById('personal-total-days').textContent=total===null?'Theo thời gian đã chọn':`${total} ngày`;if(to){to.readOnly=annual;to.classList.toggle('bg-slate-100',annual);if(annual&&from?.value){const d=new Date(from.value+'T00:00:00');d.setDate(d.getDate()+Math.max(0,total-1));to.value=d.toISOString().slice(0,10);}}if(window.initTomSelects)window.initTomSelects(panel);};
+  const render=()=>{const p=findPerson(),s=scope.tomselect?scope.tomselect.getValue():scope.value,annual=s==='PERSONAL'&&type?.value==='ANNUAL',show=s==='PERSONAL'||s==='ADMIN_EXTRA';panel.classList.toggle('hidden',!show);if(!p||!show)return;const y=years(p);document.getElementById('personal-service-years').textContent=`${y} năm thâm niên`;document.getElementById('personal-info-fields').innerHTML=`<label class="block text-xs font-bold text-slate-600">Họ tên<input readonly value="${p.name||''}" class="mt-1 w-full rounded-xl border-slate-200 bg-slate-100 px-3 py-2.5"></label><label class="block text-xs font-bold text-slate-600">Cấp bậc<input readonly value="${p.rank||''}" class="mt-1 w-full rounded-xl border-slate-200 bg-slate-100 px-3 py-2.5"></label><label class="block text-xs font-bold text-slate-600">Chức vụ<input readonly value="${p.position||''}" class="mt-1 w-full rounded-xl border-slate-200 bg-slate-100 px-3 py-2.5"></label><label class="block text-xs font-bold text-slate-600">Cơ quan quản lý<input readonly value="${p.unit||''}" class="mt-1 w-full rounded-xl border-slate-200 bg-slate-100 px-3 py-2.5"></label><label class="block text-xs font-bold text-slate-600">Cơ quan chỉ huy<input readonly value="${p.commander||''}" class="mt-1 w-full rounded-xl border-slate-200 bg-slate-100 px-3 py-2.5"></label>`;const box=document.getElementById('personal-extra-box');box.classList.toggle('hidden',!annual);if(annual)box.innerHTML=`<table class="w-full text-left text-sm"><thead class="bg-slate-100"><tr><th class="p-3">Chọn</th><th class="p-3">Phép thêm theo quy định</th><th class="p-3">Số ngày</th></tr></thead><tbody>${extras.map(x=>`<tr class="border-t"><td class="p-3"><input type="checkbox" name="extra_standard_ids[]" value="${x.id}" data-days="${x.days}" class="generic-extra h-4 w-4 accent-blue-600"></td><td class="p-3">${x.label||'Phép thêm'}</td><td class="p-3">${x.days} ngày</td></tr>`).join('')}</tbody></table>`;const total=annual?baseDays(p)+Number(travel?.value||0)+Array.from(form.querySelectorAll('.generic-extra:checked')).reduce((a,x)=>a+Number(x.dataset.days||0),0):null;document.getElementById('personal-total-days').textContent=total===null?'Theo thời gian đã chọn':`${total} ngày`;if(to){to.readOnly=false;to.classList.remove('bg-slate-100');if(annual&&from?.value&&to.dataset.manualEdited!=='1'){const d=new Date(from.value+'T00:00:00');d.setDate(d.getDate()+Math.max(0,total-1));const iso=d.toISOString().slice(0,10);window.setDateInputValue?window.setDateInputValue(to,iso,false):to.value=iso;}}if(window.initTomSelects)window.initTomSelects(panel);};
   if(scope.tomselect)scope.tomselect.on('change',render);scope.addEventListener('change',render);personnel.addEventListener('change',render);type?.addEventListener('change',render);from?.addEventListener('change',render);travel?.addEventListener('input',render);form.addEventListener('change',e=>{if(e.target.matches('.generic-extra'))render();});render();
 })();
 </script>
@@ -626,7 +938,7 @@
   const panel=document.createElement('div');panel.id='military-leave-summary';panel.className='md:col-span-3 rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50 to-white p-4';
   panel.innerHTML=`<div class="mb-3 flex items-center justify-between"><div><h3 class="font-extrabold text-slate-900">ThÃ´ng tin phÃ©p nÄƒm cÃ¡ nhÃ¢n</h3><p class="text-xs text-slate-500">ÄÆ¡n phÃ©p nÃ y ch%E1%BB%89 dÃ nh cho quÃ¢n nhÃ¢n Ä‘ang Ä‘Äƒng nh%E1%BA%ADp.</p></div><span class="rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-700">${serviceYears} nÄƒm thÃ¢m niÃªn</span></div><div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><div><div class="text-xs text-slate-500">QuÃ¢n nhÃ¢n</div><div class="font-bold text-slate-800">${person.name||''}</div></div><div><div class="text-xs text-slate-500">MÃ£ quÃ¢n nhÃ¢n</div><div class="font-semibold text-slate-700">${person.staff_code||'â€”'}</div></div><div><div class="text-xs text-slate-500">Cáº¥p báº­c / chá»©c vá»¥</div><div class="font-semibold text-slate-700">${person.rank||'â€”'} / ${person.position||'â€”'}</div></div><div><div class="text-xs text-slate-500">PhÃ©p theo thÃ¢m niÃªn</div><div class="font-bold text-blue-700">${annualDays} ngÃ y</div></div></div><div class="mt-4 grid gap-3 md:grid-cols-2"><label class="block"><span class="mb-1 block text-sm font-bold text-slate-700">Äá»‹a chá»‰ nghá»‰ phÃ©p</span><select id="military-locality" name="locality_id" class="w-full rounded-xl border-slate-200 px-3 py-2.5"><option value="">Chá»n Ä‘á»‹a chá»‰</option>${localities.map(x=>`<option value="${x.id}" ${defaultLocality&&String(defaultLocality.id)===String(x.id)?'selected':''}>${x.name}</option>`).join('')}</select><span class="mt-1 block text-xs text-slate-500">Máº·c Ä‘á»‹nh theo thÆ°á»ng trÃº: ${person.permanent_residence||'chÆ°a cÃ³'}; cÃ³ thá»ƒ sá»­a.</span></label><div><span class="mb-1 block text-sm font-bold text-slate-700">Tá»•ng ngÃ y phÃ©p</span><div id="military-total-days" class="rounded-xl border border-blue-200 bg-white px-3 py-2.5 text-lg font-extrabold text-blue-700">${annualDays} ngÃ y</div><p class="mt-1 text-xs text-slate-500">PhÃ©p thÃ¢m niÃªn + Ä‘i Ä‘Æ°á»ng + phÃ©p thÃªm</p></div></div><div class="mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-white"><table class="w-full text-left text-sm"><thead class="bg-slate-100"><tr><th class="p-3">Chá»n</th><th class="p-3">PhÃ©p thÃªm theo quy Ä‘á»‹nh</th><th class="p-3">Sá»‘ ngÃ y</th></tr></thead><tbody>${extras.length?extras.map(x=>`<tr class="border-t"><td class="p-3"><input type="checkbox" name="extra_standard_ids[]" value="${x.id}" data-days="${x.days}" class="military-extra h-4 w-4 accent-blue-600"></td><td class="p-3 font-semibold text-slate-700">${x.label||'PhÃ©p thÃªm'}</td><td class="p-3">${x.days} ngÃ y</td></tr>`).join(''):'<tr><td colspan="3" class="p-3 text-slate-500">ChÆ°a cÃ³ quy Ä‘á»‹nh phÃ©p thÃªm phÃ¹ há»£p.</td></tr>'}</tbody></table></div>`;
    from?.closest('label')?.before(panel);
-   panel.innerHTML=`<div class="mb-4 flex items-center justify-between gap-3"><div><h3 class="text-lg font-extrabold text-slate-900">Thông tin phép năm cá nhân</h3><p class="mt-1 text-sm text-slate-600">Đơn phép này dành cho quân nhân đang đăng nhập.</p></div><span class="rounded-full bg-blue-100 px-4 py-2 text-sm font-extrabold text-blue-700">${serviceYears} năm thâm niên</span></div><div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><div><div class="text-xs font-semibold text-slate-500">Quân nhân</div><div class="font-bold text-slate-800">${person.name||''}</div></div><div><div class="text-xs font-semibold text-slate-500">Mã quân nhân</div><div class="font-semibold text-slate-700">${person.staff_code||'—'}</div></div><div><div class="text-xs font-semibold text-slate-500">Cấp bậc / chức vụ</div><div class="font-semibold text-slate-700">${person.rank||'—'} / ${person.position||'—'}</div></div><div><div class="text-xs font-semibold text-slate-500">Phép theo thâm niên</div><div class="font-extrabold text-blue-700">${annualDays} ngày</div></div></div><div class="mt-5 grid gap-4 md:grid-cols-2"><label class="block"><span class="mb-1.5 block text-sm font-bold text-slate-700">Địa chỉ nghỉ phép</span><select id="military-locality" name="locality_id" class="w-full rounded-xl border-slate-200 px-3 py-2.5"><option value="">Chọn địa chỉ nghỉ phép</option>${localities.map(x=>`<option value="${x.id}" ${defaultLocality&&String(defaultLocality.id)===String(x.id)?'selected':''}>${x.name}</option>`).join('')}</select></label><div><span class="mb-1.5 block text-sm font-bold text-slate-700">Tổng ngày phép</span><div id="military-total-days" class="rounded-xl border border-blue-200 bg-white px-4 py-3 text-xl font-extrabold text-blue-700">${annualDays} ngày</div></div></div><div id="personal-extra-box" class="mt-5 overflow-hidden rounded-xl border border-slate-200 bg-white"></div>`;
+   panel.innerHTML=`<div class="mb-4 flex items-center justify-between gap-3"><div><h3 class="text-lg font-extrabold text-slate-900">Thông tin phép của quân nhân</h3><p class="mt-1 text-sm text-slate-600">Đơn phép này dành cho quân nhân đang đăng nhập.</p></div><span class="rounded-full bg-blue-100 px-4 py-2 text-sm font-extrabold text-blue-700">${serviceYears} năm thâm niên</span></div><div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><div><div class="text-xs font-semibold text-slate-500">Quân nhân</div><div class="font-bold text-slate-800">${person.name||''}</div></div><div><div class="text-xs font-semibold text-slate-500">Mã quân nhân</div><div class="font-semibold text-slate-700">${person.staff_code||'—'}</div></div><div><div class="text-xs font-semibold text-slate-500">Cấp bậc / chức vụ</div><div class="font-semibold text-slate-700">${person.rank||'—'} / ${person.position||'—'}</div></div><div><div class="text-xs font-semibold text-slate-500">Phép theo thâm niên</div><div class="font-extrabold text-blue-700">${annualDays} ngày</div></div></div><div class="mt-5 grid gap-4 md:grid-cols-2"><label class="block"><span class="mb-1.5 block text-sm font-bold text-slate-700">Địa chỉ nghỉ phép</span><select id="military-locality" name="locality_id" class="w-full rounded-xl border-slate-200 px-3 py-2.5"><option value="">Chọn địa chỉ nghỉ phép</option>${localities.map(x=>`<option value="${x.id}" ${defaultLocality&&String(defaultLocality.id)===String(x.id)?'selected':''}>${x.name}</option>`).join('')}</select></label><div><span class="mb-1.5 block text-sm font-bold text-slate-700">Tổng ngày phép</span><div id="military-total-days" class="rounded-xl border border-blue-200 bg-white px-4 py-3 text-xl font-extrabold text-blue-700">${annualDays} ngày</div></div></div><div id="personal-extra-box" class="mt-5 overflow-hidden rounded-xl border border-slate-200 bg-white"></div>`;
     const militaryExtraBox=panel.querySelector('#personal-extra-box');
    if(militaryExtraBox){
      const tabGroups=[5,10].map(days=>({days,items:extras.filter(x=>Number(x.days)===days)})).filter(group=>group.items.length);
@@ -665,12 +977,12 @@
    if(toField){const endRow=document.createElement('div');endRow.className='mt-3 md:w-1/2';endRow.appendChild(toField);dateRow.after(endRow);}
    if(reasonField){reasonField.classList.add('mt-3');panel.appendChild(reasonField);}
   if(window.initTomSelects) window.initTomSelects(panel);
-  if(to){to.readOnly=true;to.classList.add('bg-slate-100','cursor-not-allowed');to.title='NgÃ y káº¿t thÃºc Ä‘Æ°á»£c tá»± Ä‘á»™ng tÃ­nh';}
-  const update=()=>{const days=Number(annualDays)+Number(travel?.value||0)+Array.from(form.querySelectorAll('.military-extra:checked')).reduce((s,x)=>s+Number(x.dataset.days||0),0),total=document.getElementById('military-total-days');if(total)total.textContent=`${days} ngÃ y`;if(from?.value&&to){const d=new Date(`${from.value}T00:00:00`);d.setDate(d.getDate()+Math.max(0,days-1));to.value=d.toISOString().slice(0,10);}};
+  if(to){to.readOnly=false;to.disabled=false;to.classList.remove('bg-slate-100','cursor-not-allowed');to.title='Có thể sửa ngày kết thúc nếu cần';}
+  const update=()=>{const days=Number(annualDays)+Number(travel?.value||0)+Array.from(form.querySelectorAll('.military-extra:checked')).reduce((s,x)=>s+Number(x.dataset.days||0),0),total=document.getElementById('military-total-days');if(total)total.textContent=`${days} ngÃ y`;if(from?.value&&to&&to.dataset.manualEdited!=='1'){const d=new Date(`${from.value}T00:00:00`);d.setDate(d.getDate()+Math.max(0,days-1));const iso=d.toISOString().slice(0,10);window.setDateInputValue?window.setDateInputValue(to,iso,false):to.value=iso;}};
    from?.addEventListener('change',update);travel?.addEventListener('input',update);form.addEventListener('change',e=>{if(e.target.matches('.military-extra'))update();});
    const syncStats=()=>{const extraDays=Array.from(form.querySelectorAll('.military-extra:checked')).reduce((s,x)=>s+Number(x.dataset.days||0),0),travelDays=Number(travel?.value||0);panel.dataset.extraDays=String(extraDays);panel.dataset.travelDays=String(travelDays);panel.dataset.totalDays=String(Number(annualDays)+travelDays+extraDays);};
     form.addEventListener('change',syncStats);travel?.addEventListener('input',syncStats);
-    const syncEndDate=()=>{const days=Number(annualDays)+Number(travel?.value||0)+Array.from(form.querySelectorAll('.military-extra:checked')).reduce((sum,item)=>sum+Number(item.dataset.days||0),0);if(from?.value&&to){const date=new Date(`${from.value}T00:00:00`);date.setDate(date.getDate()+days);to.value=date.toISOString().slice(0,10);}};
+    const syncEndDate=()=>{const days=Number(annualDays)+Number(travel?.value||0)+Array.from(form.querySelectorAll('.military-extra:checked')).reduce((sum,item)=>sum+Number(item.dataset.days||0),0);if(from?.value&&to&&to.dataset.manualEdited!=='1'){const date=new Date(`${from.value}T00:00:00`);date.setDate(date.getDate()+Math.max(0,days-1));const iso=date.toISOString().slice(0,10);window.setDateInputValue?window.setDateInputValue(to,iso,false):to.value=iso;}};
     from?.addEventListener('change',syncEndDate);travel?.addEventListener('input',syncEndDate);form.addEventListener('change',event=>{if(event.target.matches('.military-extra'))syncEndDate();});
     document.getElementById('military-profile-fields')?.classList.add('hidden');
     const finalExtraBox=panel.querySelector('#personal-extra-box'),finalTravel=travel,finalFrom=from,finalTo=to,finalLocality=panel.querySelector('#military-locality'),finalWard=panel.querySelector('#military-ward');
@@ -693,7 +1005,7 @@
   const note = Array.from(form.querySelectorAll(':scope > div')).find(el => el.textContent.includes('Phép lớp tạo'));
   if (!note) return;
   const syncNote = (value) => {
-    const personal = value === 'PERSONAL' || value === 'ADMIN_ANNUAL' || value === 'ADMIN_EXTRA';
+    const personal = value === 'PERSONAL' || value === 'ADMIN_EXTRA';
     note.classList.toggle('hidden', personal);
   };
   if (scope.tomselect) scope.tomselect.on('change', syncNote);
@@ -736,6 +1048,124 @@
   if(dynamicBox&&dynamicBox!==serverBox)dynamicBox.remove();
   serverBox?.querySelectorAll('[data-tab-days]').forEach(tab=>tab.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();serverBox.querySelectorAll('[data-tab-days]').forEach(item=>{item.classList.remove('bg-white','text-blue-700');item.classList.add('text-slate-500');});tab.classList.add('bg-white','text-blue-700');tab.classList.remove('text-slate-500');serverBox.querySelectorAll('[data-panel-days]').forEach(panel=>panel.classList.toggle('hidden',panel.dataset.panelDays!==tab.dataset.tabDays));}));
   serverBox?.querySelectorAll('.server-extra-check').forEach(check=>check.addEventListener('change',()=>{if(check.checked)serverBox.querySelectorAll('.server-extra-check').forEach(other=>{if(other!==check)other.checked=false;});render();}));
-  const render=()=>{const travel=Number(document.getElementById('proposal-travel')?.value||0),extra=Array.from(form.querySelectorAll('.server-extra-check:checked')).reduce((sum,item)=>sum+Number(item.dataset.days||0),0),total=base+travel+extra;summary.innerHTML='<div class="flex min-w-max items-center gap-8 text-sm font-bold text-slate-900"><div class="whitespace-nowrap"><span class="mr-2 text-xs font-semibold text-slate-500">Th&acirc;m ni&ecirc;n</span><span>'+service+' n&#x103;m</span></div><div class="whitespace-nowrap"><span class="mr-2 text-xs font-semibold text-slate-500">Ph&eacute;p c&#x1a1; b&#x1ea3;n</span><span>'+base+' ng&agrave;y</span></div><div class="whitespace-nowrap"><span class="mr-2 text-xs font-semibold text-slate-500">&#x110;i &#x111;&#x1b0;&#x7901;ng</span><span>'+travel+' ng&agrave;y</span></div><div class="whitespace-nowrap"><span class="mr-2 text-xs font-semibold text-slate-500">Ngh&#x1ec9; th&ecirc;m</span><span>'+extra+' ng&agrave;y</span></div><div class="whitespace-nowrap rounded-lg bg-blue-50 px-3 py-2 text-slate-900"><span class="mr-2 text-xs font-semibold text-slate-500">T&#x1ed5;ng</span><span>'+total+' ng&agrave;y</span></div></div>';const from=document.getElementById('proposal-from'),to=document.getElementById('proposal-to');if(to){to.readOnly=true;to.classList.add('bg-slate-100');if(from?.value){const date=new Date(from.value+'T00:00:00');date.setDate(date.getDate()+total);to.value=date.toISOString().slice(0,10);}}};form.addEventListener('input',render);form.addEventListener('change',render);render();})();
+  const render=()=>{const travel=Number(document.getElementById('proposal-travel')?.value||0),extra=Array.from(form.querySelectorAll('.server-extra-check:checked')).reduce((sum,item)=>sum+Number(item.dataset.days||0),0),total=base+travel+extra;summary.innerHTML='<div class="flex min-w-max items-center gap-8 text-sm font-bold text-slate-900"><div class="whitespace-nowrap"><span class="mr-2 text-xs font-semibold text-slate-500">Th&acirc;m ni&ecirc;n</span><span>'+service+' n&#x103;m</span></div><div class="whitespace-nowrap"><span class="mr-2 text-xs font-semibold text-slate-500">Ph&eacute;p c&#x1a1; b&#x1ea3;n</span><span>'+base+' ng&agrave;y</span></div><div class="whitespace-nowrap"><span class="mr-2 text-xs font-semibold text-slate-500">&#x110;i &#x111;&#x1b0;&#x7901;ng</span><span>'+travel+' ng&agrave;y</span></div><div class="whitespace-nowrap"><span class="mr-2 text-xs font-semibold text-slate-500">Ngh&#x1ec9; th&ecirc;m</span><span>'+extra+' ng&agrave;y</span></div><div class="whitespace-nowrap rounded-lg bg-blue-50 px-3 py-2 text-slate-900"><span class="mr-2 text-xs font-semibold text-slate-500">T&#x1ed5;ng</span><span>'+total+' ng&agrave;y</span></div></div>';const from=document.getElementById('proposal-from'),to=document.getElementById('proposal-to');if(to){to.readOnly=false;to.disabled=false;to.classList.remove('bg-slate-100','cursor-not-allowed');if(from?.value&&to.dataset.manualEdited!=='1'){const date=new Date(from.value+'T00:00:00');date.setDate(date.getDate()+Math.max(0,total-1));const iso=date.toISOString().slice(0,10);window.setDateInputValue?window.setDateInputValue(to,iso,false):to.value=iso;}}};form.addEventListener('input',render);form.addEventListener('change',render);render();})();
+</script>
+<script>
+(()=>{
+  const form=document.getElementById('leave-proposal-form');
+  const to=document.getElementById('proposal-to');
+  if(!form||!to)return;
+  let manualValue='';
+  let manualEdited=false;
+  const hidden=document.getElementById('proposal-to-hidden');
+  const syncEditableDatePicker=()=>{
+    window.initDateInputs?.(form);
+    form.querySelectorAll('input[type="date"],#proposal-from,#proposal-to,#class-from,#class-to').forEach(input=>{
+      if(input.closest('#class-students'))return;
+      input.disabled=false;
+      input.readOnly=false;
+      input.removeAttribute('disabled');
+      input.removeAttribute('readonly');
+      if(input._flatpickr?.altInput){
+        input._flatpickr.altInput.disabled=false;
+        input._flatpickr.altInput.readOnly=false;
+        input._flatpickr.altInput.removeAttribute('disabled');
+        input._flatpickr.altInput.removeAttribute('readonly');
+      }
+    });
+  };
+  const unlock=()=>{
+    syncEditableDatePicker();
+    to.name='to_date';
+    to.disabled=false;
+    to.readOnly=false;
+    to.removeAttribute('disabled');
+    to.removeAttribute('readonly');
+    to.removeAttribute('aria-readonly');
+    to.style.pointerEvents='';
+    to.style.userSelect='';
+    to.tabIndex=0;
+    to.classList.remove('bg-slate-100','cursor-not-allowed');
+    to.title='Có thể sửa ngày kết thúc nếu cần';
+    if(hidden){hidden.name='';hidden.disabled=true;hidden.value=to.value||'';}
+    if(manualEdited&&manualValue)(window.setDateInputValue?window.setDateInputValue(to,manualValue,false):to.value=manualValue);
+  };
+  to.addEventListener('input',()=>{manualEdited=true;manualValue=to.value;to.dataset.manualEdited='1';unlock();});
+  to.addEventListener('change',()=>{manualEdited=true;manualValue=to.value;to.dataset.manualEdited='1';unlock();});
+  form.addEventListener('input',event=>{if(event.target!==to)setTimeout(unlock,0);});
+  form.addEventListener('change',event=>{if(event.target!==to)setTimeout(unlock,0);});
+  form.addEventListener('submit',unlock);
+  unlock();
+  [50,250,750].forEach(delay=>setTimeout(unlock,delay));
+  form.addEventListener('change',event=>{if(event.target.matches('input[type="date"], .flatpickr-input,#proposal-from,#proposal-to,#class-from,#class-to'))setTimeout(syncEditableDatePicker,0);});
+})();
+</script>
+<script>
+(()=>{
+  const form=document.getElementById('leave-proposal-form');
+  const scope=document.getElementById('proposal-scope');
+  if(!form||!scope)return;
+  const currentScope=()=>{
+    const classScope=document.getElementById('class-scope-select');
+    const classPanel=document.getElementById('class-scope-panel');
+    if(classScope&&classPanel&&!classPanel.classList.contains('hidden'))return classScope.value;
+    return scope.tomselect?scope.tomselect.getValue():scope.value;
+  };
+  const setHidden=(el,hidden)=>{
+    if(!el)return;
+    el.classList.toggle('hidden',hidden);
+    el.style.display=hidden?'none':'';
+  };
+  const syncHsqbsDateFields=()=>{
+    const scopeValue=currentScope();
+    const tableScope=['CLASS','SHORT_LEAVE','HSQBS_ANNUAL','HSQBS_SPECIAL'].includes(scopeValue);
+    const hsqbs=['HSQBS_ANNUAL','HSQBS_SPECIAL'].includes(scopeValue);
+    const proposalTo=document.getElementById('proposal-to');
+    const proposalFrom=document.getElementById('proposal-from');
+    const proposalTravel=document.getElementById('proposal-travel');
+    const proposalLocality=document.getElementById('proposal-locality');
+    [
+      document.getElementById('class-travel-field'),
+      document.getElementById('class-from-field'),
+      document.getElementById('class-to-field'),
+      document.getElementById('proposal-locality-field'),
+      document.getElementById('final-travel'),
+      document.getElementById('final-from'),
+      document.getElementById('final-to'),
+      proposalFrom?.closest('label'),
+      proposalTo?.closest('label'),
+      proposalTravel?.closest('label'),
+      proposalLocality?.closest('label')
+    ].forEach(el=>setHidden(el,tableScope));
+    Array.from(form.querySelectorAll('label[data-hidden-by-hsqbs="1"]')).forEach(label=>{
+      if(!tableScope){setHidden(label,false);label.removeAttribute('data-hidden-by-hsqbs');}
+    });
+    if(tableScope){
+      Array.from(form.querySelectorAll('label')).forEach(label=>{
+        if(label.closest('#class-students'))return;
+        const text=label.textContent.replace(/\s+/g,' ').trim();
+        if(text.includes('Ngày kết thúc')||text.includes('Ngày bắt đầu')||text.includes('Ngày đi đường')||text.includes('Nơi nghỉ')){
+          label.setAttribute('data-hidden-by-hsqbs','1');
+          setHidden(label,true);
+        }
+      });
+    }
+    if(hsqbs){
+      if(proposalTravel)proposalTravel.value=0;
+    }
+    if(proposalFrom)proposalFrom.required=!tableScope;
+    if(proposalTo)proposalTo.required=!tableScope;
+    document.querySelectorAll('#class-students tr').forEach(row=>{
+      const checked=tableScope&&!!row.querySelector('.selected-person')?.checked;
+      row.querySelectorAll('.row-from,.flatpickr-input').forEach(input=>input.removeAttribute('required'));
+      row.querySelectorAll('.row-from,.row-to,select[name^="class_leave_locations"]').forEach(input=>input.disabled=!checked);
+    });
+  };
+  scope.addEventListener('change',()=>[0,50,250,750].forEach(delay=>setTimeout(syncHsqbsDateFields,delay)));
+  scope.tomselect?.on('change',()=>[0,50,250,750].forEach(delay=>setTimeout(syncHsqbsDateFields,delay)));
+  form.addEventListener('input',event=>{if(event.target.closest('#class-students')||event.target===scope)setTimeout(syncHsqbsDateFields,0);});
+  form.addEventListener('change',()=>setTimeout(syncHsqbsDateFields,0));
+  [0,50,250,750,1200].forEach(delay=>setTimeout(syncHsqbsDateFields,delay));
+})();
 </script>
 @endif

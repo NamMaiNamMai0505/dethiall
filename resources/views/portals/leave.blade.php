@@ -9,10 +9,11 @@
     <h1 class="mt-2 text-3xl font-extrabold">Quản lý phép</h1>
     <p class="mt-2 max-w-2xl text-blue-100">Quản lý nhân sự, đề xuất nghỉ phép, phê duyệt, hồ sơ và báo cáo trong một trang riêng.</p>
 </div>
-<div class="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
+<div class="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-4">
     <div class="rounded-xl border border-blue-100 border-l-4 border-l-blue-500 bg-white p-5 shadow-sm"><p class="text-sm text-slate-600">Quân nhân – học viên</p><p class="mt-1 text-3xl font-bold text-slate-900">{{ number_format($stats['personnel']) }}</p></div>
     <div class="rounded-xl border border-emerald-100 border-l-4 border-l-emerald-500 bg-white p-5 shadow-sm"><p class="text-sm text-slate-600">Số đơn phép đã duyệt</p><p class="mt-1 text-3xl font-bold text-slate-900">{{ number_format($stats['approved']) }}</p><p class="text-xs text-slate-500">đơn</p></div>
     <div class="rounded-xl border border-indigo-100 border-l-4 border-l-indigo-500 bg-white p-5 shadow-sm"><p class="text-sm text-slate-600">Đơn đang chờ duyệt</p><p class="mt-1 text-3xl font-bold text-slate-900">{{ number_format($stats['pending']) }}</p></div>
+    <a href="{{ route('leave-management.alerts') }}" class="rounded-xl border border-amber-100 border-l-4 border-l-amber-500 bg-white p-5 shadow-sm"><p class="text-sm text-slate-600">Thông báo chưa đọc</p><p class="mt-1 text-3xl font-bold text-amber-700">{{ number_format($stats['unread_alerts'] ?? 0) }}</p></a>
 </div>
 <h2 class="mb-4 text-xl font-extrabold text-slate-900">Menu quản lý phép</h2>
 <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
