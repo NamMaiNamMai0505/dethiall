@@ -309,7 +309,7 @@ final class ApplicationRegistry
                     self::app('leave-management.audit', 'Nhật ký xử lý phép', [
                         self::ACTION_VIEW => ['index', 'show'],
                     ]),
-                    self::app('leave-management.alerts', 'Cảnh báo phép', [
+                    self::app('leave-management.alerts', 'Thông báo phép', [
                         self::ACTION_VIEW => ['index', 'show'],
                         self::ACTION_EDIT => ['edit'],
                     ]),

@@ -56,12 +56,12 @@
                 ['label' => 'Lưu trữ & quản trị', 'items' => [
                     ['label' => 'Đợt nghỉ', 'route' => 'leave-management.batches', 'icon' => 'bi-calendar3'],
                     ['label' => 'Hồ sơ phép', 'route' => 'leave-management.records', 'icon' => 'bi-archive'],
-                    ['label' => 'Cảnh báo', 'route' => 'leave-management.alerts', 'icon' => 'bi-bell'],
                     ['label' => 'Nhật ký xử lý', 'route' => 'leave-management.audit', 'icon' => 'bi-clock-history'],
                     ['label' => 'Cấu hình email', 'route' => 'leave-management.mail', 'icon' => 'bi-envelope'],
                 ]],
                 ['label' => 'Báo cáo', 'items' => [
                     ['label' => 'Báo cáo phép', 'route' => 'leave-management.reports', 'icon' => 'bi-bar-chart-line'],
+                    ['label' => 'Mẫu báo cáo', 'route' => 'leave-management.report-templates', 'icon' => 'bi-file-earmark-word'],
                 ]],
             ],
         ],
@@ -116,6 +116,7 @@
         'leave-management.audit' => 'leave-management.audit.index',
         'leave-management.mail' => 'leave-management.mail.index',
         'leave-management.reports' => 'leave-management.reports.index',
+        'leave-management.report-templates' => 'leave-management.reports.index',
         'essay-exams.index' => 'essay-exams.index',
         'essay-exams.mine' => 'essay-exams.index',
         'essay-exams.create' => 'essay-exams.authoring.index',

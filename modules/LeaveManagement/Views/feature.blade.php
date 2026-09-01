@@ -59,7 +59,43 @@
             <script>document.querySelectorAll('select[name="hometown"],select[name="permanent_residence"]').forEach(function(select){Array.from(select.options).forEach(function(option){if(option.value && !option.textContent.includes('—'))option.remove();});});</script>
             @include('leave-management::partials.personnel-detail-list')
         @endif
-        <div class="overflow-x-auto rounded border bg-white"><table class="w-full text-left text-sm"><thead class="bg-slate-100"><tr><th class="p-3">Mã</th><th class="p-3">Họ tên</th><th class="p-3">Đơn vị</th><th class="p-3">Chức vụ / đối tượng</th><th class="p-3">{{ $section === 'directory' ? 'Ngày phép đã duyệt' : 'Email / thao tác' }}</th></tr></thead><tbody>@forelse($items as $item)<tr class="border-t"><td class="p-3">{{ $item->staff_code }}</td><td class="p-3 font-medium">{{ $item->name }}</td><td class="p-3">{{ $item->unitRelation?->name ?? $item->unit }}</td><td class="p-3">{{ $item->position }} / {{ $item->object_type }}</td><td class="p-3">@if($section === 'directory'){{ $item->approved_leave_days ?? 0 }}@else{{ $item->email }}<details><summary class="cursor-pointer text-xs text-blue-600">Sửa / xóa</summary><form method="POST" action="{{ route('leave-management.personnel.update',$item) }}" class="mt-1 flex flex-wrap gap-1">@csrf @method('PATCH')<input name="staff_code" value="{{ $item->staff_code }}" class="w-20 rounded border p-1"><input name="name" value="{{ $item->name }}" class="rounded border p-1"><input name="position" value="{{ $item->position }}" class="rounded border p-1"><input name="object_type" value="{{ $item->object_type }}" class="w-20 rounded border p-1"><button class="rounded bg-blue-600 px-2 py-1 text-xs text-white">Lưu</button></form><form method="POST" action="{{ route('leave-management.personnel.delete',$item) }}">@csrf @method('DELETE')<button class="text-xs text-red-600">Xóa</button></form></details>@endif</td></tr>@empty<tr><td colspan="5" class="p-6 text-center text-slate-500">Chưa có nhân sự quản lý phép.</td></tr>@endforelse</tbody></table></div>
+        <div class="overflow-x-auto rounded border bg-white">
+            <table class="w-full min-w-[980px] text-left text-sm">
+                <thead class="bg-slate-100">
+                    <tr>
+                        <th class="p-3">Mã</th>
+                        <th class="p-3">Họ tên</th>
+                        <th class="p-3">Cấp 2</th>
+                        <th class="p-3">Cấp 3</th>
+                        <th class="p-3">Cấp 4 / Lớp</th>
+                        <th class="p-3">Chức vụ / đối tượng</th>
+                        <th class="p-3">Ngày phép đã duyệt</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @forelse($items as $item)
+                        @php
+                            $classUnit = $item->leaveClass?->unit;
+                            $baseUnit = $item->unitRelation;
+                            $level2 = $classUnit?->parent?->name ?: $baseUnit?->parent?->name;
+                            $level3 = $classUnit?->name ?: $baseUnit?->name ?: $item->unit;
+                            $level4 = $item->leaveClass?->name ?: $item->class_name;
+                        @endphp
+                        <tr class="border-t">
+                            <td class="p-3">{{ $item->staff_code }}</td>
+                            <td class="p-3 font-medium">{{ $item->name }}</td>
+                            <td class="p-3">{{ $level2 ?: '—' }}</td>
+                            <td class="p-3">{{ $level3 ?: '—' }}</td>
+                            <td class="p-3">{{ $level4 ?: '—' }}</td>
+                            <td class="p-3">{{ $item->position }} / {{ $item->object_type }}</td>
+                            <td class="p-3">{{ $item->approved_leave_days ?? 0 }}</td>
+                        </tr>
+                    @empty
+                        <tr><td colspan="7" class="p-6 text-center text-slate-500">Chưa có nhân sự quản lý phép.</td></tr>
+                    @endforelse
+                </tbody>
+            </table>
+        </div>
     @elseif($section === 'classes')
         @php
             $units = $units->filter(fn($unit) => str_contains(mb_strtolower((string) $unit->name, 'UTF-8'), 'đại đội') && $unit->parent && str_contains(mb_strtolower((string) $unit->parent->name, 'UTF-8'), 'tiểu đoàn'))->values();
@@ -237,8 +273,10 @@
         <div class="overflow-x-auto rounded border bg-white"><table class="w-full text-left text-sm"><thead class="bg-slate-100"><tr><th class="p-3">Thời gian</th><th class="p-3">Người dùng</th><th class="p-3">Thao tác</th><th class="p-3">Đối tượng</th><th class="p-3">Chi tiết</th></tr></thead><tbody>@foreach($items as $item)<tr class="border-t"><td class="p-3">{{ $item->created_at?->format('d/m/Y H:i') }}</td><td class="p-3">{{ $item->user?->name ?? $item->user_id }}</td><td class="p-3">{{ $item->action }}</td><td class="p-3">{{ $item->entity_type }} #{{ $item->entity_id }}</td><td class="p-3">{{ json_encode($item->details,JSON_UNESCAPED_UNICODE) }}</td></tr>@endforeach</tbody></table></div>
     @elseif($section === 'mail')
         <form method="POST" action="{{ route('leave-management.mail.save') }}" class="grid gap-2 rounded border bg-white p-4 md:grid-cols-3">@csrf<input name="host" value="{{ $setting?->host }}" placeholder="SMTP host" class="rounded border p-2"><input name="port" value="{{ $setting?->port }}" type="number" placeholder="Port" class="rounded border p-2"><input name="username" value="{{ $setting?->username }}" type="email" placeholder="SMTP user" class="rounded border p-2"><input name="password" type="password" placeholder="Mật khẩu (để trống nếu giữ nguyên)" class="rounded border p-2"><input name="from_address" value="{{ $setting?->from_address }}" type="email" placeholder="Địa chỉ gửi" class="rounded border p-2"><input name="from_name" value="{{ $setting?->from_name }}" placeholder="Tên người gửi" class="rounded border p-2"><select name="encryption" class="rounded border p-2"><option value="tls">TLS</option><option value="ssl">SSL</option><option value="null">Không mã hóa</option></select><label class="flex items-center gap-2 p-2"><input name="dev_mode" type="checkbox" value="1" @checked($setting?->dev_mode)> Chế độ thử nghiệm</label><button class="rounded bg-blue-600 px-4 py-2 text-white">Lưu cấu hình email</button></form><form method="POST" action="{{ route('leave-management.mail.test') }}" class="my-4 flex gap-2 rounded border bg-white p-4">@csrf<input name="to" type="email" required placeholder="Email nhận kiểm tra" class="flex-1 rounded border p-2"><button class="rounded bg-slate-700 px-4 py-2 text-white">Gửi mail thử</button></form><div class="rounded border bg-white p-4"><h2 class="mb-2 font-semibold">Nhật ký gửi mail</h2>@forelse($logs as $log)<div class="border-b p-2">{{ $log->created_at?->format('d/m/Y H:i') }} — {{ $log->to_email }} — {{ $log->kind }} — {{ $log->ok ? 'OK' : 'Lỗi' }} @if($log->error)<span class="text-red-600">{{ $log->error }}</span>@endif</div>@empty<p>Chưa có nhật ký mail.</p>@endforelse</div>
+    @elseif($section === 'report-templates')
+        @include('leave-management::partials.report-templates', ['items' => $items])
     @elseif($section === 'reports')
-        <div class="grid gap-4 md:grid-cols-4">@foreach([['Chờ duyệt',$pending],['Đã duyệt',$approved],['Từ chối',$rejected],['Tổng ngày phép',$days]] as $stat)<div class="rounded border bg-white p-5"><div class="text-sm text-slate-500">{{ $stat[0] }}</div><div class="text-3xl font-bold">{{ $stat[1] }}</div></div>@endforeach</div><a href="{{ route('leave-management.reports.word',['year'=>$year]) }}" class="inline-block rounded bg-blue-600 px-4 py-2 text-white">Xuất báo cáo Word</a><script>document.querySelectorAll('.grid.gap-4.lg\\:grid-cols-3').forEach(function(box){box.style.display='none';});</script>@include('leave-management::partials/report-tables', ['taken' => $taken, 'notYet' => $notYet, 'comparison' => $comparison, 'registered' => $registered ?? collect(), 'year' => $year])
+        <div class="grid gap-4 md:grid-cols-4">@foreach([['Chờ duyệt',$pending],['Đã duyệt',$approved],['Từ chối',$rejected],['Tổng ngày phép',$days]] as $stat)<div class="rounded border bg-white p-5"><div class="text-sm text-slate-500">{{ $stat[0] }}</div><div class="text-3xl font-bold">{{ $stat[1] }}</div></div>@endforeach</div><a href="{{ route('leave-management.reports.word',['year'=>$year]) }}" class="inline-block rounded bg-blue-600 px-4 py-2 text-white">Xuất báo cáo Word</a><script>document.querySelectorAll('.grid.gap-4.lg\\:grid-cols-3').forEach(function(box){box.style.display='none';});</script>@include('leave-management::partials/report-tables', ['taken' => $taken, 'notYet' => $notYet, 'comparison' => $comparison, 'registered' => $registered ?? collect(), 'year' => $year, 'reportTemplates' => $reportTemplates ?? collect(), 'leaveNotifications' => $leaveNotifications ?? collect()])
     @endif
 </div>
 @endsection
