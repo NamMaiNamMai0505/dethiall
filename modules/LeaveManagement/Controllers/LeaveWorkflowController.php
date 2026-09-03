@@ -488,6 +488,15 @@ PS1);
     private function buildPermitPdfFromTemplate(LeaveReportTemplate $template,LeaveRequest $leaveRequest,?string $printLocalityPath,?string $printUnitPath):string{
         $docx=$this->buildPermitDocxFromTemplate($template,$leaveRequest,$printLocalityPath,$printUnitPath);
         $pdf=storage_path('app/giay-nghi-phep-'.$leaveRequest->id.'-'.now()->format('YmdHis').'.pdf');
+        try{
+            $converter=app(\Modules\ExportTemplates\Contracts\DocumentConverterInterface::class);
+            $converted=$converter->convert($docx,'pdf',$pdf);
+            @unlink($docx);
+            abort_unless(is_file($converted),500,'Không tạo được file PDF từ mẫu Word.');
+            return $converted;
+        }catch(\Throwable $e){
+            \Log::warning('Leave permit LibreOffice PDF conversion failed, falling back to Word COM',['error'=>$e->getMessage(),'docx'=>$docx,'pdf'=>$pdf]);
+        }
         if(class_exists(\COM::class)){
             $word=null;
             $doc=null;

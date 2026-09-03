@@ -77,6 +77,7 @@ class LibreOfficeDocumentConverter implements DocumentConverterInterface
                 '--headless', '--nologo', '--nodefault', '--nofirststartwizard',
                 '--convert-to', 'pdf', '--outdir', $outputDirectory, $sourcePath,
             ]);
+            $process->setWorkingDirectory(sys_get_temp_dir());
             $process->setTimeout((float) config('export_templates.converter.timeout', 120));
             $process->run();
 
