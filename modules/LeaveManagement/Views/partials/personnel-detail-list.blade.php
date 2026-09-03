@@ -56,14 +56,38 @@
     </div>
     @php
         $personnelObjectGroups = $items->groupBy(fn ($person) => trim((string) ($person->object_type ?: '__EMPTY__')));
+        $objectCatalog = ($objects ?? collect())->values();
+        $orderedObjectTabs = collect();
+        foreach ($objectCatalog as $object) {
+            $objectCode = trim((string) $object->code);
+            if ($objectCode !== '' && $personnelObjectGroups->has($objectCode)) {
+                $orderedObjectTabs->push([
+                    'code' => $objectCode,
+                    'label' => $object->name,
+                    'people' => $personnelObjectGroups->get($objectCode),
+                ]);
+            }
+        }
+        foreach ($personnelObjectGroups->sortKeys() as $objectCode => $objectPeople) {
+            if ($objectCode === '__EMPTY__' || $objectCatalog->contains('code', $objectCode)) continue;
+            $orderedObjectTabs->push([
+                'code' => $objectCode,
+                'label' => $objectCode,
+                'people' => $objectPeople,
+            ]);
+        }
+        if ($personnelObjectGroups->has('__EMPTY__')) {
+            $orderedObjectTabs->push([
+                'code' => '__EMPTY__',
+                'label' => 'Chưa phân loại',
+                'people' => $personnelObjectGroups->get('__EMPTY__'),
+            ]);
+        }
     @endphp
     <div class="mb-4 flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-white p-2" role="tablist" aria-label="Lọc quân nhân theo đối tượng">
         <button type="button" class="personnel-object-tab rounded-lg bg-blue-700 px-4 py-2 text-sm font-bold text-white" data-object-tab="__ALL__">Tất cả ({{ $items->count() }})</button>
-        @foreach($personnelObjectGroups->sortKeys() as $objectCode => $objectPeople)
-            @php
-                $object = ($objects ?? collect())->firstWhere('code', $objectCode);
-            @endphp
-            <button type="button" class="personnel-object-tab rounded-lg px-4 py-2 text-sm font-bold text-slate-600 hover:bg-blue-50" data-object-tab="{{ $objectCode }}">{{ $object?->name ?: ($objectCode === '__EMPTY__' ? 'Chưa phân loại' : $objectCode) }} ({{ $objectPeople->count() }})</button>
+        @foreach($orderedObjectTabs as $tab)
+            <button type="button" class="personnel-object-tab rounded-lg px-4 py-2 text-sm font-bold text-slate-600 hover:bg-blue-50" data-object-tab="{{ $tab['code'] }}">{{ $tab['label'] }} ({{ $tab['people']->count() }})</button>
         @endforeach
     </div>
     <div class="personnel-table-scroll overflow-x-hidden">
