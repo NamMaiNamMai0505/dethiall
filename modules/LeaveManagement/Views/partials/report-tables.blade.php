@@ -5,6 +5,8 @@
         'tracking' => 'report-compare',
         'registered' => 'report-registered',
     ][request('report_type')] ?? '';
+    $canEditReportLeave = auth()->user()?->isSuperAdmin() || \App\Support\PermissionCheck::can(auth()->user(), 'leave-management.edit') || \App\Support\PermissionCheck::can(auth()->user(), 'leave-management.requests.create') || \App\Support\PermissionCheck::can(auth()->user(), 'leave-management.create');
+    $canDeleteReportLeave = auth()->user()?->isSuperAdmin() || \App\Support\PermissionCheck::can(auth()->user(), 'leave-management.delete');
 
     $rowMeta = function ($item, string $fallbackName = '') {
         $person = $item->personnel ?? null;
@@ -32,8 +34,8 @@
     </div>
 
     <div id="report-used" class="report-panel hidden overflow-x-auto pt-3">
-        <table class="w-full min-w-[1000px] text-left text-sm">
-            <thead class="bg-slate-100"><tr><th class="p-3">STT</th><th class="p-3">Quân nhân</th><th class="p-3">Người đề xuất</th><th class="p-3">Từ ngày</th><th class="p-3">Đến ngày</th><th class="p-3">Tổng ngày</th><th class="p-3">Đã nghỉ</th><th class="p-3">Người duyệt</th></tr></thead>
+        <table class="w-full min-w-[1120px] text-left text-sm">
+            <thead class="bg-slate-100"><tr><th class="p-3">STT</th><th class="p-3">Quân nhân</th><th class="p-3">Người đề xuất</th><th class="p-3">Từ ngày</th><th class="p-3">Đến ngày</th><th class="p-3">Tổng ngày</th><th class="p-3">Đã nghỉ</th><th class="p-3">Người duyệt</th><th class="p-3">Thao tác</th></tr></thead>
             <tbody>
                 @foreach($taken as $i => $item)
                     @php($meta = $rowMeta($item))
@@ -46,35 +48,68 @@
                         <td class="p-3">{{ $item->total_days }}</td>
                         <td class="p-3 text-emerald-700">{{ $item->days_used }}</td>
                         <td class="p-3">{{ $item->decided_by_username ?? '—' }}</td>
+                        <td class="p-3">
+                            <div class="flex flex-wrap gap-2">
+                                @if($canEditReportLeave)
+                                    <a href="{{ route('leave-management.requests.show', $item) }}" class="rounded bg-blue-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-700">Sửa</a>
+                                @endif
+                                @if($canDeleteReportLeave)
+                                    <form method="POST" action="{{ route('leave-management.requests.destroy', $item) }}" onsubmit="return confirm('Xóa đơn phép này khỏi báo cáo? Hồ sơ lưu trữ liên quan cũng sẽ được xóa.');">@csrf @method('DELETE')<button class="rounded bg-rose-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-rose-700">Xóa</button></form>
+                                @endif
+                            </div>
+                        </td>
                     </tr>
                 @endforeach
-                <tr class="hidden" data-filter-empty><td colspan="8" class="p-6 text-center">Không có dữ liệu phù hợp bộ lọc.</td></tr>
+                <tr class="hidden" data-filter-empty><td colspan="9" class="p-6 text-center">Không có dữ liệu phù hợp bộ lọc.</td></tr>
             </tbody>
         </table>
     </div>
 
     <div id="report-not-used" class="report-panel hidden overflow-x-auto pt-3">
-        <table class="w-full min-w-[800px] text-left text-sm">
-            <thead class="bg-slate-100"><tr><th class="p-3">STT</th><th class="p-3">Quân nhân</th><th class="p-3">Đơn vị</th><th class="p-3">Đơn đã duyệt sắp tới</th><th class="p-3">Thời gian</th></tr></thead>
+        <table class="w-full min-w-[980px] text-left text-sm">
+            <thead class="bg-slate-100"><tr><th class="p-3">STT</th><th class="p-3">Quân nhân</th><th class="p-3">Đơn vị</th><th class="p-3">Đơn đã duyệt sắp tới</th><th class="p-3">Thời gian</th><th class="p-3">Thao tác</th></tr></thead>
             <tbody>
                 @foreach($notYet as $i => $person)
                     @php($meta = $rowMeta($person))
+                    @php($futureRequest = ($person->requests ?? collect())->where('status', 'APPROVED')->where('from_date', '>=', now()->startOfDay())->sortBy('from_date')->first())
                     <tr class="border-t" data-report-row data-agency="{{ $meta['agency'] }}" data-unit-id="{{ $meta['unit'] }}" data-search="{{ $meta['search'] }}">
                         <td class="p-3" data-row-index>{{ $i + 1 }}</td>
                         <td class="p-3 font-semibold">{{ $person->name }}</td>
                         <td class="p-3">{{ $person->unitRelation?->name ?? $person->unit }}</td>
-                        <td class="p-3">{{ $person->requests?->where('status','APPROVED')->first()?->leave_type ?? 'Chưa có' }}</td>
-                        <td class="p-3">{{ $person->requests?->where('status','APPROVED')->first()?->from_date?->format('d-m-Y') ?? '—' }} – {{ $person->requests?->where('status','APPROVED')->first()?->to_date?->format('d-m-Y') ?? '—' }}</td>
+                        <td class="p-3">{{ $futureRequest?->leave_type ?? 'Chưa có' }}</td>
+                        <td class="p-3">{{ $futureRequest?->from_date?->format('d-m-Y') ?? '—' }} – {{ $futureRequest?->to_date?->format('d-m-Y') ?? '—' }}</td>
+                        <td class="p-3">
+                            <div class="flex flex-wrap gap-2">
+                                @if($futureRequest)
+                                    @if($canEditReportLeave)
+                                        <a href="{{ route('leave-management.requests.show', $futureRequest) }}" class="rounded bg-blue-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-700">Sửa</a>
+                                    @endif
+                                    @if($canDeleteReportLeave)
+                                        <form method="POST" action="{{ route('leave-management.requests.destroy', $futureRequest) }}" onsubmit="return confirm('Xóa đơn phép này khỏi báo cáo? Hồ sơ lưu trữ liên quan cũng sẽ được xóa.');">@csrf @method('DELETE')<button class="rounded bg-rose-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-rose-700">Xóa</button></form>
+                                    @endif
+                                @else
+                                    @if($canEditReportLeave)
+                                        <a href="{{ route('leave-management.personnel', ['focus_personnel_id' => $person->id]) }}" class="rounded bg-blue-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-700">Sửa</a>
+                                    @endif
+                                    @if($canDeleteReportLeave)
+                                        <form method="POST" action="{{ route('leave-management.personnel.delete', $person) }}" onsubmit="return confirm('Xóa nhân sự này khỏi quản lý phép?');">@csrf @method('DELETE')<button class="rounded bg-rose-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-rose-700">Xóa</button></form>
+                                    @endif
+                                    @if(!$canEditReportLeave && !$canDeleteReportLeave)
+                                        <span class="text-xs text-slate-400">—</span>
+                                    @endif
+                                @endif
+                            </div>
+                        </td>
                     </tr>
                 @endforeach
-                <tr class="hidden" data-filter-empty><td colspan="5" class="p-6 text-center">Không có dữ liệu phù hợp bộ lọc.</td></tr>
+                <tr class="hidden" data-filter-empty><td colspan="6" class="p-6 text-center">Không có dữ liệu phù hợp bộ lọc.</td></tr>
             </tbody>
         </table>
     </div>
 
     <div id="report-compare" class="report-panel hidden overflow-x-auto pt-3">
-        <table class="w-full min-w-[1000px] text-left text-sm">
-            <thead class="bg-slate-100"><tr><th class="p-3">STT</th><th class="p-3">Quân nhân</th><th class="p-3">Từ ngày</th><th class="p-3">Đến ngày</th><th class="p-3">Tổng ngày</th><th class="p-3">Đã nghỉ</th><th class="p-3">Ngày còn lại</th><th class="p-3">Người duyệt</th></tr></thead>
+        <table class="w-full min-w-[1120px] text-left text-sm">
+            <thead class="bg-slate-100"><tr><th class="p-3">STT</th><th class="p-3">Quân nhân</th><th class="p-3">Từ ngày</th><th class="p-3">Đến ngày</th><th class="p-3">Tổng ngày</th><th class="p-3">Đã nghỉ</th><th class="p-3">Ngày còn lại</th><th class="p-3">Người duyệt</th><th class="p-3">Thao tác</th></tr></thead>
             <tbody>
                 @foreach($comparison as $i => $item)
                     @php($meta = $rowMeta($item))
@@ -87,16 +122,26 @@
                         <td class="p-3 text-emerald-700">{{ $item->days_used }}</td>
                         <td class="p-3 font-bold text-blue-700">{{ $item->days_remaining }}</td>
                         <td class="p-3">{{ $item->decided_by_username ?? '—' }}</td>
+                        <td class="p-3">
+                            <div class="flex flex-wrap gap-2">
+                                @if($canEditReportLeave)
+                                    <a href="{{ route('leave-management.requests.show', $item) }}" class="rounded bg-blue-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-700">Sửa</a>
+                                @endif
+                                @if($canDeleteReportLeave)
+                                    <form method="POST" action="{{ route('leave-management.requests.destroy', $item) }}" onsubmit="return confirm('Xóa đơn phép này khỏi báo cáo? Hồ sơ lưu trữ liên quan cũng sẽ được xóa.');">@csrf @method('DELETE')<button class="rounded bg-rose-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-rose-700">Xóa</button></form>
+                                @endif
+                            </div>
+                        </td>
                     </tr>
                 @endforeach
-                <tr class="hidden" data-filter-empty><td colspan="8" class="p-6 text-center">Không có dữ liệu phù hợp bộ lọc.</td></tr>
+                <tr class="hidden" data-filter-empty><td colspan="9" class="p-6 text-center">Không có dữ liệu phù hợp bộ lọc.</td></tr>
             </tbody>
         </table>
     </div>
 
     <div id="report-registered" class="report-panel hidden overflow-x-auto pt-3">
-        <table class="w-full min-w-[1000px] text-left text-sm">
-            <thead class="bg-slate-100"><tr><th class="p-3">STT</th><th class="p-3">Quân nhân</th><th class="p-3">Đơn vị</th><th class="p-3">Từ ngày</th><th class="p-3">Đến ngày</th><th class="p-3">Nơi nghỉ phép</th><th class="p-3">Ghi chú</th></tr></thead>
+        <table class="w-full min-w-[1120px] text-left text-sm">
+            <thead class="bg-slate-100"><tr><th class="p-3">STT</th><th class="p-3">Quân nhân</th><th class="p-3">Đơn vị</th><th class="p-3">Từ ngày</th><th class="p-3">Đến ngày</th><th class="p-3">Nơi nghỉ phép</th><th class="p-3">Ghi chú</th><th class="p-3">Thao tác</th></tr></thead>
             <tbody>
                 @foreach(($registered ?? collect()) as $i => $item)
                     @php($meta = $rowMeta($item))
@@ -108,9 +153,19 @@
                         <td class="p-3">{{ $item->to_date?->format('d-m-Y') }}</td>
                         <td class="p-3">{{ $item->locality_path ?: $item->reason ?: '—' }}</td>
                         <td class="p-3">{{ $item->status === 'APPROVED' && $item->from_date && !now()->startOfDay()->lt($item->from_date->copy()->startOfDay()) ? 'Đã nghỉ' : 'Chưa nghỉ' }}</td>
+                        <td class="p-3">
+                            <div class="flex flex-wrap gap-2">
+                                @if($canEditReportLeave)
+                                    <a href="{{ route('leave-management.requests.show', $item) }}" class="rounded bg-blue-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-700">Sửa</a>
+                                @endif
+                                @if($canDeleteReportLeave)
+                                    <form method="POST" action="{{ route('leave-management.requests.destroy', $item) }}" onsubmit="return confirm('Xóa đơn phép này khỏi báo cáo? Hồ sơ lưu trữ liên quan cũng sẽ được xóa.');">@csrf @method('DELETE')<button class="rounded bg-rose-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-rose-700">Xóa</button></form>
+                                @endif
+                            </div>
+                        </td>
                     </tr>
                 @endforeach
-                <tr class="hidden" data-filter-empty><td colspan="7" class="p-6 text-center">Không có dữ liệu phù hợp bộ lọc.</td></tr>
+                <tr class="hidden" data-filter-empty><td colspan="8" class="p-6 text-center">Không có dữ liệu phù hợp bộ lọc.</td></tr>
             </tbody>
         </table>
     </div>

@@ -104,7 +104,7 @@
                         [$level1, $level2, $level3, $level4] = $unitLevels($person);
                         $unitSearch = trim(implode(' ', array_filter([$level1, $level2, $level3, $level4])));
                     @endphp
-                    <tr class="personnel-row align-top hover:bg-blue-50/40" data-object="{{ trim((string) ($person->object_type ?: '__EMPTY__')) }}" data-search="{{ mb_strtolower(($person->name ?? '').' '.($person->staff_code ?? '').' '.$unitSearch, 'UTF-8') }}" data-agency="{{ \Modules\LeaveManagement\Support\LeaveAccess::agencyForObject($person->object_type) }}" data-unit-id="{{ (int) $person->unit_id }}">
+                    <tr class="personnel-row align-top hover:bg-blue-50/40" data-personnel-id="{{ $person->id }}" data-object="{{ trim((string) ($person->object_type ?: '__EMPTY__')) }}" data-search="{{ mb_strtolower(($person->name ?? '').' '.($person->staff_code ?? '').' '.$unitSearch, 'UTF-8') }}" data-agency="{{ \Modules\LeaveManagement\Support\LeaveAccess::agencyForObject($person->object_type) }}" data-unit-id="{{ (int) $person->unit_id }}">
                         <td class="whitespace-nowrap px-4 py-3 font-bold text-blue-700">{{ $i + 1 }}</td>
                         <td class="whitespace-nowrap px-4 py-3"><div class="font-bold text-slate-900">{{ $person->name }}</div><div class="text-xs text-slate-500">{{ $person->staff_code ?: 'Chưa có mã' }}</div></td>
                         <td class="whitespace-nowrap px-4 py-3">{{ $person->staff_code ?: '—' }}</td>
@@ -217,5 +217,15 @@
     text.addEventListener('input', apply); agency.addEventListener('change', apply); unit.addEventListener('change', apply);
     reset.addEventListener('click', () => { text.value = ''; agency.value = ''; unit.value = ''; apply(); });
     apply();
+    const focusedId = new URLSearchParams(window.location.search).get('focus_personnel_id');
+    const focusedRow = focusedId ? rows.find(row => row.dataset.personnelId === focusedId) : null;
+    const focusedEditRow = focusedRow?.nextElementSibling;
+    const focusedButton = focusedRow?.querySelector('.personnel-edit-toggle');
+    if (focusedRow && focusedEditRow?.classList.contains('personnel-edit-row')) {
+        focusedEditRow.dataset.open = 'true';
+        focusedEditRow.classList.remove('hidden');
+        focusedButton?.setAttribute('aria-expanded', 'true');
+        focusedRow.scrollIntoView({behavior: 'smooth', block: 'center'});
+    }
 })();
 </script>
