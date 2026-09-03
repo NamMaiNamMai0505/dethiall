@@ -7,7 +7,7 @@ use Illuminate\Http\Request;
 use Modules\Building\Models\Building;
 use Modules\Classroom\Models\Classroom;
 use Modules\Unit\Models\Unit;
-use Modules\Inventory\Models\{InventoryMaterial, InventoryMovement, InventoryTransfer};
+use Modules\Inventory\Models\{InventoryMaterial, InventoryMovement, InventoryReportTemplate, InventoryTransfer};
 
 class InventoryMovementReportController extends ModuleBaseController
 {
@@ -29,8 +29,29 @@ class InventoryMovementReportController extends ModuleBaseController
             'classrooms' => collect($locations['classrooms'])->map(fn ($item) => (object) $item),
             'units' => Unit::active()->orderBy('name')->get(['id', 'name']),
             'materials' => InventoryMaterial::orderBy('name')->get(['id', 'code', 'name']),
+            'reportTemplates' => InventoryReportTemplate::where('active', true)->whereNotNull('report_type')->whereNotNull('file_path')->orderBy('report_type')->orderBy('name')->get(),
+            'defaultTemplates' => $this->defaultReportTemplates(),
             'locationsSyncedAt' => $locations['synced_at'],
         ]);
+    }
+
+    private function defaultReportTemplates(): array
+    {
+        return [
+            'position' => ['name' => 'Theo vị trí lắp đặt', 'report' => 'Thống kê thực lực hiện có', 'scope' => 'Theo vị trí lắp đặt'],
+            'total-position' => ['name' => 'Tổng hợp toàn bộ', 'report' => 'Thống kê thực lực hiện có', 'scope' => 'Tổng hợp toàn bộ'],
+            'unit' => ['name' => 'Theo đơn vị', 'report' => 'Thống kê thực lực vật tư theo đơn vị'],
+            'increase-decrease' => ['name' => 'Tăng, giảm', 'report' => 'Thống kê tăng, giảm thực lực vật tư'],
+            'period' => ['name' => 'Tổng hợp theo kỳ', 'report' => 'Báo cáo tổng hợp theo kỳ'],
+            'warehouse' => ['name' => 'Kho vật tư', 'report' => 'Báo cáo kho vật tư'],
+            'using-position' => ['name' => 'Theo vị trí lắp đặt', 'report' => 'Báo cáo vật tư đang sử dụng', 'scope' => 'Theo vị trí lắp đặt'],
+            'using-total' => ['name' => 'Tổng hợp toàn bộ', 'report' => 'Báo cáo vật tư đang sử dụng', 'scope' => 'Tổng hợp toàn bộ'],
+            'system-warehouse' => ['name' => 'Kho-vật tư', 'report' => 'Báo cáo hệ thống kho-vật tư'],
+            'transfer' => ['name' => 'Quyết định điều động', 'report' => 'Quyết định điều động'],
+            'recall' => ['name' => 'Quyết định thu hồi', 'report' => 'Quyết định thu hồi'],
+            'repair' => ['name' => 'Vật tư hư hại và sửa chữa', 'report' => 'Vật tư đang hư hại và sửa chữa'],
+            'update-log' => ['name' => 'Cập nhật vật tư', 'report' => 'Cập nhật vật tư'],
+        ];
     }
 
     public function syncLocations(Request $request)

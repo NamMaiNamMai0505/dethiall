@@ -35,46 +35,47 @@ class InventoryReportTemplateController extends ModuleBaseController
         };
         abort_unless(isset($files[$type]), 422, 'Loại báo cáo không hợp lệ.');
 
-        if ($request->filled('template_id')) {
-            return $this->fillUploadedVariableTemplate($request, $type);
-        }
-
         [$path, $filename] = $this->resolveTemplate($request, $files[$type], $type);
         abort_unless(is_file($path), 404, 'Chưa có mẫu báo cáo tương ứng.');
 
         return in_array($type, ['position', 'total-position', 'unit', 'using-position', 'using-total'], true)
-            ? $this->fillPositionTemplate($request, $path, $filename)
+            ? $this->fillPositionTemplate($request, $path, $filename, $type)
             : $this->fillReportTemplate($request, $path, $filename, $type);
     }
 
     private function resolveTemplate(Request $request, string $defaultFilename, string $type): array
     {
-        if ($request->filled('template_id')) {
-            $template = InventoryReportTemplate::whereKey($request->integer('template_id'))->where('active', true)->first();
+        if ($this->hasUploadedTemplate($request)) {
+            $template = InventoryReportTemplate::whereKey($request->integer('template_id'))->where('active', true)->where('report_type', $type)->first();
             abort_unless($template, 404, 'Không tìm thấy mẫu báo cáo đã chọn.');
             $path = $template->absolutePath();
             abort_unless($path && is_file($path), 404, 'File mẫu báo cáo đã chọn không tồn tại.');
             abort_unless(strtolower(pathinfo($path, PATHINFO_EXTENSION)) === 'docx', 422, 'Mẫu báo cáo Word phải là file .docx.');
 
-            $safeCode = preg_replace('/[^A-Za-z0-9_-]+/', '-', $template->code ?: 'mau-bao-cao-vat-tu');
-            return [$path, $safeCode.'-'.now()->format('YmdHis').'.docx'];
+            return [$path, basename((string) $template->file_path)];
         }
 
         $custom = InventoryReportTemplate::where('report_type', $type)->where('active', true)->first();
         if ($custom) {
             $path = $custom->absolutePath();
             if ($path && is_file($path)) {
-                $safeCode = preg_replace('/[^A-Za-z0-9_-]+/', '-', $custom->code ?: $type);
-                return [$path, $safeCode.'-'.now()->format('YmdHis').'.docx'];
+                return [$path, basename((string) $custom->file_path)];
             }
         }
 
         return [resource_path('inventory-report-templates/'.$defaultFilename), $defaultFilename];
     }
 
+    private function hasUploadedTemplate(Request $request): bool
+    {
+        $templateId = (string) $request->input('template_id', '');
+
+        return $templateId !== '' && ctype_digit($templateId) && (int) $templateId > 0;
+    }
+
     private function fillUploadedVariableTemplate(Request $request, string $type): mixed
     {
-        $template = InventoryReportTemplate::whereKey($request->integer('template_id'))->where('active', true)->first();
+        $template = InventoryReportTemplate::whereKey($request->integer('template_id'))->where('active', true)->where('report_type', $type)->first();
         abort_unless($template, 404, 'Không tìm thấy mẫu báo cáo đã chọn.');
         $path = $template->absolutePath();
         abort_unless($path && is_file($path), 404, 'File mẫu báo cáo đã chọn không tồn tại.');
@@ -84,8 +85,8 @@ class InventoryReportTemplateController extends ModuleBaseController
         $processor = new \PhpOffice\PhpWord\TemplateProcessor($path);
         $today = now();
         $titles = [
-            'position' => 'Báo cáo thực lực vật tư theo vị trí',
-            'total-position' => 'Báo cáo thực lực vật tư tổng thể',
+            'position' => 'Báo cáo thống kê thực lực hiện có',
+            'total-position' => 'Báo cáo thống kê thực lực hiện có',
             'unit' => 'Báo cáo thực lực vật tư theo đơn vị',
             'period' => 'Báo cáo tổng hợp thực lực theo kỳ',
             'increase-decrease' => 'Báo cáo tăng giảm thực lực vật tư',
@@ -276,6 +277,7 @@ class InventoryReportTemplateController extends ModuleBaseController
             $this->replaceWarehouseSummary($xpath, $assets);
             $this->removeEmptyRepairSection($xpath, $assets->whereIn('status', ['BROKEN', 'REPAIRING'])->values());
         }
+        $this->replaceScalarTemplateValues($xpath, $request, $type);
         $documentXml = $xml->saveXML();
         $zip->close();
         return $this->writeReportZip($template, $documentXml, $filename);
@@ -439,7 +441,7 @@ class InventoryReportTemplateController extends ModuleBaseController
         return response()->download($output, $filename)->deleteFileAfterSend(true);
     }
 
-    private function fillPositionTemplate(Request $request, string $template, string $filename): mixed
+    private function fillPositionTemplate(Request $request, string $template, string $filename, string $type): mixed
     {
         $assets = InventoryAsset::with(['classroom.building', 'classroom.managingUnit', 'material.category.parent', 'holdingUnit'])
             ->when($request->filled('building_id'), fn ($q) => $q->whereHas('classroom', fn ($room) => $room->where('building_id', $request->integer('building_id'))))
@@ -458,21 +460,18 @@ class InventoryReportTemplateController extends ModuleBaseController
         $table = $tables->item(1);
         abort_unless($table, 500, 'Mẫu báo cáo không có bảng vật tư.');
         $rows = $xpath->query('./w:tr', $table);
-        // Trong mẫu gốc: dòng 2 là tổng cộng mẫu, dòng 3 là ngành,
-        // dòng 4 là loại và dòng 5 là vật tư chi tiết.
-        $groupTemplate = $rows->item(3)->cloneNode(true);
-        $categoryTemplate = $rows->item(4)->cloneNode(true);
-        $itemTemplate = $rows->item(5)->cloneNode(true);
-        $roomTemplate = $rows->item(9)->cloneNode(true);
-        $totalTemplate = $rows->item($rows->length - 1)->cloneNode(true);
+        $groupTemplate = ($this->findTableRowContaining($xpath, $rows, 'nganh') ?: $rows->item(min(3, max(0, $rows->length - 1))))?->cloneNode(true);
+        $categoryTemplate = ($this->findTableRowContaining($xpath, $rows, 'loai_vat_tu') ?: $rows->item(min(4, max(0, $rows->length - 1))))?->cloneNode(true);
+        $itemTemplate = ($this->findTableRowContaining($xpath, $rows, 'ma_vat_tu') ?: $this->findTableRowContaining($xpath, $rows, 'ten_vat_tu') ?: $rows->item(min(5, max(0, $rows->length - 1))))?->cloneNode(true);
+        $roomTemplate = ($this->findTableRowContaining($xpath, $rows, 'phong') ?: $this->findTableRowContaining($xpath, $rows, 'vi_tri'))?->cloneNode(true);
+        $totalTemplate = ($this->findTableRowContaining($xpath, $rows, 'TỔNG CỘNG') ?: $rows->item($rows->length - 1))?->cloneNode(true);
+        abort_unless($groupTemplate && $categoryTemplate && $itemTemplate && $totalTemplate, 500, 'Mẫu báo cáo thiếu dòng dữ liệu để đổ thông tin vật tư.');
         $fixedColumns = $this->positionFixedColumnCount($xpath, $rows->item(0), $rows->item(1));
 
-        $unitModels = $assets->map(fn ($asset) => $asset->classroom?->managingUnit ?: $asset->holdingUnit)
-            ->filter()->unique('id')->sortBy('id')->values();
-        $unitColumns = $unitModels->take(max(0, $xpath->query('./w:tc', $rows->item(1))->length - $fixedColumns))->values();
+        $unitColumns = $this->positionUnitColumns($assets, max(0, $xpath->query('./w:tc', $rows->item(1))->length - $fixedColumns));
         $this->setUnitHeaders($xml, $xpath, $rows->item(1), $unitColumns, $fixedColumns);
 
-        for ($i = $rows->length - 2; $i >= 2; $i--) {
+        for ($i = $rows->length - 1; $i >= 2; $i--) {
             $table->removeChild($rows->item($i));
         }
 
@@ -483,12 +482,12 @@ class InventoryReportTemplateController extends ModuleBaseController
         $buildingCount = $assets->map(fn ($asset) => $asset->classroom?->building?->name ?: 'Kho vật tư')->unique()->count();
         foreach ($industries as $industry => $industryAssets) {
             $industryNo++;
-            $this->setTemplateRow($xml, $groupTemplate->cloneNode(true), $this->positionRowValues($fixedColumns, [null, $industry, null, null, $industryAssets->sum('quantity')]), $table);
+            $this->setTemplateRow($xml, $groupTemplate->cloneNode(true), array_merge($this->positionRowValues($fixedColumns, [null, $industry, null, null, $industryAssets->sum('quantity')]), $this->unitQuantities($industryAssets, $unitColumns)), $table);
             $types = $industryAssets->groupBy(fn ($asset) => $asset->material?->category?->name ?: 'Chưa xác định loại');
             $typeNo = 0;
             foreach ($types as $type => $typeAssets) {
                 $typeNo++;
-                $this->setTemplateRow($xml, $categoryTemplate->cloneNode(true), $this->positionRowValues($fixedColumns, [null, $type, null, null, $typeAssets->sum('quantity')]), $table);
+                $this->setTemplateRow($xml, $categoryTemplate->cloneNode(true), array_merge($this->positionRowValues($fixedColumns, [null, $type, null, null, $typeAssets->sum('quantity')]), $this->unitQuantities($typeAssets, $unitColumns)), $table);
                 $materials = $typeAssets->groupBy(fn ($asset) => $asset->material_id ?: $asset->asset_code ?: $asset->name);
                 foreach ($materials as $materialAssets) {
                     $first = $materialAssets->first();
@@ -502,40 +501,42 @@ class InventoryReportTemplateController extends ModuleBaseController
                     ]);
                     $itemValues = array_merge($itemValues, $this->unitQuantities($materialAssets, $unitColumns));
                     $this->setTemplateRow($xml, $this->boldRow($xml, $itemTemplate->cloneNode(true)), $itemValues, $table);
-                    $buildings = $materialAssets->groupBy(fn ($asset) => $asset->classroom?->building?->name ?: 'Kho vật tư');
-                    foreach ($buildings as $building => $buildingAssets) {
-                        $buildingNumber = $buildingNames->search($building) + 1;
-                        $buildingLabel = $buildingCount > 1 ? $buildingNumber.'. '.$building : $building;
-                        $buildingValues = $this->positionRowValues($fixedColumns, [null, $buildingLabel, null, null, $buildingAssets->sum('quantity')]);
-                        $this->setTemplateRow($xml, $roomTemplate->cloneNode(true), array_merge($buildingValues, $this->unitQuantities($buildingAssets, $unitColumns)), $table);
-                        $rooms = $buildingAssets->groupBy(fn ($asset) => $asset->classroom?->id ?: 'warehouse');
-                        foreach ($rooms as $roomAssets) {
-                        $roomAsset = $roomAssets->first();
-                        $room = $roomAsset->classroom;
-                        $roomName = $room?->name ?: 'Kho vật tư';
-                        $address = trim(implode(' - ', array_filter([$room?->building?->name, $room?->code])));
-                        $roomValues = [
-                            null,
-                            '| '.$roomName,
-                            null,
-                            null,
-                            $roomAssets->sum('quantity'),
-                        ];
-                        $roomRow = $roomTemplate->cloneNode(true);
-                        $this->rightAlignCell($xml, $roomRow, 1);
-                        $this->setTemplateRow($xml, $roomRow, array_merge($this->positionRowValues($fixedColumns, $roomValues), $this->unitQuantities($roomAssets, $unitColumns)), $table);
+                    if ($roomTemplate) {
+                        $buildings = $materialAssets->groupBy(fn ($asset) => $asset->classroom?->building?->name ?: 'Kho vật tư');
+                        foreach ($buildings as $building => $buildingAssets) {
+                            $buildingNumber = $buildingNames->search($building) + 1;
+                            $buildingLabel = $buildingCount > 1 ? $buildingNumber.'. '.$building : $building;
+                            $buildingValues = $this->positionRowValues($fixedColumns, [null, $buildingLabel, null, null, $buildingAssets->sum('quantity')]);
+                            $this->setTemplateRow($xml, $roomTemplate->cloneNode(true), array_merge($buildingValues, $this->unitQuantities($buildingAssets, $unitColumns)), $table);
+                            $rooms = $buildingAssets->groupBy(fn ($asset) => $asset->classroom?->id ?: 'warehouse');
+                            foreach ($rooms as $roomAssets) {
+                                $roomAsset = $roomAssets->first();
+                                $room = $roomAsset->classroom;
+                                $roomName = $room?->name ?: 'Kho vật tư';
+                                $roomValues = [
+                                    null,
+                                    '| '.$roomName,
+                                    null,
+                                    null,
+                                    $roomAssets->sum('quantity'),
+                                ];
+                                $roomRow = $roomTemplate->cloneNode(true);
+                                $this->rightAlignCell($xml, $roomRow, 1);
+                                $this->setTemplateRow($xml, $roomRow, array_merge($this->positionRowValues($fixedColumns, $roomValues), $this->unitQuantities($roomAssets, $unitColumns)), $table);
+                            }
                         }
                     }
                 }
             }
         }
 
-        $this->setTemplateRow($xml, $totalTemplate, $this->positionRowValues($fixedColumns, [null, 'TỔNG CỘNG', null, null, $assets->sum('quantity')]), $table);
+        $this->setTemplateRow($xml, $totalTemplate, array_merge($this->positionRowValues($fixedColumns, [null, 'TỔNG CỘNG', null, null, $assets->sum('quantity')]), $this->unitQuantities($assets, $unitColumns)), $table);
         foreach ($xpath->query('//w:t') as $text) {
             if (str_contains($text->nodeValue, 'Vị trí quản lý sử dụng (chi tiết theo phòng)')) $text->nodeValue = '';
         }
         $this->replaceReportDate($xpath, $request);
         $this->replaceUnitReportTitle($xpath, $request);
+        $this->replaceScalarTemplateValues($xpath, $request, $type);
         $documentXml = $xml->saveXML();
         $zip->close();
 
@@ -551,6 +552,67 @@ class InventoryReportTemplateController extends ModuleBaseController
         $target->close();
 
         return response()->download($output, $filename)->deleteFileAfterSend(true);
+    }
+
+    private function findTableRowContaining(\DOMXPath $xpath, \DOMNodeList $rows, string $needle): ?\DOMNode
+    {
+        for ($i = 0; $i < $rows->length; $i++) {
+            $text = '';
+            foreach ($xpath->query('.//w:t', $rows->item($i)) as $node) {
+                $text .= $node->nodeValue;
+            }
+            if (str_contains($text, $needle)) {
+                return $rows->item($i);
+            }
+        }
+
+        return null;
+    }
+
+    private function replaceScalarTemplateValues(\DOMXPath $xpath, Request $request, string $type): void
+    {
+        $today = now();
+        $from = $request->filled('from') ? date('d/m/Y', strtotime($request->input('from'))) : '';
+        $to = $request->filled('to') ? date('d/m/Y', strtotime($request->input('to'))) : $today->format('d/m/Y');
+        $values = [
+            'ngay_bao_cao' => $to,
+            'ngay' => $today->format('d'),
+            'thang' => $today->format('m'),
+            'nam' => $today->format('Y'),
+            'nam_hien_tai' => $today->format('Y'),
+            'tu_ngay' => $from,
+            'den_ngay' => $to,
+            'pham_vi' => match ($type) {
+                'position', 'using-position' => 'Theo vị trí lắp đặt',
+                'total-position', 'using-total' => 'Tổng hợp toàn bộ phòng/tòa',
+                default => 'Toàn bộ dữ liệu',
+            },
+            'so_van_ban' => '',
+            'noi_nhan' => '',
+            'chuc_danh_ky' => '',
+            'nguoi_ky' => '',
+        ];
+
+        foreach ($xpath->query('//w:p|//w:tc') as $container) {
+            $nodes = $xpath->query('.//w:t', $container);
+            if (!$nodes->length) continue;
+
+            $text = '';
+            foreach ($nodes as $node) {
+                $text .= $node->nodeValue;
+            }
+
+            $replaced = $text;
+            foreach ($values as $key => $value) {
+                $replaced = str_replace('${'.$key.'}', (string) $value, $replaced);
+            }
+
+            if ($replaced === $text) continue;
+            $nodes->item(0)->nodeValue = $replaced;
+            for ($i = 1; $i < $nodes->length; $i++) {
+                $nodes->item($i)->nodeValue = '';
+            }
+        }
     }
 
     private function setTemplateRow(\DOMDocument $xml, \DOMNode $row, array $values, \DOMNode $table): void
@@ -587,10 +649,55 @@ class InventoryReportTemplateController extends ModuleBaseController
     {
         $values = [];
         foreach ($units as $unit) {
-            $quantity = $assets->filter(fn ($asset) => (int) $asset->classroom?->managing_unit_id === (int) $unit->id)->sum('quantity');
+            if (!$unit) {
+                $values[] = '';
+                continue;
+            }
+
+            $quantity = $this->isWarehouseUnit($unit)
+                ? $assets->filter(fn ($asset) => !$asset->classroom_id)->sum('quantity')
+                : $assets->filter(fn ($asset) => (int) ($asset->classroom?->managing_unit_id ?: $asset->holding_unit_id) === (int) $unit->id)->sum('quantity');
             $values[] = $quantity > 0 ? $quantity : '';
         }
         return $values;
+    }
+
+    private function positionUnitColumns($assets, int $capacity)
+    {
+        if ($capacity <= 0) return collect();
+
+        $units = $assets->map(fn ($asset) => $asset->classroom?->managingUnit ?: $asset->holdingUnit)
+            ->filter()
+            ->reject(fn ($unit) => $this->isWarehouseLabel($unit->abbreviation ?: $unit->code ?: $unit->name))
+            ->unique('id')
+            ->sortBy('id')
+            ->values();
+
+        $warehouse = $this->warehouseUnit();
+        if ($units->count() >= $capacity) {
+            $units = $units->take($capacity - 1)->values();
+        }
+
+        while ($units->count() < $capacity - 1) {
+            $units->push(null);
+        }
+
+        return $units->push($warehouse)->values();
+    }
+
+    private function warehouseUnit(): object
+    {
+        return (object) ['id' => '__warehouse', 'name' => 'KHO', 'code' => 'KHO', 'abbreviation' => 'KHO'];
+    }
+
+    private function isWarehouseUnit($unit): bool
+    {
+        return (string) ($unit->id ?? '') === '__warehouse' || $this->isWarehouseLabel($unit->abbreviation ?? $unit->code ?? $unit->name ?? '');
+    }
+
+    private function isWarehouseLabel(?string $value): bool
+    {
+        return mb_strtoupper(trim((string) $value), 'UTF-8') === 'KHO';
     }
 
     private function positionRowValues(int $fixedColumns, array $values): array
@@ -614,12 +721,13 @@ class InventoryReportTemplateController extends ModuleBaseController
     {
         if (!$headerRow) return;
         $cells = $xpath->query('./w:tc', $headerRow);
-        foreach ($units as $index => $unit) {
-            $cell = $cells->item($index + $fixedColumns);
+        for ($index = $fixedColumns; $index < $cells->length; $index++) {
+            $cell = $cells->item($index);
             if (!$cell) continue;
+            $unit = $units[$index - $fixedColumns] ?? null;
             $texts = $xpath->query('.//w:t', $cell);
             if ($texts->length) {
-                $texts->item(0)->nodeValue = $unit->abbreviation ?: $unit->code ?: $unit->name;
+                $texts->item(0)->nodeValue = $unit ? ($unit->abbreviation ?: $unit->code ?: $unit->name) : '';
                 for ($i = 1; $i < $texts->length; $i++) $texts->item($i)->nodeValue = '';
             }
         }

@@ -1,3 +1,15 @@
+@php
+    $templateTypeOptions = collect($defaultTemplates ?? [])->map(function ($template, $type) {
+        $report = $template['report'] ?? $template['name'];
+        $scope = $template['scope'] ?? null;
+
+        return [
+            'type' => $type,
+            'report' => $report,
+            'label' => $scope ? $report.' - '.$scope : $report,
+        ];
+    });
+@endphp
 <div class="space-y-4">
     <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -16,6 +28,13 @@
             </label>
             <label class="text-sm font-semibold">Tên mẫu
                 <input name="name" required placeholder="VD: Mẫu báo cáo kho" class="mt-1 block w-full rounded-lg border px-3 py-2.5">
+            </label>
+            <label class="text-sm font-semibold">Loại báo cáo
+                <select name="report_type" required class="mt-1 block w-full rounded-lg border px-3 py-2.5">
+                    @foreach($templateTypeOptions as $option)
+                        <option value="{{ $option['type'] }}">{{ $option['label'] }}</option>
+                    @endforeach
+                </select>
             </label>
             <label class="text-sm font-semibold">File Word mẫu
                 <input name="file" type="file" accept=".docx" required class="mt-1 block w-full rounded-lg border px-3 py-2.5">
@@ -74,7 +93,7 @@
                 <tr>
                     <th class="w-[230px] p-3">Tên mẫu</th>
                     <th class="w-[160px] p-3">Nhóm mẫu</th>
-                    <th class="w-[145px] p-3">Theo báo cáo</th>
+                    <th class="w-[145px] p-3">Loại báo cáo</th>
                     <th class="w-[230px] p-3">File</th>
                     <th class="w-[105px] p-3">Trạng thái</th>
                     <th class="w-[115px] p-3">Cập nhật</th>
@@ -87,12 +106,12 @@
                     <tr class="border-t">
                         <td class="p-3">
                             <p class="font-semibold">{{ $template['name'] }}</p>
-                            <p class="mt-1 text-xs text-slate-500">{{ $customTemplate ? 'File Word đã import thay mẫu gốc.' : 'Mẫu gốc của hệ thống.' }}</p>
+                            <p class="mt-1 text-xs text-slate-500">{{ $template['scope'] ?? ($customTemplate ? 'File Word đã import thay mẫu gốc.' : 'Mẫu gốc của hệ thống.') }}</p>
                         </td>
                         <td class="p-3">Mẫu báo cáo</td>
                         <td class="p-3">{{ $template['report'] ?? $template['name'] }}</td>
                         <td class="p-3">
-                            @if($customTemplate)
+                            @if($customTemplate && $customTemplate->file_path)
                                 <a href="{{ route('inventory.templates.download', $customTemplate) }}" class="break-words text-blue-600 underline">{{ basename($customTemplate->file_path) }}</a>
                             @else
                                 <a href="{{ route('inventory.templates.variable.download', $type) }}" class="break-words text-blue-600 underline">{{ $template['variable_file'] ?? ('mau-bien-'.$type.'.docx') }}</a>
@@ -103,7 +122,7 @@
                         <td class="p-3 text-right">
                             <div class="inline-flex flex-wrap justify-end gap-2">
                                 <button type="button" data-template-toggle="default-{{ $type }}" class="rounded border px-3 py-1.5 text-xs font-semibold">Sửa</button>
-                                <a href="{{ $customTemplate ? route('inventory.templates.download', $customTemplate) : route('inventory.templates.variable.download', $type) }}" class="rounded bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white">Tải mẫu biến</a>
+                                <a href="{{ ($customTemplate && $customTemplate->file_path) ? route('inventory.templates.download', $customTemplate) : route('inventory.templates.variable.download', $type) }}" class="rounded bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white">Tải mẫu biến</a>
                                 <form method="POST" action="{{ route('inventory.templates.default.delete', $type) }}" onsubmit="return confirm('Xóa mẫu tùy chỉnh của báo cáo này? Nếu đang dùng mẫu gốc thì hệ thống sẽ giữ nguyên mẫu gốc.')">
                                     @csrf
                                     @method('DELETE')
@@ -116,20 +135,26 @@
                         <td colspan="7" class="p-4">
                             <form method="POST" action="{{ route('inventory.templates.default.replace', $type) }}" enctype="multipart/form-data" class="grid gap-3 md:grid-cols-3">
                                 @csrf
-                                <div class="md:col-span-2">
-                                    <p class="font-semibold text-slate-800">Import file Word thay mẫu: {{ $template['name'] }}</p>
-                                    <p class="mt-1 text-xs text-slate-500">File mới sẽ giữ form bạn sửa, hệ thống chỉ thay dữ liệu trong ô/bảng thành biến để khi xuất sẽ đổ dữ liệu database vào.</p>
-                                </div>
+                                <label class="text-sm font-semibold">Tên mẫu
+                                    <input name="name" required value="{{ $template['name'] }}" class="mt-1 block w-full rounded-lg border px-3 py-2.5">
+                                </label>
+                                <label class="text-sm font-semibold">Loại báo cáo
+                                    <select name="report_type" required class="mt-1 block w-full rounded-lg border px-3 py-2.5">
+                                        @foreach($templateTypeOptions as $option)
+                                            <option value="{{ $option['type'] }}" @selected($type === $option['type'])>{{ $option['label'] }}</option>
+                                        @endforeach
+                                    </select>
+                                </label>
                                 <label class="text-sm font-semibold">File Word mới
-                                    <input name="file" type="file" accept=".docx" required class="mt-1 block w-full rounded-lg border px-3 py-2.5">
+                                    <input name="file" type="file" accept=".docx" class="mt-1 block w-full rounded-lg border px-3 py-2.5">
                                 </label>
                                 <label class="flex items-center gap-2 text-sm font-semibold">
-                                    <input type="checkbox" name="active" value="1" checked class="rounded border">
+                                    <input type="checkbox" name="active" value="1" @checked($customTemplate?->active ?? true) class="rounded border">
                                     Dùng mẫu này khi xuất báo cáo
                                 </label>
                                 <div class="flex items-end justify-end gap-2 md:col-span-2">
                                     <button type="button" data-template-toggle="default-{{ $type }}" class="rounded border px-4 py-2 text-sm font-semibold">Hủy</button>
-                                    <button class="rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white">Import thay mẫu</button>
+                                    <button class="rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white">Lưu sửa</button>
                                 </div>
                             </form>
                         </td>
@@ -142,7 +167,8 @@
                             <p class="mt-1 text-xs text-slate-500">{{ $item->code }}</p>
                         </td>
                         <td class="p-3">Mẫu tải lên</td>
-                        <td class="p-3">{{ $item->description ?: 'Theo file Word đã tải lên' }}</td>
+                        @php($templateOption = $templateTypeOptions->firstWhere('type', $item->report_type))
+                        <td class="p-3">{{ $templateOption['label'] ?? ($item->description ?: 'Theo file Word đã tải lên') }}</td>
                         <td class="p-3">
                             @if($item->file_path)
                                 <a href="{{ route('inventory.templates.download', $item) }}" class="break-words text-blue-600 underline">{{ basename($item->file_path) }}</a>
@@ -178,6 +204,13 @@
                                 </label>
                                 <label class="text-sm font-semibold">Tên mẫu
                                     <input name="name" required value="{{ $item->name }}" class="mt-1 block w-full rounded-lg border px-3 py-2.5">
+                                </label>
+                                <label class="text-sm font-semibold">Loại báo cáo
+                                    <select name="report_type" required class="mt-1 block w-full rounded-lg border px-3 py-2.5">
+                                        @foreach($templateTypeOptions as $option)
+                                            <option value="{{ $option['type'] }}" @selected($item->report_type === $option['type'])>{{ $option['label'] }}</option>
+                                        @endforeach
+                                    </select>
                                 </label>
                                 <label class="text-sm font-semibold">Thay file Word
                                     <input name="file" type="file" accept=".docx" class="mt-1 block w-full rounded-lg border px-3 py-2.5">
