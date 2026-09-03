@@ -146,6 +146,8 @@ class InventoryWorkflowController extends ModuleBaseController
     public function proposalDetail(InventoryProposal $proposal){return view('inventory::feature',['section'=>'proposal-detail','title'=>'Chi tiết đề xuất','proposal'=>$proposal->load(['unit','items'])]);}
     public function proposalPrint(Request $r,InventoryProposal $proposal){$d=$r->validate(['print_mode'=>'required|in:unsigned,image,direct','signature_data'=>'nullable|string|max:7000000']);$signaturePath=$proposal->signature_path;$method=null;if($d['print_mode']!=='unsigned'){abort_unless(preg_match('/^data:image\/png;base64,(.+)$/s',(string)$d['signature_data'],$m),422,'Chữ ký phải là ảnh PNG hợp lệ.');$binary=base64_decode($m[1],true);abort_unless($binary!==false&&strlen($binary)>100,422,'Ảnh chữ ký không hợp lệ.');$signaturePath='inventory/signatures/'.now()->format('Y/m').'/proposal-'.$proposal->id.'-'.bin2hex(random_bytes(5)).'.png';Storage::disk('public')->put($signaturePath,$binary);$method=$d['print_mode']==='image'?'upload':'draw';}$proposal->update(['print_mode'=>$d['print_mode'],'signature_method'=>$method,'signature_path'=>$signaturePath,'printed_at'=>now()]);return view('inventory::partials.proposal-print',['proposal'=>$proposal->fresh()->load(['unit','items']),'signatureUrl'=>$signaturePath?Storage::disk('public')->url($signaturePath):null]);}
     public function proposalStore(Request $r){$d=$r->validate(['type'=>'required|in:REPAIR,RECALL,LIQUIDATION','title'=>'required|string|max:255','description'=>'nullable|string','unit_id'=>'nullable|exists:units,id','asset_id'=>'nullable|exists:inventory_assets,id','material_id'=>'nullable|exists:inventory_materials,id','loai_id'=>'required|exists:inventory_categories,id','classroom_id'=>'nullable|exists:classrooms,id','quantity'=>'nullable|numeric|min:.01','item_note'=>'nullable|string','location_note'=>'nullable|string|max:255','nganh_code'=>'required|string|max:80']);$industry=InventoryCategory::whereNull('parent_id')->where('code',$d['nganh_code'])->where('active',true)->first();$type=InventoryCategory::whereKey($d['loai_id'])->where('parent_id',$industry?->id)->where('active',true)->first();abort_unless($industry&&$type,422,'Loại vật tư không thuộc ngành đã chọn.');$materialId=$d['material_id']??null;$material=$materialId?InventoryMaterial::with('category')->findOrFail($materialId):null;abort_unless(!$material||((int)$material->category_id===(int)$type->id),422,'Vật tư không thuộc loại vật tư đã chọn.');$p=DB::transaction(function()use($d,$r,$materialId){$p=InventoryProposal::create(collect($d)->except(['asset_id','material_id','loai_id','classroom_id','quantity','item_note','location_note'])->merge(['created_by'=>$r->user()->id,'proposed_by_user_id'=>$r->user()->id,'proposed_by_username'=>$r->user()->email,'proposed_by_display_name'=>$r->user()->name])->all());$assetId=$d['asset_id']??null;if($materialId||$assetId){$m=$materialId?InventoryMaterial::find($materialId):null;$a=$assetId?InventoryAsset::find($assetId):null;$p->items()->create(['asset_id'=>$a?->id,'material_id'=>$m?->id,'material_code'=>$m?->code,'material_name'=>$m?->name??$a?->name,'name'=>$m?->name??$a?->name??$d['title'],'quantity'=>$d['quantity']??1,'unit'=>$m?->unit??$a?->unit,'from_classroom_id'=>$d['classroom_id']??$a?->classroom_id,'location_note'=>$d['location_note']??null,'note'=>$d['item_note']??null,'original_grade'=>$a?->grade,'original_code'=>$a?->asset_code]);}InventoryAuditLog::create(['user_id'=>$r->user()->id,'action'=>'CREATE','entity_type'=>'proposal','entity_id'=>$p->id,'details'=>$d]);return $p;});return back()->with('success','Đã tạo đề xuất.');}
+    public function proposalUpdate(Request $r,InventoryProposal $proposal){$d=$r->validate(['type'=>'required|in:REPAIR,RECALL,LIQUIDATION,PURCHASE','title'=>'required|string|max:255','description'=>'nullable|string','unit_id'=>'nullable|exists:units,id','status'=>'required|in:PENDING,APPROVED,REJECTED,COMPLETED','decision_number'=>'nullable|string|max:100','decision_note'=>'nullable|string|max:2000']);$proposal->update($d);InventoryAuditLog::create(['user_id'=>$r->user()->id,'action'=>'UPDATE','entity_type'=>'proposal','entity_id'=>$proposal->id,'details'=>$d]);return back()->with('success','Đã cập nhật đề xuất vật tư.');}
+    public function proposalDelete(InventoryProposal $proposal){DB::transaction(function()use($proposal):void{$id=$proposal->id;$details=['proposal_title'=>$proposal->title,'proposal_type'=>$proposal->type,'reason'=>'Xóa đề xuất vật tư'];$proposal->items()->delete();$proposal->delete();InventoryAuditLog::withoutEvents(fn()=>InventoryAuditLog::create(['user_id'=>auth()->id(),'action'=>'DELETE','entity_type'=>'proposal','entity_id'=>$id,'details'=>$details]));});return back()->with('success','Đã xóa đề xuất vật tư.');}
     public function proposalDecide(Request $r,InventoryProposal $proposal){$d=$r->validate(['status'=>'required|in:APPROVED,REJECTED,COMPLETED','decision_note'=>'required_if:status,REJECTED|string|min:3','decision_number'=>'nullable|string|max:100','decision_issuing_level'=>'nullable|string|max:100','decision_signer'=>'nullable|string|max:255']);$wasPending=$proposal->status==='PENDING';DB::transaction(function()use($d,$proposal,$r,$wasPending){$proposal->load('items');$proposal->update($d+['decided_by'=>$r->user()->id,'decided_at'=>now(),'completed_at'=>$d['status']==='COMPLETED'?now():null]);if($wasPending&&in_array($d['status'],['APPROVED','COMPLETED'],true))foreach($proposal->items as $item){$quantity=(int)($item->quantity?:1);if($proposal->type==='LIQUIDATION'){if($item->material){$item->material->update(['quantity'=>max(0,(int)$item->material->quantity-$quantity)]);}if($item->asset){$item->asset->update(['quantity'=>max(0,(int)$item->asset->quantity-$quantity),'status'=>'LIQUIDATED']);}}if($proposal->type==='RECALL'&&$item->asset)$item->asset->update(['classroom_id'=>null]);if($proposal->type==='REPAIR'&&$item->asset)$item->asset->update(['status'=>'REPAIRING']);}InventoryAuditLog::create(['user_id'=>$r->user()->id,'action'=>$d['status'],'entity_type'=>'proposal','entity_id'=>$proposal->id,'details'=>$d+['quantity_processed'=>$wasPending&&$proposal->type==='LIQUIDATION'?($proposal->items->sum('quantity')):0]]);});return back()->with('success','Đã cập nhật quyết định.');}
 
     public function repairs(){return view('inventory::feature',['section'=>'repairs','title'=>'Phân công sửa chữa','repairs'=>InventoryRepair::with(['asset','assignee'])->latest()->get(),'assets'=>InventoryAsset::whereIn('status',['BROKEN','REPAIRING'])->orderBy('name')->get(),'users'=>\App\Models\User::where('status',1)->orderBy('name')->get()]);}
@@ -208,6 +210,7 @@ class InventoryWorkflowController extends ModuleBaseController
     }
     public function transferDetail(InventoryTransfer $transfer){return view('inventory::feature',['section'=>'transfer-detail','title'=>'Chi tiết phiếu điều động / thu hồi','transfer'=>$transfer->load(['asset.material','fromClassroom.managingUnit','toClassroom.managingUnit','warehouse','decidedBy']),'units'=>\Modules\Unit\Models\Unit::active()->orderBy('name')->get()]);}
     public function transferUpdate(Request $r, InventoryTransfer $transfer){$d=$r->validate(['performing_unit'=>'required|string|max:255','requesting_unit'=>'required|string|max:255','decision_date'=>'nullable|date','decision_number'=>'nullable|string|max:100','signer'=>'nullable|string|max:255','using_unit'=>'nullable|string|max:255','general_note'=>'nullable|string']);$d['printed_at']=null;$d['general_note']=trim(preg_replace('/\s*\[ĐÃ IN QUYẾT ĐỊNH\]/u','',$d['general_note']??''));if(!Schema::hasColumn('inventory_transfers','printed_at'))unset($d['printed_at']);$transfer->update($d);if($r->boolean('print'))return $this->transferWord($transfer->fresh());return back()->with('success','Đã cập nhật thông tin phiếu.');}
+    public function transferDelete(InventoryTransfer $transfer){$transfer->delete();return back()->with('success','Đã xóa phiếu điều động / thu hồi.');}
     public function transferWord(InventoryTransfer $transfer){
         $transfer->load(['asset.material','fromClassroom.managingUnit','toClassroom.managingUnit','warehouse']);
         if (Schema::hasColumn('inventory_transfers', 'printed_at')) $transfer->update(['printed_at'=>now()]);
@@ -283,6 +286,14 @@ class InventoryWorkflowController extends ModuleBaseController
 
     public function search(Request $r){$term=$r->string('q')->toString();return view('inventory::feature',['section'=>'search','title'=>'Tìm kiếm vật tư','materials'=>InventoryMaterial::with(['building','classroom'])->when($term,fn($q)=>$q->where(fn($x)=>$x->where('code','like',"%$term%")->orWhere('name','like',"%$term%")))->get(),'assets'=>InventoryAsset::with('classroom')->when($term,fn($q)=>$q->where(fn($x)=>$x->where('asset_code','like',"%$term%")->orWhere('name','like',"%$term%")))->get()]);}
     public function logs(){return view('inventory::feature',['section'=>'logs','title'=>'Nhật ký vật tư','logs'=>InventoryMovement::with(['material','user'])->latest()->paginate(30),'transferLogs'=>InventoryTransfer::with(['asset','material','fromClassroom','toClassroom','decidedBy'])->latest()->limit(50)->get(),'repairLogs'=>InventoryRepair::with('asset')->latest()->limit(50)->get(),'proposalLogs'=>InventoryProposal::with(['items','unit','decidedBy'])->latest()->limit(50)->get(),'auditLogs'=>InventoryAuditLog::with('user')->latest()->limit(100)->get()->each->resolveDetails(),'brokenLogs'=>InventoryBrokenLog::with(['asset','actor'])->latest()->limit(100)->get()]);}
+    public function auditLogUpdate(Request $r,InventoryAuditLog $log){$d=$r->validate(['created_at'=>'nullable|date','action'=>'required|string|max:80','asset_code'=>'nullable|string|max:120','name'=>'nullable|string|max:255','quantity'=>'nullable|numeric|min:0','reason'=>'nullable|string|max:2000']);$details=(array)$log->details;$details['asset_code']=$d['asset_code']??data_get($details,'asset_code',data_get($details,'code'));$details['code']=$details['asset_code'];$details['name']=$d['name']??data_get($details,'name');$details['quantity']=$d['quantity']??data_get($details,'quantity',0);$details['reason']=$d['reason']??data_get($details,'reason');$log->update(['action'=>$d['action'],'details'=>$details,'created_at'=>$d['created_at']??$log->created_at]);return back()->with('success','Đã cập nhật nhật ký vật tư.');}
+    public function auditLogDelete(InventoryAuditLog $log){$log->delete();return back()->with('success','Đã xóa nhật ký vật tư.');}
+    public function movementUpdate(Request $r,InventoryMovement $movement){$movement->update($r->validate(['type'=>'required|string|max:50','quantity'=>'required|integer|min:0','reference'=>'nullable|string|max:255','note'=>'nullable|string|max:2000']));return back()->with('success','Đã cập nhật nhật ký nhập / xuất vật tư.');}
+    public function movementDelete(InventoryMovement $movement){$movement->delete();return back()->with('success','Đã xóa nhật ký nhập / xuất vật tư.');}
+    public function brokenLogUpdate(Request $r,InventoryBrokenLog $brokenLog){$brokenLog->update($r->validate(['event_at'=>'nullable|date','event_type'=>'required|string|max:80','asset_code'=>'nullable|string|max:120','asset_name'=>'required|string|max:255','quantity'=>'required|numeric|min:0','status_after'=>'nullable|string|max:80','reason'=>'nullable|string|max:2000','performer'=>'nullable|string|max:255']));return back()->with('success','Đã cập nhật nhật ký hỏng / sửa chữa.');}
+    public function brokenLogDelete(InventoryBrokenLog $brokenLog){$brokenLog->delete();return back()->with('success','Đã xóa nhật ký hỏng / sửa chữa.');}
+    public function repairUpdate(Request $r,InventoryRepair $repair){$repair->update($r->validate(['status'=>'required|in:OPEN,ASSIGNED,COMPLETED,CANCELLED','content'=>'nullable|string|max:2000','performer'=>'nullable|string|max:255','started_at'=>'nullable|date','cost'=>'nullable|numeric|min:0','result_note'=>'nullable|string|max:2000']));return back()->with('success','Đã cập nhật phiếu sửa chữa.');}
+    public function repairDelete(InventoryRepair $repair){$repair->delete();return back()->with('success','Đã xóa phiếu sửa chữa.');}
     public function assignCategory(Request $r){$d=$r->validate(['user_id'=>'required|exists:users,id','category_id'=>'required|exists:inventory_categories,id']);InventoryUserCategory::firstOrCreate($d);InventoryAuditLog::create(['user_id'=>$r->user()->id,'action'=>'ASSIGN','entity_type'=>'user_category','entity_id'=>$d['category_id'],'details'=>$d]);return back()->with('success','Đã gán ngành vật tư.');}
     public function myCatalog(Request $r){$categories=InventoryCategory::withCount('materials')->whereHas('userAssignments',fn($q)=>$q->where('user_id',$r->user()->id))->orderBy('name')->get();return view('inventory::feature',['section'=>'my-catalog','title'=>'Ngành vật tư của tôi','categories'=>$categories]);}
     public function liquidation(){$liquidated=InventoryProposal::where('type','LIQUIDATION')->whereIn('status',['APPROVED','COMPLETED'])->with('items')->get()->sum(fn($p)=>$p->items->sum('quantity'));$recalled=InventoryProposal::where('type','RECALL')->whereIn('status',['APPROVED','COMPLETED'])->with('items')->get()->sum(fn($p)=>$p->items->sum('quantity'));$repaired=InventoryRepair::where('status','COMPLETED')->with('asset')->get()->sum(fn($r)=>(int)($r->asset?->quantity??0));return view('inventory::feature',['section'=>'liquidation','title'=>'Đề xuất / thanh lý','proposals'=>InventoryProposal::with(['unit','items'])->where('type','LIQUIDATION')->latest()->get(),'liquidatedQuantity'=>$liquidated,'recalledQuantity'=>$recalled,'repairedQuantity'=>$repaired,'units'=>\Modules\Unit\Models\Unit::active()->orderBy('name')->get(),'assets'=>InventoryAsset::with('classroom')->where('status','<>','LIQUIDATED')->orderBy('name')->get(),'materials'=>InventoryMaterial::with('category')->orderBy('name')->get(),'categories'=>InventoryCategory::where('active',true)->whereNull('parent_id')->orderBy('code')->get(),'types'=>InventoryCategory::where('active',true)->whereNotNull('parent_id')->orderBy('code')->get(),'classrooms'=>Classroom::active()->with('building')->orderBy('name')->get()]);}
@@ -300,10 +311,337 @@ class InventoryWorkflowController extends ModuleBaseController
     public function roomUserStore(Request $r,Classroom $classroom){$d=$r->validate(['user_id'=>'required|exists:users,id','role'=>'nullable|string|max:100']);InventoryRoomUser::updateOrCreate(['classroom_id'=>$classroom->id,'user_id'=>$d['user_id']],['role'=>$d['role']??null]);return back()->with('success','Đã gán người phụ trách phòng.');}
     public function roomUserDelete(InventoryRoomUser $roomUser){$roomUser->delete();return back()->with('success','Đã bỏ người phụ trách phòng.');}
 
-    public function reports(Request $r){$months=max(1,min(60,(int)$r->input('months',3)));$from=$r->input('from');$to=$r->input('to');$materials=InventoryMaterial::with(['category','building','classroom'])->when($r->filled('category_id'),fn($q)=>$q->where('category_id',$r->category_id))->when($r->filled('building_id'),fn($q)=>$q->where('building_id',$r->building_id))->when($r->filled('classroom_id'),fn($q)=>$q->where('classroom_id',$r->classroom_id))->when($r->filled('search'),fn($q,$s)=>$q->where(fn($x)=>$x->where('code','like',"%$s%")->orWhere('name','like',"%$s%")))->orderBy('name')->get();$assets=InventoryAsset::with(['classroom.building','holdingUnit'])->orderBy('name')->get();$auditLogs=InventoryAuditLog::with('user')->when($from,fn($q)=>$q->whereDate('created_at','>=',$from))->when($to,fn($q)=>$q->whereDate('created_at','<=',$to))->latest()->limit(300)->get()->each->resolveDetails();$repairs=InventoryRepair::with(['asset','assignee'])->when($from,fn($q)=>$q->whereDate('opened_at','>=',$from))->when($to,fn($q)=>$q->whereDate('opened_at','<=',$to))->latest()->get();$brokenLogs=InventoryBrokenLog::with(['asset','actor'])->when($from,fn($q)=>$q->whereDate('event_at','>=',$from))->when($to,fn($q)=>$q->whereDate('event_at','<=',$to))->latest()->get();$transfers=InventoryTransfer::with(['asset','fromClassroom','toClassroom'])->latest()->limit(100)->get();$stats=['records'=>InventoryMaterial::count(),'quantity'=>InventoryMaterial::sum('quantity'),'groups'=>InventoryCategory::where('active',true)->count(),'buildings'=>InventoryMaterial::whereNotNull('building_id')->distinct()->count('building_id'),'normal'=>InventoryAsset::where('status','NORMAL')->count(),'broken'=>InventoryAsset::whereIn('status',['BROKEN','REPAIRING'])->count()];$expiringAssets=InventoryMaterial::with(['building','classroom'])->whereNotNull('expiry_date')->whereBetween('expiry_date',[now()->toDateString(),now()->addMonths($months)->toDateString()])->orderBy('expiry_date')->get();return view('inventory::feature',['section'=>'reports','title'=>'Báo cáo vật tư','materials'=>$materials,'assets'=>$assets,'auditLogs'=>$auditLogs,'repairs'=>$repairs,'brokenLogs'=>$brokenLogs,'transfers'=>$transfers,'expiringAssets'=>$expiringAssets,'stats'=>$stats,'categories'=>InventoryCategory::where('active',true)->orderBy('name')->get(),'buildings'=>Building::orderBy('name')->get(),'classrooms'=>Classroom::active()->orderBy('name')->get(),'months'=>$months,'from'=>$from,'to'=>$to,'repairCount'=>$repairs->whereIn('status',['OPEN','ASSIGNED'])->count()]);}
+    public function reports(Request $r){$months=max(1,min(60,(int)$r->input('months',3)));$from=$r->input('from');$to=$r->input('to');$materials=InventoryMaterial::with(['category','building','classroom'])->when($r->filled('category_id'),fn($q)=>$q->where('category_id',$r->category_id))->when($r->filled('building_id'),fn($q)=>$q->where('building_id',$r->building_id))->when($r->filled('classroom_id'),fn($q)=>$q->where('classroom_id',$r->classroom_id))->when($r->filled('search'),fn($q,$s)=>$q->where(fn($x)=>$x->where('code','like',"%$s%")->orWhere('name','like',"%$s%")))->orderBy('name')->get();$assets=InventoryAsset::with(['classroom.building','holdingUnit'])->orderBy('name')->get();$auditLogs=InventoryAuditLog::with('user')->when($from,fn($q)=>$q->whereDate('created_at','>=',$from))->when($to,fn($q)=>$q->whereDate('created_at','<=',$to))->latest()->limit(300)->get()->each->resolveDetails();$repairs=InventoryRepair::with(['asset','assignee'])->when($from,fn($q)=>$q->whereDate('opened_at','>=',$from))->when($to,fn($q)=>$q->whereDate('opened_at','<=',$to))->latest()->get();$brokenLogs=InventoryBrokenLog::with(['asset','actor'])->when($from,fn($q)=>$q->whereDate('event_at','>=',$from))->when($to,fn($q)=>$q->whereDate('event_at','<=',$to))->latest()->get();$transfers=InventoryTransfer::with(['asset','fromClassroom','toClassroom'])->latest()->limit(100)->get();$stats=['records'=>InventoryMaterial::count(),'quantity'=>InventoryMaterial::sum('quantity'),'groups'=>InventoryCategory::where('active',true)->count(),'buildings'=>InventoryMaterial::whereNotNull('building_id')->distinct()->count('building_id'),'normal'=>InventoryAsset::where('status','NORMAL')->count(),'broken'=>InventoryAsset::whereIn('status',['BROKEN','REPAIRING'])->count()];$expiringAssets=InventoryMaterial::with(['building','classroom'])->whereNotNull('expiry_date')->whereBetween('expiry_date',[now()->toDateString(),now()->addMonths($months)->toDateString()])->orderBy('expiry_date')->get();return view('inventory::feature',['section'=>'reports','title'=>'Báo cáo vật tư','materials'=>$materials,'assets'=>$assets,'auditLogs'=>$auditLogs,'repairs'=>$repairs,'brokenLogs'=>$brokenLogs,'transfers'=>$transfers,'expiringAssets'=>$expiringAssets,'stats'=>$stats,'categories'=>InventoryCategory::where('active',true)->orderBy('name')->get(),'buildings'=>Building::orderBy('name')->get(),'classrooms'=>Classroom::active()->orderBy('name')->get(),'reportTemplates'=>InventoryReportTemplate::where('active',true)->whereNotNull('file_path')->orderBy('name')->get(),'months'=>$months,'from'=>$from,'to'=>$to,'repairCount'=>$repairs->whereIn('status',['OPEN','ASSIGNED'])->count()]);}
     public function reportWord(Request $r){$types=['position'=>'BÁO CÁO THỐNG KÊ THỰC LỰC VẬT TƯ, TRANG BỊ KỸ THUẬT HIỆN CÓ — CHI TIẾT THEO VỊ TRÍ','total-position'=>'BÁO CÁO THỐNG KÊ THỰC LỰC VẬT TƯ, TRANG BỊ KỸ THUẬT HIỆN CÓ — TỔNG HỢP THEO TÒA','period'=>'BÁO CÁO TỔNG HỢP THỰC LỰC TRANG BỊ, VẬT TƯ KỸ THUẬT','increase-decrease'=>'BÁO CÁO TĂNG, GIẢM THỰC LỰC TRANG BỊ, VẬT TƯ KỸ THUẬT','using-position'=>'BÁO CÁO VẬT TƯ ĐANG SỬ DỤNG — THEO VỊ TRÍ','using-total'=>'BÁO CÁO VẬT TƯ ĐANG SỬ DỤNG — TỔNG THỂ','warehouse'=>'BÁO CÁO VỀ TÌNH HÌNH KHO VẬT TƯ','system-warehouse'=>'BÁO CÁO VỀ TÌNH HÌNH KHO VẬT TƯ — KHO HỆ THỐNG KHO-VT','transfer'=>'QUYẾT ĐỊNH VỀ VIỆC ĐIỀU ĐỘNG VẬT TƯ','recall'=>'QUYẾT ĐỊNH VỀ VIỆC THU HỒI, TRẢ VỀ VẬT TƯ','repair'=>'BÁO CÁO VỀ VẬT TƯ ĐANG HƯ HẠI VÀ SỬA CHỮA','update-log'=>'BÁO CÁO VỀ NHẬT KÝ CẬP NHẬT VẬT TƯ'];$word=new \PhpOffice\PhpWord\PhpWord();$word->setDefaultFontName('Arial');$section=$word->addSection();$section->addTitle($types[$r->input('report_type','position')]??$types['position'],1);$section->addText('Thời gian xuất: '.now()->format('d/m/Y H:i'));$table=$section->addTable(['borderSize'=>6,'borderColor'=>'999999']);foreach(['STT','Mã vật tư','Tên vật tư','Loại / nhóm','Tòa nhà','Phòng','Số lượng','Phân cấp','Trạng thái'] as $h)$table->addCell(1500)->addText($h);foreach(InventoryAsset::with(['classroom.building'])->orderBy('name')->get() as $i=>$a){$row=$table->addRow();foreach([$i+1,$a->asset_code,$a->name,$a->category?:'Chưa phân loại',$a->classroom?->building?->name?:'—',$a->classroom?->name?:'—',$a->quantity.' '.($a->unit?:''),$a->grade?:'—',['NORMAL'=>'Bình thường','BROKEN'=>'Hỏng','REPAIRING'=>'Đang sửa','LIQUIDATED'=>'Đã thanh lý'][$a->status]??$a->status] as $v)$row->addCell(1500)->addText((string)$v);} $path=storage_path('app/report-inventory-'.now()->format('YmdHis').'.docx');(new \PhpOffice\PhpWord\Writer\Word2007($word))->save($path);return response()->download($path,'bao-cao-vat-tu.docx')->deleteFileAfterSend(true);}
     public function reportCsv(){$rows=InventoryMaterial::orderBy('name')->get();$callback=function()use($rows){$out=fopen('php://output','w');fputcsv($out,['No','Code','Name','Unit','Quantity','Location']);foreach($rows as $i=>$m)fputcsv($out,[$i+1,$m->code,$m->name,$m->unit,$m->quantity,$m->location]);fclose($out);};return response()->streamDownload($callback,'inventory-report.csv',['Content-Type'=>'text/csv; charset=UTF-8']);}
-    public function templates(){return view('inventory::feature',['section'=>'templates','title'=>'Mẫu báo cáo Word','templates'=>InventoryReportTemplate::where('active',true)->latest()->get()]);}
-    public function templateStore(Request $r){$d=$r->validate(['code'=>'required|string|max:80|unique:inventory_report_templates,code','name'=>'required|string|max:255','description'=>'nullable|string','file'=>'nullable|file|mimes:doc,docx|max:10240']);if($r->hasFile('file'))$d['file_path']=$r->file('file')->store('inventory-templates');unset($d['file']);InventoryReportTemplate::create($d);return back()->with('success','Đã lưu mẫu Word.');}
+    public function templates(){$templates=InventoryReportTemplate::latest()->get();return view('inventory::feature',['section'=>'templates','title'=>'Mẫu báo cáo Word','templates'=>$templates,'uploadTemplates'=>$templates->whereNull('report_type'),'customTemplates'=>$templates->whereNotNull('report_type')->keyBy('report_type'),'defaultTemplates'=>$this->defaultReportTemplates()]);}
+    public function templateStore(Request $r){$d=$r->validate(['code'=>'required|string|max:80|unique:inventory_report_templates,code','report_type'=>'nullable|string|max:80','name'=>'required|string|max:255','description'=>'nullable|string','file'=>'required|file|mimes:docx|max:10240','active'=>'nullable|boolean']);$type=$d['report_type']??$this->inferVariableTemplateType($d['code'],$d['name'],$d['description']??'');$d['file_path']=$this->storeVariableTemplateFile($r->file('file')->getRealPath(),$type,$d['code']);$d['active']=$r->boolean('active',true);unset($d['file']);$template=empty($d['report_type'])?InventoryReportTemplate::create($d):InventoryReportTemplate::updateOrCreate(['report_type'=>$d['report_type']],$d);return back()->with('success','Đã lưu mẫu Word báo cáo vật tư. Khi xuất đúng loại báo cáo này sẽ dùng mẫu vừa import.');}
+    public function templateUpdate(Request $r,InventoryReportTemplate $template){$d=$r->validate(['code'=>['required','string','max:80',Rule::unique('inventory_report_templates','code')->ignore($template->id)],'report_type'=>'nullable|string|max:80','name'=>'required|string|max:255','description'=>'nullable|string','file'=>'nullable|file|mimes:docx|max:10240','active'=>'nullable|boolean']);$oldPath=$template->file_path;$type=$d['report_type']??$template->report_type??$this->inferVariableTemplateType($d['code'],$d['name'],$d['description']??'');if($r->hasFile('file'))$d['file_path']=$this->storeVariableTemplateFile($r->file('file')->getRealPath(),$type,$d['code']);$d['active']=$r->boolean('active');unset($d['file']);$template->update($d);if(isset($d['file_path'])&&$oldPath)Storage::disk('local')->delete($oldPath);return back()->with('success','Đã cập nhật mẫu báo cáo vật tư.');}
+    public function templateReplaceDefault(Request $r,string $type){$defaults=$this->defaultReportTemplates();abort_unless(isset($defaults[$type]),404,'Không tìm thấy loại mẫu báo cáo.');$d=$r->validate(['file'=>'required|file|mimes:docx|max:10240','active'=>'nullable|boolean']);$default=$defaults[$type];$code='DEFAULT_'.strtoupper(str_replace('-','_',$type));$old=InventoryReportTemplate::where('report_type',$type)->first();$oldPath=$old?->file_path;$path=$this->storeVariableTemplateFile($r->file('file')->getRealPath(),$type,$code);InventoryReportTemplate::updateOrCreate(['report_type'=>$type],['code'=>$code,'name'=>$default['name'],'description'=>'Mẫu tùy chỉnh thay cho mẫu mặc định '.$default['name'],'file_path'=>$path,'active'=>$r->boolean('active',true)]);if($oldPath)Storage::disk('local')->delete($oldPath);return back()->with('success','Đã thay mẫu '.$default['name'].'. Lần xuất báo cáo tương ứng sẽ dùng file vừa import.');}
+    public function templateDeleteDefault(string $type){$defaults=$this->defaultReportTemplates();abort_unless(isset($defaults[$type]),404,'Không tìm thấy loại mẫu báo cáo.');$template=InventoryReportTemplate::where('report_type',$type)->first();if($template){$path=$template->file_path;$template->delete();if($path)Storage::disk('local')->delete($path);return back()->with('success','Đã xóa mẫu tùy chỉnh. Báo cáo này quay về mẫu biến gốc.');}return back()->with('success','Báo cáo này đang dùng mẫu biến gốc, không có mẫu tùy chỉnh để xóa.');}
+    public function templateDownload(InventoryReportTemplate $template){$source=$template->absolutePath();abort_unless($source&&is_file($source),404,'Không tìm thấy file mẫu.');$type=$this->inferVariableTemplateType($template->code,$template->name,$template->description??'');$path=storage_path('app/'.uniqid('mau-bien-upload-',true).'.docx');$this->writeVariableTemplateZip($source,$path,$type);return response()->download($path,($template->code?:'mau-bao-cao-vat-tu').'.docx')->deleteFileAfterSend(true);}
+    public function defaultTemplateDownload(string $type)
+    {
+        $templates = $this->defaultReportTemplates();
+        abort_unless(isset($templates[$type]), 404, 'Không tìm thấy mẫu mặc định.');
+
+        $template = $templates[$type];
+        $filename = $template['variable_file'] ?? ('mau-bien-'.$type.'.docx');
+        $path = storage_path('app/'.$filename);
+        if (in_array($type, ['position', 'total-position', 'unit'], true)) {
+            $this->createInventoryStatusVariableTemplate($path);
+        } else {
+            $this->writeVariableTemplateZip(resource_path('inventory-report-templates/'.$template['file']),$path,$type);
+        }
+
+        return response()->download($path, $filename)->deleteFileAfterSend(true);
+    }
+    public function templateDelete(InventoryReportTemplate $template){$path=$template->file_path;$template->delete();if($path)Storage::disk('local')->delete($path);return back()->with('success','Đã xóa mẫu báo cáo vật tư.');}
+    private function storeVariableTemplateFile(string $source,string $type,string $code): string
+    {
+        Storage::disk('local')->makeDirectory('inventory-templates');
+        $safeCode=preg_replace('/[^A-Za-z0-9_-]+/','-',trim($code)?:'mau-bao-cao-vat-tu');
+        $relative='inventory-templates/'.$safeCode.'-'.now()->format('YmdHis').'.docx';
+        $target=Storage::disk('local')->path($relative);
+        $this->wordFileHasVariables($source)?copy($source,$target):$this->writeVariableTemplateZip($source,$target,$type);
+        return $relative;
+    }
+    private function wordFileHasVariables(string $path): bool
+    {
+        $zip=new \ZipArchive();
+        if($zip->open($path)!==true)return false;
+        $xml=$zip->getFromName('word/document.xml')?:'';
+        $zip->close();
+        return str_contains($xml,'${')||str_contains($xml,'{{');
+    }
+    private function createInventoryStatusVariableTemplate(string $path): void
+    {
+        $word = new \PhpOffice\PhpWord\PhpWord();
+        $word->setDefaultFontName('Times New Roman');
+        $word->setDefaultFontSize(10);
+        $section = $word->addSection([
+            'orientation' => 'landscape',
+            'marginTop' => 650,
+            'marginBottom' => 650,
+            'marginLeft' => 650,
+            'marginRight' => 650,
+        ]);
+
+        $normal = ['name' => 'Times New Roman', 'size' => 10];
+        $bold = ['name' => 'Times New Roman', 'size' => 10, 'bold' => true];
+        $title = ['name' => 'Times New Roman', 'size' => 13, 'bold' => true];
+        $small = ['name' => 'Times New Roman', 'size' => 7];
+        $smallBold = ['name' => 'Times New Roman', 'size' => 7, 'bold' => true];
+        $center = ['alignment' => \PhpOffice\PhpWord\SimpleType\Jc::CENTER];
+        $right = ['alignment' => \PhpOffice\PhpWord\SimpleType\Jc::RIGHT];
+        $left = ['alignment' => \PhpOffice\PhpWord\SimpleType\Jc::LEFT];
+
+        $head = $section->addTable(['borderSize' => 0, 'cellMargin' => 0, 'width' => 100 * 50, 'unit' => 'pct']);
+        $head->addRow();
+        $head->addCell(8000)->addText('TỔNG CỤC HẬU CẦN', $bold, $center);
+        $head->addCell(8000)->addText('CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM', $bold, $center);
+        $head->addRow();
+        $head->addCell(8000)->addText('TRƯỜNG CAO ĐẲNG HẬU CẦN 2', $bold, $center);
+        $head->addCell(8000)->addText('Độc lập - Tự do - Hạnh phúc', ['bold' => true, 'underline' => 'single'] + $normal, $center);
+        $head->addRow();
+        $head->addCell(8000)->addText('Số: ${so_van_ban}/BC-CDHC', $normal, $center);
+        $head->addCell(8000)->addText('Thành phố Hồ Chí Minh, ngày ${ngay} tháng ${thang} năm ${nam_hien_tai}', ['italic' => true] + $normal, $center);
+
+        $section->addTextBreak(1);
+        $section->addText('BÁO CÁO THỐNG KÊ THỰC LỰC VẬT TƯ, TRANG BỊ KỸ THUẬT HIỆN CÓ', $title, $center);
+        $section->addText('Số liệu đến ngày: ${ngay_bao_cao}', ['italic' => true, 'bold' => true, 'size' => 11, 'name' => 'Times New Roman'], $center);
+        $section->addTextBreak(1);
+
+        $tableStyle = ['borderSize' => 6, 'borderColor' => '222222', 'cellMargin' => 45, 'width' => 100 * 50, 'unit' => 'pct'];
+        $table = $section->addTable($tableStyle);
+        $unitCount = 20;
+        $table->addRow(520);
+        $this->addTemplateCell($table, 'MÃ SỐ', 1050, $smallBold, $center, ['vMerge' => 'restart']);
+        $this->addTemplateCell($table, 'TÊN VẬT TƯ TRANG BỊ', 3500, $smallBold, $center, ['vMerge' => 'restart']);
+        $this->addTemplateCell($table, 'ĐVT', 520, $smallBold, $center, ['vMerge' => 'restart']);
+        $this->addTemplateCell($table, "Phâ\nn", 650, $smallBold, $center, ['vMerge' => 'restart']);
+        $this->addTemplateCell($table, 'Thực lực ngày ${ngay_bao_cao}', 900, $smallBold, $center, ['vMerge' => 'restart']);
+        $this->addTemplateCell($table, 'THỰC LỰC CÁC ĐƠN VỊ', 520 * $unitCount, $smallBold, $center, ['gridSpan' => $unitCount]);
+
+        $table->addRow(420);
+        $this->addTemplateCell($table, '', 1050, $small, $center, ['vMerge' => 'continue']);
+        $this->addTemplateCell($table, '', 3500, $small, $center, ['vMerge' => 'continue']);
+        $this->addTemplateCell($table, '', 520, $small, $center, ['vMerge' => 'continue']);
+        $this->addTemplateCell($table, '', 650, $small, $center, ['vMerge' => 'continue']);
+        $this->addTemplateCell($table, '', 900, $small, $center, ['vMerge' => 'continue']);
+        for ($i = 1; $i <= $unitCount; $i++) {
+            $this->addTemplateCell($table, '${don_vi_'.$i.'}', 520, $smallBold, $center);
+        }
+
+        $unitValues = [];
+        for ($i = 1; $i <= $unitCount; $i++) {
+            $unitValues[] = '${don_vi_'.$i.'_so_luong}';
+        }
+
+        $this->addTemplateRow($table, ['', '* ${nganh}', '', '', '${so_luong_nganh}'], $unitValues, $smallBold, $left);
+        $this->addTemplateRow($table, ['', '${stt_nhom}. ${loai_vat_tu}', '', '', '${so_luong_loai}'], $unitValues, $smallBold, $left);
+        $this->addTemplateRow($table, ['${ma_vat_tu}', '${ten_vat_tu}', '${don_vi_tinh}', '${phan_cap}', '${so_luong}'], $unitValues, $small, $left);
+        $this->addTemplateRow($table, ['', '', '', '${phan_cap_chi_tiet}', '${so_luong_phan_cap}'], $unitValues, $small, $left);
+        $this->addTemplateRow($table, ['', 'TỔNG CỘNG', '', '', '${tong_so_luong}'], $unitValues, $smallBold, $left);
+
+        $section->addTextBreak(1);
+        $foot = $section->addTable(['borderSize' => 0, 'cellMargin' => 0, 'width' => 100 * 50, 'unit' => 'pct']);
+        $foot->addRow();
+        $leftCell = $foot->addCell(8000);
+        $leftCell->addText('Nơi nhận:', $bold, $left);
+        $leftCell->addText('- ${noi_nhan};', $normal, $left);
+        $leftCell->addText('- Lưu: VT, HC;', $normal, $left);
+        $rightCell = $foot->addCell(8000);
+        $rightCell->addText('${chuc_danh_ky}', $bold, $center);
+        $rightCell->addText('(Ký, ghi rõ họ tên, cấp bậc)', ['italic' => true] + $normal, $center);
+        $rightCell->addTextBreak(2);
+        $rightCell->addText('${nguoi_ky}', $bold, $center);
+
+        (new \PhpOffice\PhpWord\Writer\Word2007($word))->save($path);
+    }
+    private function addTemplateCell($table,string $text,int $width,array $font,array $paragraph,array $style=[]): void
+    {
+        $cell = $table->addCell($width, array_merge(['valign' => 'center'], $style));
+        foreach (explode("\n", $text) as $line) {
+            $cell->addText($line, $font, $paragraph);
+        }
+    }
+    private function addTemplateRow($table,array $fixed,array $unitValues,array $font,array $paragraph): void
+    {
+        $table->addRow(420);
+        $widths = [1050, 3500, 520, 650, 900];
+        foreach ($fixed as $index => $value) {
+            $this->addTemplateCell($table, $value, $widths[$index] ?? 700, $font, $index === 1 ? $paragraph : ['alignment' => \PhpOffice\PhpWord\SimpleType\Jc::CENTER]);
+        }
+        foreach ($unitValues as $value) {
+            $this->addTemplateCell($table, $value, 520, $font, ['alignment' => \PhpOffice\PhpWord\SimpleType\Jc::CENTER]);
+        }
+    }
+    private function writeVariableTemplateZip(string $sourcePath,string $targetPath,string $type): void
+    {
+        $source=new \ZipArchive();$target=new \ZipArchive();
+        abort_unless($source->open($sourcePath)===true&&$target->open($targetPath,\ZipArchive::CREATE|\ZipArchive::OVERWRITE)===true,500,'Không tạo được file mẫu biến.');
+        $documentXml=$source->getFromName('word/document.xml');
+        abort_unless($documentXml!==false,500,'File mẫu Word không hợp lệ.');
+        $xml=new \DOMDocument();$xml->loadXML($documentXml);
+        $xpath=new \DOMXPath($xml);$xpath->registerNamespace('w','http://schemas.openxmlformats.org/wordprocessingml/2006/main');
+        $this->replaceVariableTemplateDate($xpath);
+        in_array($type,['position','total-position','unit','using-position','using-total'],true)
+            ? $this->variableizePositionTemplate($xml,$xpath)
+            : $this->variableizeSimpleTemplate($xml,$xpath,$type);
+        $documentXml=$xml->saveXML();
+        for($i=0;$i<$source->numFiles;$i++){$name=$source->getNameIndex($i);$target->addFromString($name,$name==='word/document.xml'?$documentXml:$source->getFromIndex($i));}
+        $source->close();$target->close();
+    }
+    private function replaceVariableTemplateDate(\DOMXPath $xpath): void
+    {
+        foreach($xpath->query('//w:t') as $text){
+            $value=$text->nodeValue;
+            $value=preg_replace('/Số:\s*(TEST-\d+|\.{2,}\/BC-CDHC)/u','Số: ${so_van_ban}',$value);
+            $value=preg_replace('/ngày\s+\d{1,2}\s+tháng\s+\d{1,2}\s+năm\s+\d{4}/u','ngày ${ngay} tháng ${thang} năm ${nam_hien_tai}',$value);
+            $value=preg_replace('/ngày\s+\d{1,2}\/\d{1,2}\/\d{4}/u','ngày ${ngay_bao_cao}',$value);
+            $value=preg_replace('/\d{1,2}\/\d{1,2}\/\d{4}/u','${ngay_bao_cao}',$value);
+            $value=preg_replace('/Số liệu từ ngày\s+…\s+đến ngày\s+…/u','Số liệu từ ngày ${tu_ngay} đến ngày ${den_ngay}',$value);
+            $value=str_replace('Phạm vi: Toàn trường','Phạm vi: ${pham_vi}',$value);
+            $text->nodeValue=$value;
+        }
+    }
+    private function variableizePositionTemplate(\DOMDocument $xml,\DOMXPath $xpath): void
+    {
+        $tables=$xpath->query('//w:tbl');$table=$tables->item(1)?:$tables->item(0);if(!$table)return;
+        $rows=$xpath->query('./w:tr',$table);if($rows->length<3)return;
+        $fixedColumns=$this->positionFixedColumnCount($xpath,$rows->item(0),$rows->item(1));
+        if($header=$rows->item(1)){$cells=$xpath->query('./w:tc',$header);for($i=$fixedColumns;$i<$cells->length;$i++)$this->setCellText($xpath,$cells->item($i),'${don_vi_'.($i-$fixedColumns+1).'}');}
+        $groupTemplate=$rows->item(2)->cloneNode(true);$industryTemplate=$rows->item(min(3,$rows->length-1))->cloneNode(true);$itemTemplate=$rows->item(min(4,$rows->length-1))->cloneNode(true);$roomTemplate=$rows->item(min(9,$rows->length-1))->cloneNode(true);$totalTemplate=$rows->item($rows->length-1)->cloneNode(true);
+        for($i=$rows->length-1;$i>=2;$i--)$table->removeChild($rows->item($i));
+        $unitVars=$this->unitVariableValues($xpath,$rows->item(1),$fixedColumns);
+        $groupValues=$fixedColumns===5?['${ma_vi_tri}','${vi_tri}',null,null,'${tong_so_luong}']:['${ma_vi_tri}','${vi_tri}',null,'${tong_so_luong}'];
+        $industryValues=$fixedColumns===5?[null,'${nganh}',null,null,'${so_luong_nganh}']:[null,'${nganh}',null,'${so_luong_nganh}'];
+        $itemValues=$fixedColumns===5?['${ma_vat_tu}','${ten_vat_tu}','${don_vi_tinh}','${phan_cap}','${so_luong}']:['${ma_vat_tu}','${ten_vat_tu}','${don_vi_tinh}','${so_luong}'];
+        $roomValues=$fixedColumns===5?[null,'${phong}',null,null,'${so_luong_phong}']:[null,'${phong}',null,'${so_luong_phong}'];
+        $totalValues=$fixedColumns===5?[null,'TỔNG CỘNG',null,null,'${tong_so_luong}']:[null,'TỔNG CỘNG',null,'${tong_so_luong}'];
+        $this->setTemplateRow($xml,$groupTemplate,array_merge($groupValues,$unitVars),$table);
+        $this->setTemplateRow($xml,$industryTemplate,array_merge($industryValues,$unitVars),$table);
+        $this->setTemplateRow($xml,$itemTemplate,array_merge($itemValues,$unitVars),$table);
+        $this->setTemplateRow($xml,$roomTemplate,array_merge($roomValues,$unitVars),$table);
+        $this->setTemplateRow($xml,$totalTemplate,array_merge($totalValues,$unitVars),$table);
+    }
+    private function variableizeSimpleTemplate(\DOMDocument $xml,\DOMXPath $xpath,string $type): void
+    {
+        $tables=$xpath->query('//w:tbl');$indexes=$tables->length>1?(in_array($type,['warehouse','system-warehouse'],true)?[1,2]:[1]):[0];
+        foreach($indexes as $tableIndex){$table=$tables->item($tableIndex);if(!$table)continue;$rows=$xpath->query('./w:tr',$table);if(!$rows->length)continue;$headerRows=$tables->length===1?2:1;$templateIndex=in_array($type,['increase-decrease','period'],true)?min(3,$rows->length-1):min($headerRows,$rows->length-1);$templateRow=$rows->item($templateIndex)->cloneNode(true);$totalRow=$rows->item($rows->length-1)->cloneNode(true);$removeFrom=in_array($type,['increase-decrease','period'],true)?2:$headerRows;for($i=$rows->length-1;$i>=$removeFrom;$i--)$table->removeChild($rows->item($i));$this->setTemplateRow($xml,$templateRow,$this->tableVariables($type,$xpath,$templateRow),$table);$this->setTemplateRow($xml,$totalRow,$this->totalVariables($xpath,$totalRow),$table);}
+    }
+    private function tableVariables(string $type,\DOMXPath $xpath,\DOMNode $row): array
+    {
+        $cells=$xpath->query('./w:tc',$row)->length;$map=[
+            'increase-decrease'=>['${ten_vat_tu}','${don_vi_tinh}','${phan_cap}','${so_luong_tang}','${so_luong_giam}','${tren_cap}','${mua_sam}','${tang_phan_cap}','${kiem_ke_tang}','${tang_khac}','${tra_tren}','${hao_hut}','${thanh_ly}','${hu_hong}','${kiem_ke_giam}','${giam_khac}'],
+            'period'=>['${stt}','${ngay_du_lieu}','${loai_bien_dong}','${ten_vat_tu}','${so_luong}','${ghi_chu}'],
+            'transfer'=>['${stt}','${ten_vat_tu}','${don_vi_tinh}','${phan_cap}','${so_luong}','${ghi_chu}'],
+            'recall'=>['${stt}','${ten_vat_tu}','${don_vi_tinh}','${phan_cap}','${so_luong}','${ghi_chu}'],
+            'update-log'=>['${stt}','${ngay_du_lieu}','${loai_bien_dong}','${ten_vat_tu}','${so_luong}','${truoc}','${sau}','${vi_tri}','${nguoi_thuc_hien}','${ly_do}'],
+            'repair'=>['${stt}','${ma_vat_tu}','${ten_vat_tu}','${don_vi_tinh}','${phan_cap}','${so_luong}','${vi_tri}','${trang_thai}','${ghi_chu}'],
+        ];$values=$map[$type]??['${stt}','${ma_vat_tu}','${ten_vat_tu}','${don_vi_tinh}','${phan_cap}','${so_luong}','${toa_nha}','${phong}','${trang_thai}','${ghi_chu}'];return array_pad(array_slice($values,0,$cells),$cells,'');
+    }
+    private function totalVariables(\DOMXPath $xpath,\DOMNode $row): array
+    {
+        $cells=$xpath->query('./w:tc',$row)->length;return array_pad([null,'TỔNG CỘNG',null,'${tong_so_luong}'],$cells,'');
+    }
+    private function positionFixedColumnCount(\DOMXPath $xpath,?\DOMNode $firstHeader,?\DOMNode $secondHeader): int
+    {
+        $text='';
+        foreach([$firstHeader,$secondHeader] as $row){
+            if(!$row)continue;
+            foreach($xpath->query('.//w:t',$row) as $node)$text.=' '.$node->nodeValue;
+        }
+        return str_contains(mb_strtolower($text,'UTF-8'),'phâ')||str_contains($text,'${phan_cap}')?5:4;
+    }
+    private function unitVariableValues(\DOMXPath $xpath,?\DOMNode $header,int $fixedColumns=4): array
+    {
+        if(!$header)return [];$count=max(0,$xpath->query('./w:tc',$header)->length-$fixedColumns);$values=[];for($i=1;$i<=$count;$i++)$values[]='${don_vi_'.$i.'_so_luong}';return $values;
+    }
+    private function setCellText(\DOMXPath $xpath,\DOMNode $cell,string $value): void
+    {
+        $nodes=$xpath->query('.//w:t',$cell);if(!$nodes->length)return;$nodes->item(0)->nodeValue=$value;for($i=1;$i<$nodes->length;$i++)$nodes->item($i)->nodeValue='';
+    }
+    private function setTemplateRow(\DOMDocument $xml,\DOMNode $row,array $values,\DOMNode $table): void
+    {
+        $xpath=new \DOMXPath($xml);$xpath->registerNamespace('w','http://schemas.openxmlformats.org/wordprocessingml/2006/main');
+        $cells=$xpath->query('./w:tc',$row);
+        foreach($cells as $index=>$cell){
+            $nodes=$xpath->query('.//w:t',$cell);if(!$nodes->length)continue;
+            $nodes->item(0)->nodeValue=(string)($values[$index]??'');
+            for($i=1;$i<$nodes->length;$i++)$nodes->item($i)->nodeValue='';
+        }
+        $table->appendChild($row);
+    }
+    private function inferVariableTemplateType(?string $code,?string $name,?string $description=''): string
+    {
+        $text=mb_strtolower(($code.' '.$name.' '.$description),'UTF-8');
+        return match(true){
+            str_contains($text,'tang')||str_contains($text,'tăng')||str_contains($text,'giam')||str_contains($text,'giảm')=>'increase-decrease',
+            str_contains($text,'ky')||str_contains($text,'kỳ')||str_contains($text,'tong hop')||str_contains($text,'tổng hợp')=>'period',
+            str_contains($text,'dieu dong')||str_contains($text,'điều động')||str_contains($text,'transfer')=>'transfer',
+            str_contains($text,'thu hoi')||str_contains($text,'thu hồi')||str_contains($text,'recall')=>'recall',
+            str_contains($text,'sua chua')||str_contains($text,'sửa chữa')||str_contains($text,'hu hai')||str_contains($text,'hư hại')||str_contains($text,'repair')=>'repair',
+            str_contains($text,'cap nhat')||str_contains($text,'cập nhật')||str_contains($text,'update')=>'update-log',
+            str_contains($text,'don vi')||str_contains($text,'đơn vị')||str_contains($text,'unit')=>'unit',
+            str_contains($text,'kho')||str_contains($text,'warehouse')=>'warehouse',
+            str_contains($text,'su dung')||str_contains($text,'sử dụng')||str_contains($text,'using')=>'using-position',
+            str_contains($text,'tong the')||str_contains($text,'tổng thể')=>'total-position',
+            default=>'position',
+        };
+    }
+    private function defaultReportTemplates(): array
+    {
+        return [
+            'position' => ['name' => 'Theo vị trí', 'report' => 'Thống kê theo vị trí', 'file' => 'bao-cao-thuc-luc-hien-co-theo-vi-tri.docx', 'variable_file' => 'Mau_bien_Theo_vi_tri.docx'],
+            'total-position' => ['name' => 'Tổng thể', 'report' => 'Thống kê tổng thể', 'file' => 'bao-cao-thuc-luc-hien-co-tong-the.docx', 'variable_file' => 'Mau_bien_Tong_the.docx'],
+            'unit' => ['name' => 'Đơn vị', 'report' => 'Thống kê theo đơn vị', 'file' => 'bao-cao-thuc-luc-hien-co-tong-the.docx', 'variable_file' => 'Mau_bien_Don_vi.docx'],
+            'increase-decrease' => ['name' => 'Tăng, giảm', 'report' => 'Báo cáo tăng, giảm', 'file' => 'bao-cao-tang-giam-thuc-luc-vat-tu.docx', 'variable_file' => 'Mau_bien_Tang_giam.docx'],
+            'period' => ['name' => 'Tổng hợp theo kỳ', 'report' => 'Báo cáo tổng hợp theo kỳ', 'file' => 'bao-cao-tong-hop-thuc-luc-theo-ky.docx', 'variable_file' => 'Mau_bien_Tong_hop_theo_ky.docx'],
+            'warehouse' => ['name' => 'Kho', 'report' => 'Báo cáo kho', 'file' => 'bao-cao-kho-vat-tu.docx', 'variable_file' => 'Mau_bien_Kho.docx'],
+            'using-total' => ['name' => 'Toàn hệ thống', 'report' => 'Báo cáo toàn hệ thống', 'file' => 'bao-cao-vt-dang-su-dung-tong-the.docx', 'variable_file' => 'Mau_bien_Toan_he_thong.docx'],
+            'system-warehouse' => ['name' => 'Kho-vật tư', 'report' => 'Báo cáo hệ thống kho-vật tư', 'file' => 'bao-cao-kho-he-thong-kho-vt.docx', 'variable_file' => 'Mau_bien_Kho_vat_tu.docx'],
+            'transfer' => ['name' => 'Phiếu điều động', 'report' => 'Phiếu điều động', 'file' => 'bao-cao-quyet-dinh-dieu-dong.docx', 'variable_file' => 'Mau_bien_Phieu_dieu_dong.docx'],
+            'recall' => ['name' => 'Phiếu thu hồi', 'report' => 'Phiếu thu hồi', 'file' => 'bao-cao-quyet-dinh-thu-hoi-tra-ve.docx', 'variable_file' => 'Mau_bien_Phieu_thu_hoi.docx'],
+            'repair' => ['name' => 'Vật tư hư hại', 'report' => 'Báo cáo vật tư hư hại', 'file' => 'bao-cao-vat-tu-dang-hu-hai-va-sua-chua.docx', 'variable_file' => 'Mau_bien_Vat_tu_hu_hai.docx'],
+            'update-log' => ['name' => 'Nhật kí cập nhật', 'report' => 'Báo cáo nhật kí cập nhật', 'file' => 'bao-cao-cap-nhat-vat-tu.docx', 'variable_file' => 'Mau_bien_Nhat_ki_cap_nhat.docx'],
+        ];
+    }
+
+    private function variableTemplateColumns(string $type): array
+    {
+        $common = [
+            'STT' => 'stt',
+            'Ngày' => 'ngay_du_lieu',
+            'Mã vật tư' => 'ma_vat_tu',
+            'Tên vật tư' => 'ten_vat_tu',
+            'Ngành' => 'nganh',
+            'Loại' => 'loai_vat_tu',
+            'ĐVT' => 'don_vi_tinh',
+            'SL' => 'so_luong',
+            'Cấp' => 'phan_cap',
+            'Trạng thái' => 'trang_thai',
+            'Tòa nhà' => 'toa_nha',
+            'Phòng' => 'phong',
+            'Đơn vị' => 'don_vi_quan_ly',
+            'Vị trí' => 'vi_tri',
+            'Ghi chú' => 'ghi_chu',
+        ];
+
+        if (in_array($type, ['increase-decrease', 'period', 'update-log'], true)) {
+            return [
+                'STT' => 'stt',
+                'Ngày' => 'ngay_du_lieu',
+                'Mã vật tư' => 'ma_vat_tu',
+                'Tên vật tư' => 'ten_vat_tu',
+                'Biến động' => 'loai_bien_dong',
+                'SL' => 'so_luong',
+                'Trước' => 'truoc',
+                'Sau' => 'sau',
+                'Vị trí' => 'vi_tri',
+                'Người TH' => 'nguoi_thuc_hien',
+                'Lý do' => 'ly_do',
+                'Ghi chú' => 'ghi_chu',
+            ];
+        }
+
+        if (in_array($type, ['transfer', 'recall'], true)) {
+            return [
+                'STT' => 'stt',
+                'Mã vật tư' => 'ma_vat_tu',
+                'Tên vật tư' => 'ten_vat_tu',
+                'ĐVT' => 'don_vi_tinh',
+                'SL' => 'so_luong',
+                'Cấp' => 'phan_cap',
+                'Phòng' => 'phong',
+                'Đơn vị' => 'don_vi_quan_ly',
+                'Lý do' => 'ly_do',
+                'Ghi chú' => 'ghi_chu',
+            ];
+        }
+
+        return $common;
+    }
     public function repairAssign(Request $r,InventoryRepair $repair){$d=$r->validate(['performer'=>'required|string|max:255','started_at'=>'nullable|date','cost'=>'nullable|numeric|min:0','result_note'=>'nullable|string']);$repair->update($d+['status'=>'ASSIGNED','started_at'=>$d['started_at']??now()]);$repair->asset?->update(['status'=>'REPAIRING','repair_started_at'=>$d['started_at']??now(),'repair_performer'=>$d['performer']]);return back()->with('success','Đã phân công người sửa.');}
 }

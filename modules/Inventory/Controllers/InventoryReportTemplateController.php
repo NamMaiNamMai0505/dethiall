@@ -4,7 +4,7 @@ namespace Modules\Inventory\Controllers;
 
 use App\Http\Controllers\ModuleBaseController;
 use Illuminate\Http\Request;
-use Modules\Inventory\Models\{InventoryAsset, InventoryAuditLog, InventoryMovement, InventoryTransfer};
+use Modules\Inventory\Models\{InventoryAsset, InventoryAuditLog, InventoryMovement, InventoryReportTemplate, InventoryTransfer};
 
 class InventoryReportTemplateController extends ModuleBaseController
 {
@@ -13,6 +13,7 @@ class InventoryReportTemplateController extends ModuleBaseController
         $files = [
             'position' => 'bao-cao-thuc-luc-hien-co-theo-vi-tri.docx',
             'total-position' => 'bao-cao-thuc-luc-hien-co-tong-the.docx',
+            'unit' => 'bao-cao-thuc-luc-hien-co-tong-the.docx',
             'period' => 'bao-cao-tong-hop-thuc-luc-theo-ky.docx',
             'increase-decrease' => 'bao-cao-tang-giam-thuc-luc-vat-tu.docx',
             'using-position' => 'bao-cao-vt-dang-su-dung-vi-tri.docx',
@@ -29,17 +30,162 @@ class InventoryReportTemplateController extends ModuleBaseController
             'summary' => $request->input('scope', 'position') === 'all' ? 'total-position' : 'position',
             'movement' => 'increase-decrease',
             'using' => $request->input('scope', 'position') === 'all' ? 'using-total' : 'using-position',
-            'unit' => 'total-position',
+            'unit' => 'unit',
             default => (string) $request->input('report_type', 'position'),
         };
         abort_unless(isset($files[$type]), 422, 'Loại báo cáo không hợp lệ.');
 
-        $path = resource_path('inventory-report-templates/'.$files[$type]);
+        if ($request->filled('template_id')) {
+            return $this->fillUploadedVariableTemplate($request, $type);
+        }
+
+        [$path, $filename] = $this->resolveTemplate($request, $files[$type], $type);
         abort_unless(is_file($path), 404, 'Chưa có mẫu báo cáo tương ứng.');
 
-        return in_array($type, ['position', 'total-position', 'using-position', 'using-total'], true)
-            ? $this->fillPositionTemplate($request, $path, $files[$type])
-            : $this->fillReportTemplate($request, $path, $files[$type], $type);
+        return in_array($type, ['position', 'total-position', 'unit', 'using-position', 'using-total'], true)
+            ? $this->fillPositionTemplate($request, $path, $filename)
+            : $this->fillReportTemplate($request, $path, $filename, $type);
+    }
+
+    private function resolveTemplate(Request $request, string $defaultFilename, string $type): array
+    {
+        if ($request->filled('template_id')) {
+            $template = InventoryReportTemplate::whereKey($request->integer('template_id'))->where('active', true)->first();
+            abort_unless($template, 404, 'Không tìm thấy mẫu báo cáo đã chọn.');
+            $path = $template->absolutePath();
+            abort_unless($path && is_file($path), 404, 'File mẫu báo cáo đã chọn không tồn tại.');
+            abort_unless(strtolower(pathinfo($path, PATHINFO_EXTENSION)) === 'docx', 422, 'Mẫu báo cáo Word phải là file .docx.');
+
+            $safeCode = preg_replace('/[^A-Za-z0-9_-]+/', '-', $template->code ?: 'mau-bao-cao-vat-tu');
+            return [$path, $safeCode.'-'.now()->format('YmdHis').'.docx'];
+        }
+
+        $custom = InventoryReportTemplate::where('report_type', $type)->where('active', true)->first();
+        if ($custom) {
+            $path = $custom->absolutePath();
+            if ($path && is_file($path)) {
+                $safeCode = preg_replace('/[^A-Za-z0-9_-]+/', '-', $custom->code ?: $type);
+                return [$path, $safeCode.'-'.now()->format('YmdHis').'.docx'];
+            }
+        }
+
+        return [resource_path('inventory-report-templates/'.$defaultFilename), $defaultFilename];
+    }
+
+    private function fillUploadedVariableTemplate(Request $request, string $type): mixed
+    {
+        $template = InventoryReportTemplate::whereKey($request->integer('template_id'))->where('active', true)->first();
+        abort_unless($template, 404, 'Không tìm thấy mẫu báo cáo đã chọn.');
+        $path = $template->absolutePath();
+        abort_unless($path && is_file($path), 404, 'File mẫu báo cáo đã chọn không tồn tại.');
+        abort_unless(strtolower(pathinfo($path, PATHINFO_EXTENSION)) === 'docx', 422, 'Mẫu báo cáo Word phải là file .docx.');
+
+        [$rowsData, $assets] = $this->loadReportRows($request, $type);
+        $processor = new \PhpOffice\PhpWord\TemplateProcessor($path);
+        $today = now();
+        $titles = [
+            'position' => 'Báo cáo thực lực vật tư theo vị trí',
+            'total-position' => 'Báo cáo thực lực vật tư tổng thể',
+            'unit' => 'Báo cáo thực lực vật tư theo đơn vị',
+            'period' => 'Báo cáo tổng hợp thực lực theo kỳ',
+            'increase-decrease' => 'Báo cáo tăng giảm thực lực vật tư',
+            'warehouse' => 'Báo cáo kho vật tư',
+            'system-warehouse' => 'Báo cáo hệ thống kho vật tư',
+            'transfer' => 'Quyết định điều động vật tư',
+            'recall' => 'Quyết định thu hồi vật tư',
+            'repair' => 'Báo cáo vật tư hư hại và sửa chữa',
+            'update-log' => 'Báo cáo cập nhật vật tư',
+            'using-position' => 'Báo cáo vật tư đang sử dụng theo vị trí',
+            'using-total' => 'Báo cáo vật tư đang sử dụng tổng thể',
+        ];
+        $processor->setValues([
+            'ngay_bao_cao' => $today->format('d/m/Y'),
+            'ngay' => $today->format('d'),
+            'thang' => $today->format('m'),
+            'nam' => $today->format('Y'),
+            'tu_ngay' => $request->filled('from') ? date('d/m/Y', strtotime($request->input('from'))) : '',
+            'den_ngay' => $request->filled('to') ? date('d/m/Y', strtotime($request->input('to'))) : $today->format('d/m/Y'),
+            'tieu_de' => $titles[$type] ?? 'Báo cáo vật tư',
+            'loai_bao_cao' => $titles[$type] ?? 'Báo cáo vật tư',
+            'ten_mau' => $template->name,
+            'ma_mau' => $template->code,
+            'tong_so' => (string) $rowsData->count(),
+            'tong_so_luong' => (string) $rowsData->sum(fn ($item) => (float) ($item->quantity ?? $item->asset?->quantity ?? 0)),
+            'tong_vat_tu' => (string) $assets->count(),
+            'tong_so_luong_vat_tu' => (string) $assets->sum('quantity'),
+        ]);
+
+        $rows = $rowsData->values()->map(fn ($record, $index) => $this->variableRowValues($record, $type, $index + 1))->all();
+        if (!$rows) $rows = [$this->emptyVariableRow()];
+
+        $variables = $processor->getVariables();
+        $clonedRows = false;
+        if (in_array('stt', $variables, true)) {
+            try {
+                $processor->cloneRowAndSetValues('stt', $rows);
+                $clonedRows = true;
+            } catch (\Throwable $e) {
+                $clonedRows = false;
+            }
+        }
+
+        $textRows = collect($rows)->map(fn ($row) => trim(implode(' ', array_filter([
+            $row['stt'] ? $row['stt'].'.' : '',
+            $row['ma_vat_tu'],
+            $row['ten_vat_tu'],
+            $row['so_luong'],
+            $row['don_vi_tinh'],
+            $row['vi_tri'],
+            $row['ghi_chu'],
+        ], fn ($value) => $value !== '' && $value !== null))))->implode("\n");
+
+        if ($clonedRows) {
+            foreach (array_keys($this->emptyVariableRow()) as $macro) {
+                $processor->setValue($macro, '');
+            }
+            $processor->setValue('bang_du_lieu', '');
+        } else {
+            foreach (($rows[0] ?? $this->emptyVariableRow()) as $macro => $value) {
+                $processor->setValue($macro, $value);
+            }
+            $processor->setValue('bang_du_lieu', $textRows);
+        }
+
+        $safeCode = preg_replace('/[^A-Za-z0-9_-]+/', '-', $template->code ?: 'mau-bao-cao-vat-tu');
+        $output = storage_path('app/'.$safeCode.'-'.now()->format('YmdHis').'.docx');
+        $processor->saveAs($output);
+
+        return response()->download($output, $safeCode.'.docx')->deleteFileAfterSend(true);
+    }
+
+    private function loadReportRows(Request $request, string $type): array
+    {
+        $assets = InventoryAsset::with(['classroom.building', 'classroom.managingUnit', 'material.category.parent', 'holdingUnit'])
+            ->when($request->filled('building_id'), fn ($q) => $q->whereHas('classroom', fn ($room) => $room->where('building_id', $request->integer('building_id'))))
+            ->when($request->filled('classroom_id'), fn ($q) => $q->where('classroom_id', $request->integer('classroom_id')))
+            ->when($request->filled('unit_id'), fn ($q) => $q->whereHas('classroom', fn ($room) => $room->where('managing_unit_id', $request->integer('unit_id'))))
+            ->when($request->filled('material_id'), fn ($q) => $q->where('material_id', $request->integer('material_id')))
+            ->orderBy('name')->get();
+
+        $rowsData = $assets;
+        if ($type === 'repair') {
+            $rowsData = $assets->whereIn('status', ['BROKEN', 'REPAIRING'])->values();
+        } elseif (in_array($type, ['transfer', 'recall'], true)) {
+            $rowsData = InventoryTransfer::with(['asset', 'material', 'fromClassroom.managingUnit', 'toClassroom.managingUnit'])->where('type', $type === 'recall' ? 'RECALL' : 'TRANSFER')->latest()->get();
+        } elseif (in_array($type, ['increase-decrease', 'update-log'], true)) {
+            $actions = $type === 'increase-decrease' ? ['INCREASE', 'DECREASE', 'ADJUST'] : ['CREATE', 'UPDATE', 'IMPORT', 'INCREASE', 'DECREASE', 'ADJUST', 'MOVEMENT'];
+            $rowsData = InventoryAuditLog::with('user')->whereIn('action', $actions)
+                ->when($request->filled('from'), fn ($q) => $q->whereDate('created_at', '>=', $request->input('from')))
+                ->when($request->filled('to'), fn ($q) => $q->whereDate('created_at', '<=', $request->input('to')))
+                ->latest()->get();
+        } elseif ($type === 'period') {
+            $rowsData = InventoryMovement::with(['material.category.parent', 'material.classroom.building'])
+                ->when($request->filled('from'), fn ($q) => $q->whereDate('created_at', '>=', $request->input('from')))
+                ->when($request->filled('to'), fn ($q) => $q->whereDate('created_at', '<=', $request->input('to')))
+                ->latest()->get();
+        }
+
+        return [$rowsData, $assets];
     }
 
     private function fillReportTemplate(Request $request, string $template, string $filename, string $type): mixed
@@ -187,6 +333,97 @@ class InventoryReportTemplateController extends ModuleBaseController
         return [$record->asset_code, $record->name, $record->unit ?: $record->material?->unit, $record->grade ?: 1, $record->quantity, $record->classroom?->building?->name ?: 'Kho vật tư', $record->classroom?->name ?: 'Kho vật tư', $record->status === 'BROKEN' ? 'Hỏng' : ($record->status === 'REPAIRING' ? 'Đang sửa chữa' : '')];
     }
 
+    private function variableRowValues(mixed $record, string $type, int $number): array
+    {
+        $row = $this->emptyVariableRow();
+        $row['stt'] = (string) $number;
+        if ($record instanceof InventoryTransfer) {
+            $asset = $record->asset;
+            $material = $record->material;
+            $row['ma_vat_tu'] = (string) ($asset?->asset_code ?: $material?->code ?: '');
+            $row['ten_vat_tu'] = (string) ($asset?->name ?: $material?->name ?: '');
+            $row['don_vi_tinh'] = (string) ($asset?->unit ?: $material?->unit ?: '');
+            $row['so_luong'] = (string) ($record->quantity ?: $asset?->quantity ?: 1);
+            $row['phan_cap'] = (string) ($asset?->grade ?: '');
+            $row['trang_thai'] = $record->status;
+            $row['phong'] = (string) ($type === 'recall' ? $record->fromClassroom?->name : $record->toClassroom?->name);
+            $row['toa_nha'] = '';
+            $row['don_vi_quan_ly'] = (string) ($type === 'recall' ? $record->fromClassroom?->managingUnit?->name : $record->toClassroom?->managingUnit?->name);
+            $row['ly_do'] = (string) ($record->reason ?: $record->general_note ?: '');
+            $row['ghi_chu'] = (string) ($record->general_note ?: '');
+            return $row;
+        }
+        if ($record instanceof InventoryMovement) {
+            $row['ngay_du_lieu'] = optional($record->created_at)->format('d/m/Y');
+            $row['ma_vat_tu'] = (string) ($record->material?->code ?: '');
+            $row['ten_vat_tu'] = (string) ($record->material?->name ?: '');
+            $row['nganh'] = (string) ($record->material?->category?->parent?->name ?: '');
+            $row['loai_vat_tu'] = (string) ($record->material?->category?->name ?: '');
+            $row['don_vi_tinh'] = (string) ($record->material?->unit ?: '');
+            $row['so_luong'] = (string) $record->quantity;
+            $row['loai_bien_dong'] = ['IN' => 'Tăng', 'OUT' => 'Giảm', 'ADJUST' => 'Điều chỉnh'][$record->type] ?? $record->type;
+            $row['ghi_chu'] = (string) ($record->note ?: '');
+            return $row;
+        }
+        if ($record instanceof InventoryAuditLog) {
+            $details = (array) $record->details;
+            $row['ngay_du_lieu'] = optional($record->created_at)->format('d/m/Y');
+            $row['ma_vat_tu'] = (string) ($details['asset_code'] ?? $details['code'] ?? '');
+            $row['ten_vat_tu'] = (string) ($details['name'] ?? 'Vật tư');
+            $row['don_vi_tinh'] = (string) ($details['unit'] ?? '');
+            $row['so_luong'] = (string) ($details['quantity'] ?? abs((float) ($details['change'] ?? 0)));
+            $row['phan_cap'] = (string) ($details['grade'] ?? '');
+            $row['loai_bien_dong'] = ['CREATE' => 'Thêm mới', 'UPDATE' => 'Cập nhật', 'IMPORT' => 'Import', 'INCREASE' => 'Tăng', 'DECREASE' => 'Giảm', 'ADJUST' => 'Điều chỉnh', 'MOVEMENT' => 'Biến động'][$record->action] ?? $record->action;
+            $row['truoc'] = (string) ($details['before'] ?? '');
+            $row['sau'] = (string) ($details['after'] ?? '');
+            $row['vi_tri'] = (string) ($details['install_address'] ?? $details['location'] ?? '');
+            $row['nguoi_thuc_hien'] = (string) ($record->user?->name ?? '');
+            $row['ly_do'] = (string) ($details['reason'] ?? $details['note'] ?? '');
+            $row['ghi_chu'] = $row['ly_do'];
+            return $row;
+        }
+        $row['ma_vat_tu'] = (string) ($record->asset_code ?: $record->material?->code ?: '');
+        $row['ten_vat_tu'] = (string) ($record->name ?: $record->material?->name ?: '');
+        $row['nganh'] = (string) ($record->material?->category?->parent?->name ?: '');
+        $row['loai_vat_tu'] = (string) ($record->material?->category?->name ?: '');
+        $row['don_vi_tinh'] = (string) ($record->unit ?: $record->material?->unit ?: '');
+        $row['so_luong'] = (string) $record->quantity;
+        $row['phan_cap'] = (string) ($record->grade ?: '');
+        $row['trang_thai'] = ['NORMAL' => 'Bình thường', 'BROKEN' => 'Hỏng', 'REPAIRING' => 'Đang sửa', 'LIQUIDATED' => 'Đã thanh lý'][$record->status] ?? (string) $record->status;
+        $row['toa_nha'] = (string) ($record->classroom?->building?->name ?: 'Kho vật tư');
+        $row['phong'] = (string) ($record->classroom?->name ?: 'Kho vật tư');
+        $row['don_vi_quan_ly'] = (string) ($record->classroom?->managingUnit?->name ?: $record->holdingUnit?->name ?: '');
+        $row['vi_tri'] = trim($row['toa_nha'].' / '.$row['phong'], ' /');
+        $row['ghi_chu'] = (string) ($record->note ?: '');
+        return $row;
+    }
+
+    private function emptyVariableRow(): array
+    {
+        return [
+            'stt' => '',
+            'ngay_du_lieu' => '',
+            'ma_vat_tu' => '',
+            'ten_vat_tu' => '',
+            'nganh' => '',
+            'loai_vat_tu' => '',
+            'don_vi_tinh' => '',
+            'so_luong' => '',
+            'phan_cap' => '',
+            'trang_thai' => '',
+            'toa_nha' => '',
+            'phong' => '',
+            'don_vi_quan_ly' => '',
+            'vi_tri' => '',
+            'loai_bien_dong' => '',
+            'truoc' => '',
+            'sau' => '',
+            'nguoi_thuc_hien' => '',
+            'ly_do' => '',
+            'ghi_chu' => '',
+        ];
+    }
+
     private function writeReportZip(string $template, string $documentXml, string $filename): mixed
     {
         $output = storage_path('app/'.pathinfo($filename, PATHINFO_FILENAME).'-'.now()->format('YmdHis').'.docx');
@@ -228,11 +465,12 @@ class InventoryReportTemplateController extends ModuleBaseController
         $itemTemplate = $rows->item(5)->cloneNode(true);
         $roomTemplate = $rows->item(9)->cloneNode(true);
         $totalTemplate = $rows->item($rows->length - 1)->cloneNode(true);
+        $fixedColumns = $this->positionFixedColumnCount($xpath, $rows->item(0), $rows->item(1));
 
         $unitModels = $assets->map(fn ($asset) => $asset->classroom?->managingUnit ?: $asset->holdingUnit)
             ->filter()->unique('id')->sortBy('id')->values();
-        $unitColumns = $unitModels->take(max(0, $xpath->query('./w:tc', $rows->item(1))->length - 4))->values();
-        $this->setUnitHeaders($xml, $xpath, $rows->item(1), $unitColumns);
+        $unitColumns = $unitModels->take(max(0, $xpath->query('./w:tc', $rows->item(1))->length - $fixedColumns))->values();
+        $this->setUnitHeaders($xml, $xpath, $rows->item(1), $unitColumns, $fixedColumns);
 
         for ($i = $rows->length - 2; $i >= 2; $i--) {
             $table->removeChild($rows->item($i));
@@ -245,29 +483,30 @@ class InventoryReportTemplateController extends ModuleBaseController
         $buildingCount = $assets->map(fn ($asset) => $asset->classroom?->building?->name ?: 'Kho vật tư')->unique()->count();
         foreach ($industries as $industry => $industryAssets) {
             $industryNo++;
-            $this->setTemplateRow($xml, $groupTemplate->cloneNode(true), [null, $industry, null, $industryAssets->sum('quantity')], $table);
+            $this->setTemplateRow($xml, $groupTemplate->cloneNode(true), $this->positionRowValues($fixedColumns, [null, $industry, null, null, $industryAssets->sum('quantity')]), $table);
             $types = $industryAssets->groupBy(fn ($asset) => $asset->material?->category?->name ?: 'Chưa xác định loại');
             $typeNo = 0;
             foreach ($types as $type => $typeAssets) {
                 $typeNo++;
-                $this->setTemplateRow($xml, $categoryTemplate->cloneNode(true), [null, $type, null, $typeAssets->sum('quantity')], $table);
+                $this->setTemplateRow($xml, $categoryTemplate->cloneNode(true), $this->positionRowValues($fixedColumns, [null, $type, null, null, $typeAssets->sum('quantity')]), $table);
                 $materials = $typeAssets->groupBy(fn ($asset) => $asset->material_id ?: $asset->asset_code ?: $asset->name);
                 foreach ($materials as $materialAssets) {
                     $first = $materialAssets->first();
                     $total = $materialAssets->sum('quantity');
-                    $itemValues = [
+                    $itemValues = $this->positionRowValues($fixedColumns, [
                         $first->asset_code ?: $first->material?->code,
                         $first->name ?: $first->material?->name,
                         $first->unit ?: $first->material?->unit,
+                        $first->grade ?: '',
                         $total,
-                    ];
+                    ]);
                     $itemValues = array_merge($itemValues, $this->unitQuantities($materialAssets, $unitColumns));
                     $this->setTemplateRow($xml, $this->boldRow($xml, $itemTemplate->cloneNode(true)), $itemValues, $table);
                     $buildings = $materialAssets->groupBy(fn ($asset) => $asset->classroom?->building?->name ?: 'Kho vật tư');
                     foreach ($buildings as $building => $buildingAssets) {
                         $buildingNumber = $buildingNames->search($building) + 1;
                         $buildingLabel = $buildingCount > 1 ? $buildingNumber.'. '.$building : $building;
-                        $buildingValues = [null, $buildingLabel, null, $buildingAssets->sum('quantity')];
+                        $buildingValues = $this->positionRowValues($fixedColumns, [null, $buildingLabel, null, null, $buildingAssets->sum('quantity')]);
                         $this->setTemplateRow($xml, $roomTemplate->cloneNode(true), array_merge($buildingValues, $this->unitQuantities($buildingAssets, $unitColumns)), $table);
                         $rooms = $buildingAssets->groupBy(fn ($asset) => $asset->classroom?->id ?: 'warehouse');
                         foreach ($rooms as $roomAssets) {
@@ -279,18 +518,19 @@ class InventoryReportTemplateController extends ModuleBaseController
                             null,
                             '| '.$roomName,
                             null,
+                            null,
                             $roomAssets->sum('quantity'),
                         ];
                         $roomRow = $roomTemplate->cloneNode(true);
                         $this->rightAlignCell($xml, $roomRow, 1);
-                        $this->setTemplateRow($xml, $roomRow, array_merge($roomValues, $this->unitQuantities($roomAssets, $unitColumns)), $table);
+                        $this->setTemplateRow($xml, $roomRow, array_merge($this->positionRowValues($fixedColumns, $roomValues), $this->unitQuantities($roomAssets, $unitColumns)), $table);
                         }
                     }
                 }
             }
         }
 
-        $this->setTemplateRow($xml, $totalTemplate, [null, 'TỔNG CỘNG', null, $assets->sum('quantity')], $table);
+        $this->setTemplateRow($xml, $totalTemplate, $this->positionRowValues($fixedColumns, [null, 'TỔNG CỘNG', null, null, $assets->sum('quantity')]), $table);
         foreach ($xpath->query('//w:t') as $text) {
             if (str_contains($text->nodeValue, 'Vị trí quản lý sử dụng (chi tiết theo phòng)')) $text->nodeValue = '';
         }
@@ -353,12 +593,29 @@ class InventoryReportTemplateController extends ModuleBaseController
         return $values;
     }
 
-    private function setUnitHeaders(\DOMDocument $xml, \DOMXPath $xpath, ?\DOMNode $headerRow, $units): void
+    private function positionRowValues(int $fixedColumns, array $values): array
+    {
+        return $fixedColumns === 5
+            ? array_slice(array_pad($values, 5, ''), 0, 5)
+            : [$values[0] ?? null, $values[1] ?? null, $values[2] ?? null, $values[4] ?? ($values[3] ?? null)];
+    }
+
+    private function positionFixedColumnCount(\DOMXPath $xpath, ?\DOMNode $firstHeader, ?\DOMNode $secondHeader): int
+    {
+        $text = '';
+        foreach ([$firstHeader, $secondHeader] as $row) {
+            if (!$row) continue;
+            foreach ($xpath->query('.//w:t', $row) as $node) $text .= ' '.$node->nodeValue;
+        }
+        return str_contains(mb_strtolower($text, 'UTF-8'), 'phâ') || str_contains($text, '${phan_cap}') ? 5 : 4;
+    }
+
+    private function setUnitHeaders(\DOMDocument $xml, \DOMXPath $xpath, ?\DOMNode $headerRow, $units, int $fixedColumns = 4): void
     {
         if (!$headerRow) return;
         $cells = $xpath->query('./w:tc', $headerRow);
         foreach ($units as $index => $unit) {
-            $cell = $cells->item($index + 4);
+            $cell = $cells->item($index + $fixedColumns);
             if (!$cell) continue;
             $texts = $xpath->query('.//w:t', $cell);
             if ($texts->length) {
