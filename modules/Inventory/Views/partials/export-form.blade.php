@@ -49,12 +49,8 @@
 
             <label class="text-sm font-semibold md:col-span-2">Mẫu Word
                 <select name="template_id" data-native-select class="mt-1 block w-full rounded-lg border px-3 py-2.5">
-                    <option value="" data-report-type="*" data-default-label="Mẫu mặc định của hệ thống">Mẫu mặc định của hệ thống</option>
                     @foreach(($reportTemplates ?? collect()) as $template)
-                        <option value="{{ $template->id }}" data-report-type="{{ $template->report_type ?: '*' }}">Mẫu báo cáo đã cấu hình — {{ $template->name }} — {{ $template->code }}</option>
-                    @endforeach
-                    @foreach(($defaultTemplates ?? []) as $type => $template)
-                        <option value="default:{{ $type }}" data-report-type="{{ $type }}">Mẫu hệ thống — {{ ($template['report'] ?? $template['name']).(isset($template['scope']) ? ' - '.$template['scope'] : '') }}</option>
+                        <option value="{{ $template->id }}" data-report-type="{{ $template->report_type ?: '*' }}">Mẫu đã cấu hình — {{ $template->description ?: $template->name }}</option>
                     @endforeach
                 </select>
             </label>
@@ -64,15 +60,6 @@
                     <option value="">Chọn đơn vị</option>
                     @foreach($units ?? [] as $unit)
                         <option value="{{ $unit->id }}">{{ $unit->name }}</option>
-                    @endforeach
-                </select>
-            </label>
-
-            <label id="material-filter" class="hidden text-sm font-semibold">Vật tư cần thống kê
-                <select name="material_id" class="mt-1 block w-full rounded-lg border px-3 py-2.5">
-                    <option value="">Tất cả vật tư</option>
-                    @foreach($materials ?? [] as $material)
-                        <option value="{{ $material->id }}">{{ $material->code }} — {{ $material->name }}</option>
                     @endforeach
                 </select>
             </label>
@@ -122,7 +109,6 @@
             const type = document.querySelector('select[name="report_type"]');
             const template = document.querySelector('select[name="template_id"]');
             const unit = document.getElementById('unit-filter');
-            const material = document.getElementById('material-filter');
             const scope = document.getElementById('scope-filter');
             const resolveReportType = () => {
                 const value = type?.value || 'summary';
@@ -146,14 +132,12 @@
                 if (template?.tomselect && typeof window.destroyTomSelect === 'function') window.destroyTomSelect(template);
                 unit?.classList.toggle('hidden', !isUnit);
                 scope?.classList.toggle('hidden', !isScoped);
-                material?.classList.toggle('hidden', !isSummary);
                 if (!isUnit) unit?.querySelector('select') && (unit.querySelector('select').value = '');
-                if (!isSummary) material?.querySelector('select') && (material.querySelector('select').value = '');
                 if (template) {
                     const selectedType = resolveReportType();
                     [...template.options].forEach(option => {
                         const reportType = option.dataset.reportType || '*';
-                        const visible = reportType === '*' || reportType === selectedType;
+                        const visible = reportType === selectedType && /^\d+$/.test(option.value);
                         option.hidden = !visible;
                         option.disabled = !visible;
                     });
@@ -162,10 +146,8 @@
                         const configured = [...template.options].find(option => !option.disabled && /^\d+$/.test(option.value));
                         if (configured) template.value = configured.value;
                     }
-                    template.options[0].textContent = 'Mẫu mặc định của ' + (type?.selectedOptions[0]?.textContent || 'hệ thống');
                     syncSelectUi(template);
                 }
-                syncSelectUi(material?.querySelector('select'));
             };
             scope?.querySelectorAll('input[name="scope"]').forEach(input => input.addEventListener('change', updateForm));
             type?.addEventListener('change', updateForm);

@@ -20,12 +20,8 @@
             </label>
             <label class="text-sm font-semibold">Mẫu Word
                 <select name="template_id" id="inventory-template-select" data-native-select class="mt-1 block w-full rounded-lg border px-3 py-2.5">
-                    <option value="" data-report-type="*" data-default-label="Mẫu mặc định của hệ thống">Mẫu mặc định của hệ thống</option>
                     @foreach(($reportTemplates ?? collect()) as $template)
-                        <option value="{{ $template->id }}" data-report-type="{{ $template->report_type ?: '*' }}">Mẫu báo cáo đã cấu hình — {{ $template->name }} — {{ $template->code }}</option>
-                    @endforeach
-                    @foreach(($defaultTemplates ?? []) as $type => $template)
-                        <option value="default:{{ $type }}" data-report-type="{{ $type }}">Mẫu hệ thống — {{ ($template['report'] ?? $template['name']).(isset($template['scope']) ? ' - '.$template['scope'] : '') }}</option>
+                        <option value="{{ $template->id }}" data-report-type="{{ $template->report_type ?: '*' }}">Mẫu đã cấu hình — {{ $template->description ?: $template->name }}</option>
                     @endforeach
                 </select>
             </label>
@@ -40,14 +36,6 @@
                     <option value="">Tất cả đơn vị</option>
                     @foreach(\Modules\Unit\Models\Unit::active()->orderBy('name')->get() as $unit)
                         <option value="{{ $unit->id }}">{{ $unit->name }}</option>
-                    @endforeach
-                </select>
-            </label>
-            <label id="inventory-material-filter" class="text-sm font-semibold">Vật tư cần thống kê
-                <select name="material_id" class="mt-1 block w-full rounded-lg border px-3 py-2.5">
-                    <option value="">Tất cả vật tư</option>
-                    @foreach($materials ?? [] as $material)
-                        <option value="{{ $material->id }}">{{ $material->code }} — {{ $material->name }}</option>
                     @endforeach
                 </select>
             </label>
@@ -91,7 +79,6 @@
         const reportType = document.getElementById('inventory-report-type');
         const templateSelect = document.getElementById('inventory-template-select');
         const scopeFilter = document.getElementById('inventory-scope-filter');
-        const materialFilter = document.getElementById('inventory-material-filter');
         if (!reportType || !templateSelect) return;
         const resolveReportType = () => {
             const selected = reportType.value;
@@ -113,12 +100,10 @@
             const isScoped = isSummary || reportType.value === 'using';
             if (templateSelect.tomselect && typeof window.destroyTomSelect === 'function') window.destroyTomSelect(templateSelect);
             scopeFilter?.classList.toggle('hidden', !isScoped);
-            materialFilter?.classList.toggle('hidden', !isSummary);
-            if (!isSummary) materialFilter?.querySelector('select') && (materialFilter.querySelector('select').value = '');
             const selectedType = resolveReportType();
             [...templateSelect.options].forEach(option => {
                 const type = option.dataset.reportType || '*';
-                const visible = type === '*' || type === selectedType;
+                const visible = type === selectedType && /^\d+$/.test(option.value);
                 option.hidden = !visible;
                 option.disabled = !visible;
             });
@@ -127,9 +112,7 @@
                 const configured = [...templateSelect.options].find(option => !option.disabled && /^\d+$/.test(option.value));
                 if (configured) templateSelect.value = configured.value;
             }
-            templateSelect.options[0].textContent = 'Mẫu mặc định của ' + reportType.selectedOptions[0].textContent;
             syncSelectUi(templateSelect);
-            syncSelectUi(materialFilter?.querySelector('select'));
         };
         reportType.addEventListener('change', filterTemplates);
         scopeFilter?.querySelectorAll('input[name="scope"]').forEach(input => input.addEventListener('change', filterTemplates));

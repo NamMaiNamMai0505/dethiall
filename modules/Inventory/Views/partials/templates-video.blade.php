@@ -122,8 +122,8 @@
                         <td class="p-3 text-right">
                             <div class="inline-flex flex-wrap justify-end gap-2">
                                 <button type="button" data-template-toggle="default-{{ $type }}" class="rounded border px-3 py-1.5 text-xs font-semibold">Sửa</button>
-                                <a href="{{ ($customTemplate && $customTemplate->file_path) ? route('inventory.templates.download', $customTemplate) : route('inventory.templates.variable.download', $type) }}" class="rounded bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white">Tải mẫu biến</a>
-                                <form method="POST" action="{{ route('inventory.templates.default.delete', $type) }}" onsubmit="return confirm('Xóa mẫu tùy chỉnh của báo cáo này? Nếu đang dùng mẫu gốc thì hệ thống sẽ giữ nguyên mẫu gốc.')">
+                                <a href="{{ ($customTemplate && $customTemplate->file_path) ? route('inventory.templates.download', $customTemplate) : route('inventory.templates.variable.download', $type) }}" class="rounded bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white">{{ ($customTemplate && $customTemplate->file_path) ? 'Tải file đang dùng' : 'Tải mẫu biến' }}</a>
+                                <form method="POST" action="{{ route('inventory.templates.default.delete', $type) }}" onsubmit="return confirm('Xóa hoàn toàn mẫu báo cáo này? Hệ thống sẽ không quay về file mặc định.')">
                                     @csrf
                                     @method('DELETE')
                                     <button class="rounded bg-red-600 px-3 py-1.5 text-xs font-semibold text-white">Xóa</button>

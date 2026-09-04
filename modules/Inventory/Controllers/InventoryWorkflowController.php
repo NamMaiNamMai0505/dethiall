@@ -14,6 +14,10 @@ use Modules\Inventory\Models\{InventoryAsset,InventoryAuditLog,InventoryBrokenLo
 
 class InventoryWorkflowController extends ModuleBaseController
 {
+    protected bool $useGenericModulePermissions = false;
+    private const INVENTORY_STATUS_FIXED_WIDTHS = [900, 3000, 430, 480, 720];
+    private const INVENTORY_STATUS_TABLE_WIDTH = 15400;
+
     public function category(Request $r){$isTypes=$r->routeIs('inventory.types');$categories=InventoryCategory::with('parent')->withCount('materials')->when($isTypes,fn($q)=>$q->whereNotNull('parent_id'),fn($q)=>$q->whereNull('parent_id'))->orderBy('code')->get();return view('inventory::feature',['section'=>'category','title'=>$isTypes?'Danh mục loại vật tư':'Danh mục ngành vật tư','categories'=>$categories,'parents'=>InventoryCategory::whereNull('parent_id')->orderBy('code')->get(),'isTypes'=>$isTypes,'users'=>\App\Models\User::where('status',1)->orderBy('name')->get()]);}
     public function categoryShow(InventoryCategory $category){$category->load(['parent','children'=>fn($q)=>$q->withCount('materials')->orderBy('code'),'materials.category']);return view('inventory::feature',['section'=>'category-detail','title'=>'Chi tiết '.$category->name,'category'=>$category,'isRoot'=>$category->parent_id===null]);}
     public function categoryStore(Request $r){$d=$r->validate(['parent_id'=>'nullable|exists:inventory_categories,id','code'=>'nullable|string|max:50|unique:inventory_categories,code','name'=>'required|string|max:255','description'=>'nullable|string']);if(!empty($d['parent_id'])){$parent=InventoryCategory::findOrFail($d['parent_id']);$prefix=$parent->code;$next=InventoryCategory::where('parent_id',$parent->id)->get()->map(fn($x)=>(int) substr($x->code,strlen($prefix)))->max()+1;$d['code']=$prefix.str_pad((string)$next,2,'0',STR_PAD_LEFT);}else{abort_if(empty($d['code']),422,'Ngành gốc phải có mã ngành.');}InventoryCategory::create($d);return back()->with('success','Đã thêm ngành/loại vật tư.');}
@@ -302,39 +306,64 @@ class InventoryWorkflowController extends ModuleBaseController
     public function classrooms(Request $r){$classrooms=Classroom::with(['building','managingUnit'])->withCount('inventoryAssets')->when($r->filled('search'),fn($q)=>$q->where(fn($x)=>$x->where('code','like','%'.$r->search.'%')->orWhere('name','like','%'.$r->search.'%')))->when($r->filled('building_id'),fn($q)=>$q->where('building_id',$r->building_id))->when($r->filled('floor'),fn($q)=>$q->where('floor',$r->floor))->when($r->filled('status'),fn($q)=>$q->where('status',$r->status))->orderBy('building_id')->orderBy('floor')->orderBy('name')->get();return view('inventory::feature',['section'=>'inventory-classrooms','title'=>'Danh mục phòng','classrooms'=>$classrooms,'buildings'=>Building::where('status',true)->orderBy('name')->get()]);}
     public function building(Request $r,Building $building){$classrooms=Classroom::where('building_id',$building->id)->orderBy('floor')->orderBy('name')->get();$classrooms->each(fn($room)=>$room->inventory_count=InventoryAsset::where('classroom_id',$room->id)->sum('quantity'));$selectedRoom=null;$roomData=[];if($r->filled('room')){$selectedRoom=$classrooms->firstWhere('id',(int)$r->input('room'));if($selectedRoom){$selectedRoom->load(['building','managingUnit']);$roomData=['assets'=>InventoryAsset::where('classroom_id',$selectedRoom->id)->with(['material.category.parent','holdingUnit'])->orderBy('name')->get(),'materials'=>InventoryMaterial::with('category.parent')->orderBy('name')->get(),'roomImages'=>InventoryRoomImage::where('classroom_id',$selectedRoom->id)->latest()->get(),'roomUsers'=>InventoryRoomUser::where('classroom_id',$selectedRoom->id)->with('user')->latest()->get(),'users'=>\App\Models\User::where('status',1)->orderBy('name')->get(),'breakReports'=>\Modules\Inventory\Models\InventoryRoomBreakReport::where('classroom_id',$selectedRoom->id)->with('reporter')->latest()->get(),'roomRepairs'=>\Modules\Inventory\Models\InventoryRoomRepair::where('classroom_id',$selectedRoom->id)->latest()->get(),'roomInventories'=>\Modules\Inventory\Models\InventoryRoomInventory::where('classroom_id',$selectedRoom->id)->latest()->get(),'roomReplacements'=>\Modules\Inventory\Models\InventoryRoomReplacement::where('classroom_id',$selectedRoom->id)->latest()->get(),'industries'=>InventoryCategory::whereNull('parent_id')->where('active',true)->orderBy('code')->get(),'categories'=>InventoryCategory::whereNotNull('parent_id')->where('active',true)->orderBy('code')->get(),'units'=>\Modules\Unit\Models\Unit::active()->orderBy('name')->get()];}}return view('inventory::feature',['section'=>'building','title'=>'Tòa nhà: '.$building->name,'building'=>$building,'classrooms'=>$classrooms,'selectedRoom'=>$selectedRoom]+$roomData);}
     public function room(Classroom $classroom){return view('inventory::feature',['section'=>'room','title'=>'Phòng: '.$classroom->name,'classroom'=>$classroom->load(['building','managingUnit']),'assets'=>InventoryAsset::where('classroom_id',$classroom->id)->with(['material.category.parent','holdingUnit'])->orderBy('name')->get(),'materials'=>InventoryMaterial::with('category.parent')->orderBy('name')->get(),'roomImages'=>InventoryRoomImage::where('classroom_id',$classroom->id)->latest()->get(),'roomUsers'=>InventoryRoomUser::where('classroom_id',$classroom->id)->with('user')->latest()->get(),'users'=>\App\Models\User::where('status',1)->orderBy('name')->get(),'breakReports'=>\Modules\Inventory\Models\InventoryRoomBreakReport::where('classroom_id',$classroom->id)->with('reporter')->latest()->get(),'roomRepairs'=>\Modules\Inventory\Models\InventoryRoomRepair::where('classroom_id',$classroom->id)->latest()->get(),'roomInventories'=>\Modules\Inventory\Models\InventoryRoomInventory::where('classroom_id',$classroom->id)->latest()->get(),'roomReplacements'=>\Modules\Inventory\Models\InventoryRoomReplacement::where('classroom_id',$classroom->id)->latest()->get(),'industries'=>InventoryCategory::whereNull('parent_id')->where('active',true)->orderBy('code')->get(),'categories'=>InventoryCategory::whereNotNull('parent_id')->where('active',true)->orderBy('code')->get(),'units'=>\Modules\Unit\Models\Unit::active()->orderBy('name')->get()]);}
-    public function roomAssetStore(Request $r,Classroom $classroom){$d=$r->validate(['material_id'=>'required|exists:inventory_materials,id','quantity'=>'required|numeric|min:.01']);$material=InventoryMaterial::with('category')->findOrFail($d['material_id']);abort_unless($classroom->managing_unit_id,'Phòng chưa có đơn vị quản lý.');$d['holding_unit_id']=$classroom->managing_unit_id;$asset=InventoryAsset::updateOrCreate(['material_id'=>$material->id,'classroom_id'=>$classroom->id],['asset_code'=>$material->code,'name'=>$material->name,'quantity'=>$d['quantity'],'unit'=>$material->unit,'holding_unit_id'=>$d['holding_unit_id'],'grade'=>1,'status'=>'NORMAL']);InventoryAuditLog::create(['user_id'=>auth()->id(),'action'=>'CREATE','entity_type'=>'asset','entity_id'=>$asset->id,'details'=>['reason'=>'Thêm vật tư vào phòng','quantity'=>$d['quantity'],'classroom_id'=>$classroom->id,'asset_code'=>$material->code,'name'=>$material->name]]);return back()->with('success','Đã thêm vật tư có sẵn vào phòng.');}
-    public function roomAssetImport(Request $r,Classroom $classroom){$d=$r->validate(['file'=>'required|file|mimes:xlsx,xls,csv,txt|max:20480']);abort_unless($classroom->managing_unit_id,'Phòng chưa có đơn vị quản lý.');$d['holding_unit_id']=$classroom->managing_unit_id;$rows=\PhpOffice\PhpSpreadsheet\IOFactory::load($r->file('file')->getRealPath())->getActiveSheet()->toArray(null,true,true,true);$headers=array_map(fn($v)=>strtolower(trim((string)$v)),array_shift($rows));$count=0;foreach($rows as $row){$values=[];foreach($headers as $key=>$header)$values[$header]=trim((string)($row[$key]??''));if(empty($values['code']))continue;$material=InventoryMaterial::where('code',$values['code'])->first();if(!$material)continue;$asset=InventoryAsset::updateOrCreate(['material_id'=>$material->id,'classroom_id'=>$classroom->id],['asset_code'=>$material->code,'name'=>$material->name,'quantity'=>(float)($values['quantity']?:1),'unit'=>$material->unit,'holding_unit_id'=>$d['holding_unit_id'],'grade'=>1,'status'=>'NORMAL']);InventoryAuditLog::create(['user_id'=>auth()->id(),'action'=>'CREATE','entity_type'=>'asset','entity_id'=>$asset->id,'details'=>['reason'=>'Import vật tư vào phòng','quantity'=>(float)($values['quantity']?:1),'classroom_id'=>$classroom->id,'asset_code'=>$material->code,'name'=>$material->name]]);$count++;}return back()->with('success',"Đã import {$count} vật tư có sẵn vào phòng.");}
-    public function roomAssetUpdate(Request $r,Classroom $classroom,InventoryAsset $asset){abort_unless((int)$asset->classroom_id===(int)$classroom->id,404);abort_unless($classroom->managing_unit_id,'Phòng chưa có đơn vị quản lý.');$d=$r->validate(['quantity'=>'required|numeric|min:.01','grade'=>'required|integer|min:1|max:5','status'=>'required|in:NORMAL,BROKEN,REPAIRING,LIQUIDATED']);$before=(int)$asset->quantity;$d['holding_unit_id']=$classroom->managing_unit_id;$asset->update($d);InventoryAuditLog::create(['user_id'=>auth()->id(),'action'=>'UPDATE','entity_type'=>'asset','entity_id'=>$asset->id,'details'=>$d+['reason'=>$r->input('reason')?:'Sửa thông tin vật tư trong phòng','before'=>$before,'after'=>(int)$asset->quantity,'quantity'=>abs((int)$asset->quantity-$before),'classroom_id'=>$classroom->id]]);return back()->with('success','Đã sửa vật tư trong phòng.');}
+    public function roomAssetStore(Request $r,Classroom $classroom){$d=$r->validate(['material_id'=>'required|exists:inventory_materials,id','quantity'=>'required|numeric|min:.01','holding_unit_id'=>'nullable|exists:units,id']);$material=InventoryMaterial::with('category')->findOrFail($d['material_id']);$d['holding_unit_id']=$d['holding_unit_id']?:$classroom->managing_unit_id;abort_unless($d['holding_unit_id'],'Chưa chọn đơn vị quản lý / giữ vật tư.');$asset=InventoryAsset::updateOrCreate(['material_id'=>$material->id,'classroom_id'=>$classroom->id],['asset_code'=>$material->code,'name'=>$material->name,'quantity'=>$d['quantity'],'unit'=>$material->unit,'holding_unit_id'=>$d['holding_unit_id'],'grade'=>1,'status'=>'NORMAL']);InventoryAuditLog::create(['user_id'=>auth()->id(),'action'=>'CREATE','entity_type'=>'asset','entity_id'=>$asset->id,'details'=>['reason'=>'Thêm vật tư vào phòng','quantity'=>$d['quantity'],'classroom_id'=>$classroom->id,'holding_unit_id'=>$d['holding_unit_id'],'asset_code'=>$material->code,'name'=>$material->name]]);return back()->with('success','Đã thêm vật tư có sẵn vào phòng.');}
+    public function roomAssetImport(Request $r,Classroom $classroom){$d=$r->validate(['file'=>'required|file|mimes:xlsx,xls,csv,txt|max:20480','holding_unit_id'=>'nullable|exists:units,id']);$d['holding_unit_id']=$d['holding_unit_id']?:$classroom->managing_unit_id;abort_unless($d['holding_unit_id'],'Chưa chọn đơn vị quản lý / giữ vật tư.');$rows=\PhpOffice\PhpSpreadsheet\IOFactory::load($r->file('file')->getRealPath())->getActiveSheet()->toArray(null,true,true,true);$headers=array_map(fn($v)=>strtolower(trim((string)$v)),array_shift($rows));$count=0;foreach($rows as $row){$values=[];foreach($headers as $key=>$header)$values[$header]=trim((string)($row[$key]??''));if(empty($values['code']))continue;$material=InventoryMaterial::where('code',$values['code'])->first();if(!$material)continue;$asset=InventoryAsset::updateOrCreate(['material_id'=>$material->id,'classroom_id'=>$classroom->id],['asset_code'=>$material->code,'name'=>$material->name,'quantity'=>(float)($values['quantity']?:1),'unit'=>$material->unit,'holding_unit_id'=>$d['holding_unit_id'],'grade'=>1,'status'=>'NORMAL']);InventoryAuditLog::create(['user_id'=>auth()->id(),'action'=>'CREATE','entity_type'=>'asset','entity_id'=>$asset->id,'details'=>['reason'=>'Import vật tư vào phòng','quantity'=>(float)($values['quantity']?:1),'classroom_id'=>$classroom->id,'holding_unit_id'=>$d['holding_unit_id'],'asset_code'=>$material->code,'name'=>$material->name]]);$count++;}return back()->with('success',"Đã import {$count} vật tư có sẵn vào phòng.");}
+    public function roomAssetUpdate(Request $r,Classroom $classroom,InventoryAsset $asset){abort_unless((int)$asset->classroom_id===(int)$classroom->id,404);$d=$r->validate(['quantity'=>'required|numeric|min:.01','holding_unit_id'=>'nullable|exists:units,id','grade'=>'required|integer|min:1|max:5','status'=>'required|in:NORMAL,BROKEN,REPAIRING,LIQUIDATED']);$before=(int)$asset->quantity;$d['holding_unit_id']=$d['holding_unit_id']?:$classroom->managing_unit_id;abort_unless($d['holding_unit_id'],'Chưa chọn đơn vị quản lý / giữ vật tư.');$asset->update($d);InventoryAuditLog::create(['user_id'=>auth()->id(),'action'=>'UPDATE','entity_type'=>'asset','entity_id'=>$asset->id,'details'=>$d+['reason'=>$r->input('reason')?:'Sửa thông tin vật tư trong phòng','before'=>$before,'after'=>(int)$asset->quantity,'quantity'=>abs((int)$asset->quantity-$before),'classroom_id'=>$classroom->id]]);return back()->with('success','Đã sửa vật tư trong phòng.');}
     public function roomAssetDelete(Request $r,Classroom $classroom,InventoryAsset $asset){abort_unless((int)$asset->classroom_id===(int)$classroom->id,404);abort_if($asset->repairs()->exists()||$asset->proposals()->exists(),422,'Không thể xóa vật tư đã có lịch sử.');$details=['reason'=>$r->input('reason')?:'Xóa vật tư khỏi phòng','quantity'=>(int)$asset->quantity,'classroom_id'=>$classroom->id,'asset_code'=>$asset->asset_code,'name'=>$asset->name];$id=$asset->id;$asset->delete();InventoryAuditLog::create(['user_id'=>auth()->id(),'action'=>'DELETE','entity_type'=>'asset','entity_id'=>$id,'details'=>$details]);return back()->with('success','Đã xóa vật tư khỏi phòng.');}
     public function roomImageStore(Request $r,Classroom $classroom){$d=$r->validate(['image'=>'required|image|max:10240','caption'=>'nullable|string|max:255']);InventoryRoomImage::create(['classroom_id'=>$classroom->id,'path'=>$r->file('image')->store('inventory-room-images'),'caption'=>$d['caption']??null,'uploaded_by'=>$r->user()->id]);return back()->with('success','Đã thêm ảnh phòng.');}
-    public function roomImageDelete(InventoryRoomImage $image){abort_unless(auth()->user()?->can('inventory.delete'),403);Storage::delete($image->path);$image->delete();return back()->with('success','Đã xóa ảnh phòng.');}
+    public function roomImageDelete(InventoryRoomImage $image){abort_unless(\App\Support\PermissionCheck::can(auth()->user(),'inventory.locations.delete'),403);Storage::delete($image->path);$image->delete();return back()->with('success','Đã xóa ảnh phòng.');}
     public function roomUserStore(Request $r,Classroom $classroom){$d=$r->validate(['user_id'=>'required|exists:users,id','role'=>'nullable|string|max:100']);InventoryRoomUser::updateOrCreate(['classroom_id'=>$classroom->id,'user_id'=>$d['user_id']],['role'=>$d['role']??null]);return back()->with('success','Đã gán người phụ trách phòng.');}
     public function roomUserDelete(InventoryRoomUser $roomUser){$roomUser->delete();return back()->with('success','Đã bỏ người phụ trách phòng.');}
 
     public function reports(Request $r){$months=max(1,min(60,(int)$r->input('months',3)));$from=$r->input('from');$to=$r->input('to');$materials=InventoryMaterial::with(['category','building','classroom'])->when($r->filled('category_id'),fn($q)=>$q->where('category_id',$r->category_id))->when($r->filled('building_id'),fn($q)=>$q->where('building_id',$r->building_id))->when($r->filled('classroom_id'),fn($q)=>$q->where('classroom_id',$r->classroom_id))->when($r->filled('search'),fn($q,$s)=>$q->where(fn($x)=>$x->where('code','like',"%$s%")->orWhere('name','like',"%$s%")))->orderBy('name')->get();$assets=InventoryAsset::with(['classroom.building','holdingUnit'])->orderBy('name')->get();$auditLogs=InventoryAuditLog::with('user')->when($from,fn($q)=>$q->whereDate('created_at','>=',$from))->when($to,fn($q)=>$q->whereDate('created_at','<=',$to))->latest()->limit(300)->get()->each->resolveDetails();$repairs=InventoryRepair::with(['asset','assignee'])->when($from,fn($q)=>$q->whereDate('opened_at','>=',$from))->when($to,fn($q)=>$q->whereDate('opened_at','<=',$to))->latest()->get();$brokenLogs=InventoryBrokenLog::with(['asset','actor'])->when($from,fn($q)=>$q->whereDate('event_at','>=',$from))->when($to,fn($q)=>$q->whereDate('event_at','<=',$to))->latest()->get();$transfers=InventoryTransfer::with(['asset','fromClassroom','toClassroom'])->latest()->limit(100)->get();$stats=['records'=>InventoryMaterial::count(),'quantity'=>InventoryMaterial::sum('quantity'),'groups'=>InventoryCategory::where('active',true)->count(),'buildings'=>InventoryMaterial::whereNotNull('building_id')->distinct()->count('building_id'),'normal'=>InventoryAsset::where('status','NORMAL')->count(),'broken'=>InventoryAsset::whereIn('status',['BROKEN','REPAIRING'])->count()];$expiringAssets=InventoryMaterial::with(['building','classroom'])->whereNotNull('expiry_date')->whereBetween('expiry_date',[now()->toDateString(),now()->addMonths($months)->toDateString()])->orderBy('expiry_date')->get();return view('inventory::feature',['section'=>'reports','title'=>'Báo cáo vật tư','materials'=>$materials,'assets'=>$assets,'auditLogs'=>$auditLogs,'repairs'=>$repairs,'brokenLogs'=>$brokenLogs,'transfers'=>$transfers,'expiringAssets'=>$expiringAssets,'stats'=>$stats,'categories'=>InventoryCategory::where('active',true)->orderBy('name')->get(),'buildings'=>Building::orderBy('name')->get(),'classrooms'=>Classroom::active()->orderBy('name')->get(),'reportTemplates'=>InventoryReportTemplate::where('active',true)->whereNotNull('report_type')->whereNotNull('file_path')->orderBy('report_type')->orderBy('name')->get(),'defaultTemplates'=>$this->defaultReportTemplates(),'months'=>$months,'from'=>$from,'to'=>$to,'repairCount'=>$repairs->whereIn('status',['OPEN','ASSIGNED'])->count()]);}
-    public function reportWord(Request $r){$types=['position'=>'BÁO CÁO THỐNG KÊ THỰC LỰC VẬT TƯ, TRANG BỊ KỸ THUẬT HIỆN CÓ — CHI TIẾT THEO VỊ TRÍ','total-position'=>'BÁO CÁO THỐNG KÊ THỰC LỰC VẬT TƯ, TRANG BỊ KỸ THUẬT HIỆN CÓ — TỔNG HỢP THEO TÒA','period'=>'BÁO CÁO TỔNG HỢP THỰC LỰC TRANG BỊ, VẬT TƯ KỸ THUẬT','increase-decrease'=>'BÁO CÁO TĂNG, GIẢM THỰC LỰC TRANG BỊ, VẬT TƯ KỸ THUẬT','using-position'=>'BÁO CÁO VẬT TƯ ĐANG SỬ DỤNG — THEO VỊ TRÍ','using-total'=>'BÁO CÁO VẬT TƯ ĐANG SỬ DỤNG — TỔNG THỂ','warehouse'=>'BÁO CÁO VỀ TÌNH HÌNH KHO VẬT TƯ','system-warehouse'=>'BÁO CÁO VỀ TÌNH HÌNH KHO VẬT TƯ — KHO HỆ THỐNG KHO-VT','transfer'=>'QUYẾT ĐỊNH VỀ VIỆC ĐIỀU ĐỘNG VẬT TƯ','recall'=>'QUYẾT ĐỊNH VỀ VIỆC THU HỒI, TRẢ VỀ VẬT TƯ','repair'=>'BÁO CÁO VỀ VẬT TƯ ĐANG HƯ HẠI VÀ SỬA CHỮA','update-log'=>'BÁO CÁO VỀ NHẬT KÝ CẬP NHẬT VẬT TƯ'];$word=new \PhpOffice\PhpWord\PhpWord();$word->setDefaultFontName('Arial');$section=$word->addSection();$section->addTitle($types[$r->input('report_type','position')]??$types['position'],1);$section->addText('Thời gian xuất: '.now()->format('d/m/Y H:i'));$table=$section->addTable(['borderSize'=>6,'borderColor'=>'999999']);foreach(['STT','Mã vật tư','Tên vật tư','Loại / nhóm','Tòa nhà','Phòng','Số lượng','Phân cấp','Trạng thái'] as $h)$table->addCell(1500)->addText($h);foreach(InventoryAsset::with(['classroom.building'])->orderBy('name')->get() as $i=>$a){$row=$table->addRow();foreach([$i+1,$a->asset_code,$a->name,$a->category?:'Chưa phân loại',$a->classroom?->building?->name?:'—',$a->classroom?->name?:'—',$a->quantity.' '.($a->unit?:''),$a->grade?:'—',['NORMAL'=>'Bình thường','BROKEN'=>'Hỏng','REPAIRING'=>'Đang sửa','LIQUIDATED'=>'Đã thanh lý'][$a->status]??$a->status] as $v)$row->addCell(1500)->addText((string)$v);} $path=storage_path('app/report-inventory-'.now()->format('YmdHis').'.docx');(new \PhpOffice\PhpWord\Writer\Word2007($word))->save($path);return response()->download($path,'bao-cao-vat-tu.docx')->deleteFileAfterSend(true);}
+    public function reportWord(Request $r){return app(InventoryReportTemplateController::class)->download($r);}
     public function reportCsv(){$rows=InventoryMaterial::orderBy('name')->get();$callback=function()use($rows){$out=fopen('php://output','w');fputcsv($out,['No','Code','Name','Unit','Quantity','Location']);foreach($rows as $i=>$m)fputcsv($out,[$i+1,$m->code,$m->name,$m->unit,$m->quantity,$m->location]);fclose($out);};return response()->streamDownload($callback,'inventory-report.csv',['Content-Type'=>'text/csv; charset=UTF-8']);}
-    public function templates(){$templates=InventoryReportTemplate::latest()->get();$customTemplates=$templates->whereNotNull('report_type')->keyBy('report_type');$defaultTemplates=$this->defaultReportTemplates();foreach($defaultTemplates as $type=>$template){if($custom=$customTemplates->get($type)){$defaultTemplates[$type]['name']=$custom->name?:$template['name'];$defaultTemplates[$type]['report']=$custom->description?:($template['report']??$template['name']);}}return view('inventory::feature',['section'=>'templates','title'=>'Mẫu báo cáo Word','templates'=>$templates,'uploadTemplates'=>$templates->whereNull('report_type'),'customTemplates'=>$customTemplates,'defaultTemplates'=>$defaultTemplates]);}
+    public function templates(){$templates=InventoryReportTemplate::latest()->get();$deletedTypes=$templates->whereNotNull('report_type')->where('active',false)->whereNull('file_path')->pluck('report_type')->all();$customTemplates=$templates->whereNotNull('report_type')->filter(fn($template)=>$template->active&&$template->file_path)->groupBy('report_type')->map(fn($items)=>$items->first());$defaultTemplates=collect($this->defaultReportTemplates())->reject(fn($template,$type)=>in_array($type,$deletedTypes,true))->all();foreach($defaultTemplates as $type=>$template){if($custom=$customTemplates->get($type)){$defaultTemplates[$type]['name']=$custom->name?:$template['name'];$defaultTemplates[$type]['report']=$custom->description?:($template['report']??$template['name']);}}return view('inventory::feature',['section'=>'templates','title'=>'Mẫu báo cáo Word','templates'=>$templates,'uploadTemplates'=>$templates->whereNull('report_type'),'customTemplates'=>$customTemplates,'defaultTemplates'=>$defaultTemplates]);}
     public function templateStore(Request $r){$d=$r->validate(['code'=>'required|string|max:80|unique:inventory_report_templates,code','report_type'=>'nullable|string|max:80','name'=>'required|string|max:255','description'=>'nullable|string','file'=>'required|file|mimes:docx|max:10240','active'=>'nullable|boolean']);$type=$d['report_type']??$this->inferVariableTemplateType($d['code'],$d['name'],$d['description']??'');$d['report_type']=$type;$d['file_path']=$this->storeVariableTemplateFile($r->file('file')->getRealPath(),$type,$d['code'],$r->file('file')->getClientOriginalName());$d['active']=$r->boolean('active',true);unset($d['file']);InventoryReportTemplate::updateOrCreate(['report_type'=>$type],$d);return back()->with('success','Đã lưu mẫu Word báo cáo vật tư. Khi xuất đúng loại báo cáo này sẽ dùng mẫu vừa import.');}
     public function templateUpdate(Request $r,InventoryReportTemplate $template){$d=$r->validate(['code'=>['required','string','max:80',Rule::unique('inventory_report_templates','code')->ignore($template->id)],'report_type'=>'nullable|string|max:80','name'=>'required|string|max:255','description'=>'nullable|string','file'=>'nullable|file|mimes:docx|max:10240','active'=>'nullable|boolean']);$oldPath=$template->file_path;$type=$d['report_type']??$template->report_type??$this->inferVariableTemplateType($d['code'],$d['name'],$d['description']??'');$d['report_type']=$type;if($r->hasFile('file'))$d['file_path']=$this->storeVariableTemplateFile($r->file('file')->getRealPath(),$type,$d['code'],$r->file('file')->getClientOriginalName());$d['active']=$r->boolean('active');unset($d['file']);$template->update($d);if(isset($d['file_path'])&&$oldPath)Storage::disk('local')->delete($oldPath);return back()->with('success','Đã cập nhật mẫu báo cáo vật tư.');}
     public function templateReplaceDefault(Request $r,string $type){$defaults=$this->defaultReportTemplates();abort_unless(isset($defaults[$type]),404,'Không tìm thấy loại mẫu báo cáo.');$d=$r->validate(['name'=>'required|string|max:255','report_type'=>'required|string|max:80','file'=>'nullable|file|mimes:docx|max:10240','active'=>'nullable|boolean']);$selectedType=$d['report_type'];abort_unless(isset($defaults[$selectedType]),404,'Không tìm thấy loại báo cáo đã chọn.');$default=$defaults[$selectedType];$code='DEFAULT_'.strtoupper(str_replace('-','_',$selectedType));$old=InventoryReportTemplate::where('report_type',$selectedType)->first();$oldPath=$old?->file_path;$description=($default['report']??$default['name']).(isset($default['scope'])?' - '.$default['scope']:'');$payload=['code'=>$old?->code?:$code,'report_type'=>$selectedType,'name'=>$d['name'],'description'=>$description,'active'=>$r->boolean('active',true)];if($r->hasFile('file'))$payload['file_path']=$this->storeVariableTemplateFile($r->file('file')->getRealPath(),$selectedType,$payload['code'],$r->file('file')->getClientOriginalName());elseif($old?->file_path)$payload['file_path']=$old->file_path;InventoryReportTemplate::updateOrCreate(['report_type'=>$selectedType],$payload);if(isset($payload['file_path'])&&$r->hasFile('file')&&$oldPath&&$oldPath!==$payload['file_path'])Storage::disk('local')->delete($oldPath);return back()->with('success','Đã cập nhật mẫu '.$description.'. Lần xuất báo cáo tương ứng sẽ dùng cấu hình vừa lưu.');}
-    public function templateDeleteDefault(string $type){$defaults=$this->defaultReportTemplates();abort_unless(isset($defaults[$type]),404,'Không tìm thấy loại mẫu báo cáo.');$template=InventoryReportTemplate::where('report_type',$type)->first();if($template){$path=$template->file_path;$template->delete();if($path)Storage::disk('local')->delete($path);return back()->with('success','Đã xóa mẫu tùy chỉnh. Báo cáo này quay về mẫu biến gốc.');}return back()->with('success','Báo cáo này đang dùng mẫu biến gốc, không có mẫu tùy chỉnh để xóa.');}
+    public function templateDeleteDefault(string $type){$defaults=$this->defaultReportTemplates();abort_unless(isset($defaults[$type]),404,'Không tìm thấy loại mẫu báo cáo.');$templates=InventoryReportTemplate::where('report_type',$type)->get();foreach($templates as $template){if($template->file_path)Storage::disk('local')->delete($template->file_path);$template->delete();}$this->deleteGeneratedVariableTemplates($type);InventoryReportTemplate::create(['code'=>'DELETED_'.strtoupper(str_replace('-','_',$type)),'report_type'=>$type,'name'=>$defaults[$type]['name'],'description'=>'Đã xóa mẫu, không dùng mẫu mặc định.','file_path'=>null,'active'=>false]);return back()->with('success','Đã xóa hoàn toàn mẫu báo cáo này. Hệ thống sẽ không tự quay về file mặc định.');}
     public function templateDownload(InventoryReportTemplate $template){$source=$template->absolutePath();abort_unless($source&&is_file($source),404,'Không tìm thấy file mẫu.');return response()->download($source,basename((string)$template->file_path));}
     public function defaultTemplateDownload(string $type)
     {
         $templates = $this->defaultReportTemplates();
         abort_unless(isset($templates[$type]), 404, 'Không tìm thấy mẫu mặc định.');
 
+        $configured = InventoryReportTemplate::where('report_type', $type)->latest()->first();
+        abort_if($configured && !$configured->active && !$configured->file_path, 404, 'Mẫu báo cáo này đã bị xóa.');
+        if ($configured && $configured->active && $configured->file_path) {
+            $source = $configured->absolutePath();
+            abort_unless($source && is_file($source), 404, 'File mẫu đang dùng không tồn tại.');
+            return response()->download($source, basename((string) $configured->file_path));
+        }
+
         $template = $templates[$type];
         $filename = $template['variable_file'] ?? ('mau-bien-'.$type.'.docx');
         $path = storage_path('app/'.$filename);
-        if (in_array($type, ['position', 'total-position', 'unit'], true)) {
+        if (in_array($type, ['position', 'total-position', 'unit', 'using-position', 'using-total'], true)) {
             $this->createInventoryStatusVariableTemplate($path);
         } else {
             $this->writeVariableTemplateZip(resource_path('inventory-report-templates/'.$template['file']),$path,$type);
         }
 
         return response()->download($path, $filename)->deleteFileAfterSend(true);
+    }
+    private function deleteGeneratedVariableTemplates(string $type): void
+    {
+        $patterns = [
+            'position' => ['mau-bien-theo-vi-tri*.docx', 'Mau_bien_Thong_ke_thuc_luc_hien_co_theo_vi_tri*.docx'],
+            'total-position' => ['mau-bien-tong-hop-toan-bo*.docx', 'Mau_bien_Thong_ke_thuc_luc_hien_co_tong_hop*.docx'],
+            'unit' => ['Mau_bien_Don_vi*.docx'],
+            'using-position' => ['mau-bien-vat-tu-dang-su-dung-theo-vi-tri*.docx', 'Mau_bien_Vat_tu_dang_su_dung_theo_vi_tri*.docx'],
+            'using-total' => ['mau-bien-vat-tu-dang-su-dung-tong-hop*.docx', 'Mau_bien_Toan_he_thong*.docx'],
+        ][$type] ?? [];
+
+        $directory = Storage::disk('local')->path('inventory-templates');
+        foreach ($patterns as $pattern) {
+            foreach (glob($directory.DIRECTORY_SEPARATOR.$pattern) ?: [] as $path) {
+                if (is_file($path)) @unlink($path);
+            }
+        }
     }
     public function templateDelete(InventoryReportTemplate $template){$path=$template->file_path;$template->delete();if($path)Storage::disk('local')->delete($path);return back()->with('success','Đã xóa mẫu báo cáo vật tư.');}
     private function storeVariableTemplateFile(string $source,string $type,string $code,?string $originalName=null): string
@@ -364,8 +393,18 @@ class InventoryWorkflowController extends ModuleBaseController
         $word = new \PhpOffice\PhpWord\PhpWord();
         $word->setDefaultFontName('Times New Roman');
         $word->setDefaultFontSize(10);
+        $unitCount = max(1, InventoryAsset::with(['classroom.managingUnit', 'holdingUnit'])->get()
+            ->map(fn ($asset) => $asset->classroom?->managingUnit ?: $asset->holdingUnit)
+            ->filter()
+            ->reject(fn ($unit) => mb_strtoupper(trim((string) ($unit->abbreviation ?: $unit->code ?: $unit->name)), 'UTF-8') === 'KHO')
+            ->unique('id')
+            ->count()) + 1;
+        $unitColumnWidth = $this->inventoryStatusUnitColumnWidth($unitCount);
+        $pageWidth = max(23811, array_sum(self::INVENTORY_STATUS_FIXED_WIDTHS) + ($unitColumnWidth * $unitCount) + 1800);
         $section = $word->addSection([
             'orientation' => 'landscape',
+            'pageSizeW' => $pageWidth,
+            'pageSizeH' => 16838,
             'marginTop' => 650,
             'marginBottom' => 650,
             'marginLeft' => 650,
@@ -375,8 +414,8 @@ class InventoryWorkflowController extends ModuleBaseController
         $normal = ['name' => 'Times New Roman', 'size' => 10];
         $bold = ['name' => 'Times New Roman', 'size' => 10, 'bold' => true];
         $title = ['name' => 'Times New Roman', 'size' => 13, 'bold' => true];
-        $small = ['name' => 'Times New Roman', 'size' => 7];
-        $smallBold = ['name' => 'Times New Roman', 'size' => 7, 'bold' => true];
+        $small = ['name' => 'Times New Roman', 'size' => 5];
+        $smallBold = ['name' => 'Times New Roman', 'size' => 5, 'bold' => true];
         $center = ['alignment' => \PhpOffice\PhpWord\SimpleType\Jc::CENTER];
         $right = ['alignment' => \PhpOffice\PhpWord\SimpleType\Jc::RIGHT];
         $left = ['alignment' => \PhpOffice\PhpWord\SimpleType\Jc::LEFT];
@@ -399,14 +438,14 @@ class InventoryWorkflowController extends ModuleBaseController
 
         $tableStyle = ['borderSize' => 6, 'borderColor' => '222222', 'cellMargin' => 45, 'width' => 100 * 50, 'unit' => 'pct'];
         $table = $section->addTable($tableStyle);
-        $unitCount = 20;
         $table->addRow(520);
-        $this->addTemplateCell($table, 'MÃ SỐ', 1050, $smallBold, $center, ['vMerge' => 'restart']);
-        $this->addTemplateCell($table, 'TÊN VẬT TƯ TRANG BỊ', 3500, $smallBold, $center, ['vMerge' => 'restart']);
-        $this->addTemplateCell($table, 'ĐVT', 520, $smallBold, $center, ['vMerge' => 'restart']);
-        $this->addTemplateCell($table, "Phâ\nn", 650, $smallBold, $center, ['vMerge' => 'restart']);
-        $this->addTemplateCell($table, 'Thực lực ngày ${ngay_bao_cao}', 900, $smallBold, $center, ['vMerge' => 'restart']);
-        $this->addTemplateCell($table, 'THỰC LỰC CÁC ĐƠN VỊ', 520 * $unitCount, $smallBold, $center, ['gridSpan' => $unitCount]);
+        $unitHeaderCell = ['textDirection' => \PhpOffice\PhpWord\Style\Cell::TEXT_DIR_BTLR];
+        $this->addTemplateCell($table, 'MÃ SỐ', 900, $smallBold, $center, ['vMerge' => 'restart']);
+        $this->addTemplateCell($table, 'TÊN VẬT TƯ TRANG BỊ', 3000, $smallBold, $center, ['vMerge' => 'restart']);
+        $this->addTemplateCell($table, 'ĐVT', 430, $smallBold, $center, ['vMerge' => 'restart']);
+        $this->addTemplateCell($table, "Phâ\nn", 480, $smallBold, $center, ['vMerge' => 'restart']);
+        $this->addTemplateCell($table, 'Thực lực ngày ${ngay_bao_cao}', 720, $smallBold, $center, ['vMerge' => 'restart']);
+        $this->addTemplateCell($table, 'THỰC LỰC CÁC ĐƠN VỊ', $unitColumnWidth * $unitCount, $smallBold, $center, ['gridSpan' => $unitCount]);
 
         $table->addRow(420);
         $this->addTemplateCell($table, '', 1050, $small, $center, ['vMerge' => 'continue']);
@@ -415,19 +454,20 @@ class InventoryWorkflowController extends ModuleBaseController
         $this->addTemplateCell($table, '', 650, $small, $center, ['vMerge' => 'continue']);
         $this->addTemplateCell($table, '', 900, $small, $center, ['vMerge' => 'continue']);
         for ($i = 1; $i <= $unitCount; $i++) {
-            $this->addTemplateCell($table, '${don_vi_'.$i.'}', 520, $smallBold, $center);
+            $this->addTemplateCell($table, $i === $unitCount ? 'KHO' : '${don_vi_'.$i.'}', $unitColumnWidth, $smallBold, $center, $unitHeaderCell);
         }
 
         $unitValues = [];
         for ($i = 1; $i <= $unitCount; $i++) {
-            $unitValues[] = '${don_vi_'.$i.'_so_luong}';
+            $unitValues[] = $i === $unitCount ? '${kho_so_luong}' : '${don_vi_'.$i.'_so_luong}';
         }
 
-        $this->addTemplateRow($table, ['', '* ${nganh}', '', '', '${so_luong_nganh}'], $unitValues, $smallBold, $left);
-        $this->addTemplateRow($table, ['', '${stt_nhom}. ${loai_vat_tu}', '', '', '${so_luong_loai}'], $unitValues, $smallBold, $left);
-        $this->addTemplateRow($table, ['${ma_vat_tu}', '${ten_vat_tu}', '${don_vi_tinh}', '${phan_cap}', '${so_luong}'], $unitValues, $small, $left);
-        $this->addTemplateRow($table, ['', '', '', '${phan_cap_chi_tiet}', '${so_luong_phan_cap}'], $unitValues, $small, $left);
-        $this->addTemplateRow($table, ['', 'TỔNG CỘNG', '', '', '${tong_so_luong}'], $unitValues, $smallBold, $left);
+        $this->addTemplateRow($table, ['', 'VẬT TƯ, TRANG BỊ KỸ THUẬT', '', '', ''], $unitValues, $smallBold, $center, $unitColumnWidth);
+        $this->addTemplateRow($table, ['${ma_nganh}', '* ${nganh}', '', '', '${so_luong_nganh}'], $unitValues, $smallBold, $left, $unitColumnWidth);
+        $this->addTemplateRow($table, ['${ma_loai_vat_tu}', '${loai_vat_tu}', '', '', '${so_luong_loai}'], $unitValues, $smallBold, $left, $unitColumnWidth);
+        $this->addTemplateRow($table, ['${ma_vat_tu}', '${ten_vat_tu}', '${don_vi_tinh}', '${phan_cap}', '${so_luong}'], $unitValues, $small, $left, $unitColumnWidth);
+        $this->addTemplateRow($table, ['', '${ma_phong}', '', '', '${so_luong_phong}'], $unitValues, $small, $left, $unitColumnWidth);
+        $this->addTemplateRow($table, ['', 'TỔNG CỘNG', '', '', '${tong_so_luong}'], $unitValues, $smallBold, $left, $unitColumnWidth);
 
         $section->addTextBreak(1);
         $foot = $section->addTable(['borderSize' => 0, 'cellMargin' => 0, 'width' => 100 * 50, 'unit' => 'pct']);
@@ -451,16 +491,20 @@ class InventoryWorkflowController extends ModuleBaseController
             $cell->addText($line, $font, $paragraph);
         }
     }
-    private function addTemplateRow($table,array $fixed,array $unitValues,array $font,array $paragraph): void
+    private function addTemplateRow($table,array $fixed,array $unitValues,array $font,array $paragraph,int $unitColumnWidth = 360): void
     {
         $table->addRow(420);
-        $widths = [1050, 3500, 520, 650, 900];
+        $widths = self::INVENTORY_STATUS_FIXED_WIDTHS;
         foreach ($fixed as $index => $value) {
             $this->addTemplateCell($table, $value, $widths[$index] ?? 700, $font, $index === 1 ? $paragraph : ['alignment' => \PhpOffice\PhpWord\SimpleType\Jc::CENTER]);
         }
         foreach ($unitValues as $value) {
-            $this->addTemplateCell($table, $value, 520, $font, ['alignment' => \PhpOffice\PhpWord\SimpleType\Jc::CENTER]);
+            $this->addTemplateCell($table, $value, $unitColumnWidth, $font, ['alignment' => \PhpOffice\PhpWord\SimpleType\Jc::CENTER]);
         }
+    }
+    private function inventoryStatusUnitColumnWidth(int $unitCount): int
+    {
+        return 360;
     }
     private function writeVariableTemplateZip(string $sourcePath,string $targetPath,string $type): void
     {
@@ -614,14 +658,14 @@ class InventoryWorkflowController extends ModuleBaseController
     private function defaultReportTemplates(): array
     {
         return [
-            'position' => ['name' => 'Theo vị trí lắp đặt', 'report' => 'Thống kê thực lực hiện có', 'scope' => 'Theo vị trí lắp đặt', 'file' => 'bao-cao-thuc-luc-hien-co-theo-vi-tri.docx', 'variable_file' => 'Mau_bien_Thong_ke_thuc_luc_hien_co_theo_vi_tri.docx'],
-            'total-position' => ['name' => 'Tổng hợp toàn bộ', 'report' => 'Thống kê thực lực hiện có', 'scope' => 'Tổng hợp toàn bộ', 'file' => 'bao-cao-thuc-luc-hien-co-tong-the.docx', 'variable_file' => 'Mau_bien_Thong_ke_thuc_luc_hien_co_tong_hop.docx'],
+            'position' => ['name' => 'Theo vị trí lắp đặt', 'report' => 'Thống kê thực lực hiện có', 'scope' => 'Theo vị trí lắp đặt', 'file' => 'bao-cao-thuc-luc-hien-co-theo-vi-tri.docx', 'variable_file' => 'mau-bien-theo-vi-tri.docx'],
+            'total-position' => ['name' => 'Tổng hợp toàn bộ', 'report' => 'Thống kê thực lực hiện có', 'scope' => 'Tổng hợp toàn bộ', 'file' => 'bao-cao-thuc-luc-hien-co-tong-the.docx', 'variable_file' => 'mau-bien-tong-hop-toan-bo.docx'],
             'unit' => ['name' => 'Theo đơn vị', 'report' => 'Thống kê thực lực vật tư theo đơn vị', 'file' => 'bao-cao-thuc-luc-hien-co-tong-the.docx', 'variable_file' => 'Mau_bien_Don_vi.docx'],
             'increase-decrease' => ['name' => 'Tăng, giảm', 'report' => 'Thống kê tăng, giảm thực lực vật tư', 'file' => 'bao-cao-tang-giam-thuc-luc-vat-tu.docx', 'variable_file' => 'Mau_bien_Tang_giam.docx'],
             'period' => ['name' => 'Tổng hợp theo kỳ', 'report' => 'Báo cáo tổng hợp theo kỳ', 'file' => 'bao-cao-tong-hop-thuc-luc-theo-ky.docx', 'variable_file' => 'Mau_bien_Tong_hop_theo_ky.docx'],
             'warehouse' => ['name' => 'Kho vật tư', 'report' => 'Báo cáo kho vật tư', 'file' => 'bao-cao-kho-vat-tu.docx', 'variable_file' => 'Mau_bien_Kho.docx'],
-            'using-position' => ['name' => 'Theo vị trí lắp đặt', 'report' => 'Báo cáo vật tư đang sử dụng', 'scope' => 'Theo vị trí lắp đặt', 'file' => 'bao-cao-vt-dang-su-dung-vi-tri.docx', 'variable_file' => 'Mau_bien_Vat_tu_dang_su_dung_theo_vi_tri.docx'],
-            'using-total' => ['name' => 'Tổng hợp toàn bộ', 'report' => 'Báo cáo vật tư đang sử dụng', 'scope' => 'Tổng hợp toàn bộ', 'file' => 'bao-cao-vt-dang-su-dung-tong-the.docx', 'variable_file' => 'Mau_bien_Toan_he_thong.docx'],
+            'using-position' => ['name' => 'Theo vị trí lắp đặt', 'report' => 'Báo cáo vật tư đang sử dụng', 'scope' => 'Theo vị trí lắp đặt', 'file' => 'bao-cao-vt-dang-su-dung-vi-tri.docx', 'variable_file' => 'mau-bien-vat-tu-dang-su-dung-theo-vi-tri.docx'],
+            'using-total' => ['name' => 'Tổng hợp toàn bộ', 'report' => 'Báo cáo vật tư đang sử dụng', 'scope' => 'Tổng hợp toàn bộ', 'file' => 'bao-cao-vt-dang-su-dung-tong-the.docx', 'variable_file' => 'mau-bien-vat-tu-dang-su-dung-tong-hop.docx'],
             'system-warehouse' => ['name' => 'Hệ thống kho-vật tư', 'report' => 'Báo cáo hệ thống kho-vật tư', 'file' => 'bao-cao-kho-he-thong-kho-vt.docx', 'variable_file' => 'Mau_bien_Kho_vat_tu.docx'],
             'transfer' => ['name' => 'Quyết định điều động', 'report' => 'Quyết định điều động', 'file' => 'bao-cao-quyet-dinh-dieu-dong.docx', 'variable_file' => 'Mau_bien_Phieu_dieu_dong.docx'],
             'recall' => ['name' => 'Quyết định thu hồi', 'report' => 'Quyết định thu hồi', 'file' => 'bao-cao-quyet-dinh-thu-hoi-tra-ve.docx', 'variable_file' => 'Mau_bien_Phieu_thu_hoi.docx'],
