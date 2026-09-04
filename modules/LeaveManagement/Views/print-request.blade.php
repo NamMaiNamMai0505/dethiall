@@ -45,7 +45,7 @@
         @php
             $printReason = trim((string) ($request->reason ?? ''));
             if ($request->leave_type === 'ANNUAL') {
-                $printReason = ($printReason ?: 'Nghỉ phép năm') . ' ' . now()->year;
+                $printReason = $printReason ?: 'Nghỉ phép năm';
             } elseif ($printReason === '') {
                 $printReason = 'Nghỉ phép.';
             }

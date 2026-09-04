@@ -390,7 +390,7 @@ class LeaveWorkflowController extends ModuleBaseController {
         $from=$leaveRequest->from_date;$to=$leaveRequest->to_date;$created=$leaveRequest->created_at ?: now();
         $signer=$leaveRequest->bgh_signed_by_user_id ? \App\Models\User::find($leaveRequest->bgh_signed_by_user_id) : null;
         $reason=trim((string)($leaveRequest->reason??''));
-        if($leaveRequest->leave_type==='ANNUAL')$reason=($reason?:'Nghỉ phép năm').' '.($leaveRequest->leave_year?:now()->year);
+        if($leaveRequest->leave_type==='ANNUAL')$reason=$reason?:'Nghỉ phép năm';
         elseif($reason==='')$reason='Nghỉ phép.';
         $signedDate=$leaveRequest->bgh_signed_at?->format('d/m/Y') ?: ($leaveRequest->approved_at?->format('d/m/Y') ?: '');
         $values=[
