@@ -8,6 +8,8 @@ use Modules\Inventory\Models\{InventoryAuditLog,InventoryCategory,InventoryMater
 
 class InventoryController extends ModuleBaseController
 {
+    protected bool $useGenericModulePermissions = false;
+
     public function portal(){ return view('portals.inventory'); }
     public function materials(Request $request){$industryId=$request->input('industry_id');$typeId=$request->input('category_id');$materials=InventoryMaterial::with('category')->when($industryId,fn($q,$id)=>$q->whereHas('category',fn($c)=>$c->where('parent_id',$id)))->when($typeId,fn($q,$id)=>$q->where('category_id',$id))->when($request->filled('search'),fn($q)=>$q->where(fn($x)=>$x->where('code','like','%'.$request->search.'%')->orWhere('name','like','%'.$request->search.'%')))->latest()->get();$industries=InventoryCategory::whereNull('parent_id')->orderBy('code')->get();$categories=InventoryCategory::whereNotNull('parent_id')->when($industryId,fn($q,$id)=>$q->where('parent_id',$id))->orderBy('code')->get();return view('inventory::feature',['section'=>'materials','title'=>'Danh sách vật tư','materials'=>$materials,'categories'=>$categories,'industries'=>$industries,'industryId'=>$industryId,'typeId'=>$typeId]);}
     public function importTemplate(){

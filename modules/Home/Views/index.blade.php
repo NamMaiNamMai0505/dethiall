@@ -58,7 +58,7 @@
                 if ($canGrades && Route::has('grades.hub')) {
                     $gradesRoute = route('grades.hub');
                 }
-                if (($u->isSuperAdmin() || $u->can('inventory.index')) && Route::has('inventory.portal')) {
+                if (($u->isSuperAdmin() || \App\Support\PermissionCheck::can($u, 'inventory.access.index')) && Route::has('inventory.portal')) {
                     $inventoryRoute = route('inventory.portal');
                 }
                 if (($u->isSuperAdmin() || $u->can('leave-management.index') || $u->can('leave-management.access.index')) && Route::has('leave-management.portal')) {

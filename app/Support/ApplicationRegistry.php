@@ -199,6 +199,12 @@ final class ApplicationRegistry
                         self::ACTION_DELETE => ['delete'],
                         self::ACTION_IMPORT => ['import'],
                     ]),
+                    self::app('inventory.categories', 'Danh mục ngành / loại vật tư', [
+                        self::ACTION_VIEW => ['index', 'show'],
+                        self::ACTION_CREATE => ['create'],
+                        self::ACTION_EDIT => ['edit'],
+                        self::ACTION_DELETE => ['delete'],
+                    ]),
                     self::app('inventory.assets', 'Cập nhật vật tư trong đơn vị', [
                         self::ACTION_VIEW => ['index', 'show'],
                         self::ACTION_CREATE => ['create'],
@@ -212,10 +218,18 @@ final class ApplicationRegistry
                         self::ACTION_EDIT => ['edit'],
                         self::ACTION_DELETE => ['delete'],
                     ]),
+                    self::app('inventory.locations', 'Tòa nhà / phòng vật tư', [
+                        self::ACTION_VIEW => ['index', 'show'],
+                        self::ACTION_CREATE => ['create'],
+                        self::ACTION_EDIT => ['edit'],
+                        self::ACTION_DELETE => ['delete'],
+                        self::ACTION_IMPORT => ['import'],
+                    ]),
                     self::app('inventory.proposals', 'Đề xuất vật tư', [
                         self::ACTION_VIEW => ['index', 'show'],
                         self::ACTION_CREATE => ['create'],
                         self::ACTION_EDIT => ['edit'],
+                        self::ACTION_DELETE => ['delete'],
                         self::ACTION_APPROVE => ['approve'],
                         self::ACTION_EXPORT => ['export'],
                     ]),
@@ -223,6 +237,7 @@ final class ApplicationRegistry
                         self::ACTION_VIEW => ['index', 'show'],
                         self::ACTION_CREATE => ['create'],
                         self::ACTION_EDIT => ['edit'],
+                        self::ACTION_DELETE => ['delete'],
                         self::ACTION_APPROVE => ['approve'],
                         self::ACTION_EXPORT => ['export'],
                     ]),
@@ -230,6 +245,7 @@ final class ApplicationRegistry
                         self::ACTION_VIEW => ['index', 'show'],
                         self::ACTION_CREATE => ['create'],
                         self::ACTION_EDIT => ['edit'],
+                        self::ACTION_DELETE => ['delete'],
                     ]),
                     self::app('inventory.reports', 'Báo cáo vật tư', [
                         self::ACTION_VIEW => ['index', 'show'],
@@ -237,6 +253,8 @@ final class ApplicationRegistry
                     ]),
                     self::app('inventory.logs', 'Nhật ký vật tư', [
                         self::ACTION_VIEW => ['index', 'show'],
+                        self::ACTION_EDIT => ['edit'],
+                        self::ACTION_DELETE => ['delete'],
                     ]),
                     self::app('inventory.templates', 'Mẫu biểu vật tư', [
                         self::ACTION_VIEW => ['index', 'show'],
@@ -244,6 +262,12 @@ final class ApplicationRegistry
                         self::ACTION_EDIT => ['edit'],
                         self::ACTION_DELETE => ['delete'],
                         self::ACTION_EXPORT => ['export'],
+                    ]),
+                    self::app('inventory.liquidations', 'Thanh lý vật tư', [
+                        self::ACTION_VIEW => ['index', 'show'],
+                    ]),
+                    self::app('inventory.search', 'Tìm kiếm vật tư', [
+                        self::ACTION_VIEW => ['index', 'show'],
                     ]),
                     self::app('inventory', 'Quản lý vật tư (tương thích quyền cũ)', [
                         self::ACTION_VIEW => ['index', 'show'],

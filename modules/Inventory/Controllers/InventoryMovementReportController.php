@@ -11,6 +11,8 @@ use Modules\Inventory\Models\{InventoryMaterial, InventoryMovement, InventoryRep
 
 class InventoryMovementReportController extends ModuleBaseController
 {
+    protected bool $useGenericModulePermissions = false;
+
     public function index(Request $request)
     {
         $locations = $this->syncedLocations($request);

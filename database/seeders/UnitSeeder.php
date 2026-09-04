@@ -4,6 +4,7 @@ namespace Database\Seeders;
 
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class UnitSeeder extends Seeder
 {
@@ -195,6 +196,37 @@ class UnitSeeder extends Seeder
             ],
         ];
 
+        $extraUnits = [
+            ['code' => 'BGH', 'name' => 'Ban Giám hiệu', 'abbreviation' => 'BGH', 'parent_code' => 'CDHC2', 'level' => 2],
+            ['code' => 'PHONG_CT', 'name' => 'Phòng Chính trị', 'abbreviation' => 'PCT', 'parent_code' => 'CDHC2', 'level' => 2],
+            ['code' => 'PHONG_HC', 'name' => 'Phòng Hậu cần', 'abbreviation' => 'PHC', 'parent_code' => 'CDHC2', 'level' => 2],
+            ['code' => 'PHONG_KT', 'name' => 'Phòng Kỹ thuật', 'abbreviation' => 'PKT', 'parent_code' => 'CDHC2', 'level' => 2],
+            ['code' => 'PHONG_TCKT', 'name' => 'Phòng Tài chính - Kế toán', 'abbreviation' => 'TCKT', 'parent_code' => 'CDHC2', 'level' => 2],
+            ['code' => 'PHONG_KHCN', 'name' => 'Phòng Khoa học công nghệ', 'abbreviation' => 'KHCN', 'parent_code' => 'CDHC2', 'level' => 2],
+            ['code' => 'BKHQS', 'name' => 'Ban Khoa học Quân sự', 'abbreviation' => 'KHQS', 'parent_code' => 'CDHC2', 'level' => 2, 'functional_type' => 'approval_agency'],
+            ['code' => 'BKT&ĐBCLGDĐT', 'name' => 'Ban Khảo thí và Đảm bảo chất lượng giáo dục đào tạo', 'abbreviation' => 'KTĐBCL', 'parent_code' => 'CDHC2', 'level' => 2, 'functional_type' => 'approval_agency'],
+            ['code' => 'BAN_QLHV', 'name' => 'Ban Quản lý học viên', 'abbreviation' => 'QLHV', 'parent_code' => 'CDHC2', 'level' => 2],
+            ['code' => 'BAN_QUAN_LUC', 'name' => 'Ban Quân lực', 'abbreviation' => 'QL', 'parent_code' => 'PHONG_TMHC', 'level' => 3],
+            ['code' => 'BAN_CAN_BO', 'name' => 'Ban Cán bộ', 'abbreviation' => 'CB', 'parent_code' => 'PHONG_CT', 'level' => 3],
+            ['code' => 'BAN_TUYEN_HUAN', 'name' => 'Ban Tuyên huấn', 'abbreviation' => 'TH', 'parent_code' => 'PHONG_CT', 'level' => 3],
+            ['code' => 'BAN_HANH_CHINH', 'name' => 'Ban Hành chính', 'abbreviation' => 'HC', 'parent_code' => 'PHONG_TMHC', 'level' => 3],
+            ['code' => 'BAN_DOANH_TRAI', 'name' => 'Ban Doanh trại', 'abbreviation' => 'DT', 'parent_code' => 'PHONG_HC', 'level' => 3],
+            ['code' => 'BAN_QUAN_Y', 'name' => 'Ban Quân y', 'abbreviation' => 'QY', 'parent_code' => 'PHONG_HC', 'level' => 3],
+            ['code' => 'BAN_XE_MAY', 'name' => 'Ban Xe máy', 'abbreviation' => 'XM', 'parent_code' => 'PHONG_KT', 'level' => 3],
+            ['code' => 'BAN_VU_KHI', 'name' => 'Ban Vũ khí', 'abbreviation' => 'VK', 'parent_code' => 'PHONG_KT', 'level' => 3],
+            ['code' => 'TTVIEN', 'name' => 'Thư viện', 'abbreviation' => 'TV', 'parent_code' => 'CDHC2', 'level' => 2],
+            ['code' => 'TTTHNN', 'name' => 'Trung tâm Tin học - Ngoại ngữ', 'abbreviation' => 'THNN', 'parent_code' => 'CDHC2', 'level' => 2],
+            ['code' => 'TTTH', 'name' => 'Tổ Thực hành', 'abbreviation' => 'TTH', 'parent_code' => 'PHONG_DT', 'level' => 3],
+            ['code' => 'DD1_D1', 'name' => 'Đại đội 1', 'abbreviation' => 'C1', 'parent_code' => 'D1', 'level' => 3],
+            ['code' => 'DD2_D1', 'name' => 'Đại đội 2', 'abbreviation' => 'C2', 'parent_code' => 'D1', 'level' => 3],
+            ['code' => 'DD3_D1', 'name' => 'Đại đội 3', 'abbreviation' => 'C3', 'parent_code' => 'D1', 'level' => 3],
+            ['code' => 'DD4_D1', 'name' => 'Đại đội 4', 'abbreviation' => 'C4', 'parent_code' => 'D1', 'level' => 3],
+            ['code' => 'DD5_D2', 'name' => 'Đại đội 5', 'abbreviation' => 'C5', 'parent_code' => 'D2', 'level' => 3],
+            ['code' => 'DD6_D2', 'name' => 'Đại đội 6', 'abbreviation' => 'C6', 'parent_code' => 'D2', 'level' => 3],
+            ['code' => 'DD7_D2', 'name' => 'Đại đội 7', 'abbreviation' => 'C7', 'parent_code' => 'D2', 'level' => 3],
+            ['code' => 'DD8_D2', 'name' => 'Đại đội 8', 'abbreviation' => 'C8', 'parent_code' => 'D2', 'level' => 3],
+        ];
+
         // Migration chuẩn hóa K1–K8 có thể tạo các đơn vị placeholder trước khi
         // seeder chạy trên database sạch. Đổi mã tạm để không va unique(code),
         // sau đó upsert theo ID giúp seeder chạy lặp an toàn.
@@ -221,6 +253,60 @@ class UnitSeeder extends Seeder
                 'code', 'name', 'parent_id', 'level', 'status',
                 'created_by', 'updated_by', 'updated_at',
             ]
+        );
+
+        $parentIds = DB::table('units')
+            ->whereIn('code', collect($extraUnits)->pluck('parent_code')->unique()->all())
+            ->pluck('id', 'code');
+
+        $hasAbbreviation = Schema::hasColumn('units', 'abbreviation');
+        $hasFunctionalType = Schema::hasColumn('units', 'functional_type');
+        $hasFacultyCode = Schema::hasColumn('units', 'faculty_code');
+
+        $extraRows = collect($extraUnits)
+            ->map(function (array $unit) use ($parentIds, $hasAbbreviation, $hasFunctionalType, $hasFacultyCode): array {
+                $row = [
+                    'code' => $unit['code'],
+                    'name' => $unit['name'],
+                    'parent_id' => $parentIds[$unit['parent_code']] ?? 1,
+                    'level' => $unit['level'],
+                    'status' => 'active',
+                    'created_by' => 1,
+                    'updated_by' => 1,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ];
+
+                if ($hasAbbreviation) {
+                    $row['abbreviation'] = $unit['abbreviation'] ?? null;
+                }
+
+                if ($hasFunctionalType) {
+                    $row['functional_type'] = $unit['functional_type'] ?? 'other';
+                }
+
+                if ($hasFacultyCode) {
+                    $row['faculty_code'] = $unit['faculty_code'] ?? null;
+                }
+
+                return $row;
+            })
+            ->all();
+
+        DB::table('units')->upsert(
+            $extraRows,
+            ['code'],
+            array_values(array_filter([
+                'name',
+                $hasAbbreviation ? 'abbreviation' : null,
+                'parent_id',
+                'level',
+                $hasFunctionalType ? 'functional_type' : null,
+                $hasFacultyCode ? 'faculty_code' : null,
+                'status',
+                'updated_by',
+                'updated_at',
+            ]))
         );
     }
 }
