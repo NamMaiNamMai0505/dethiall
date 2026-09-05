@@ -3,8 +3,8 @@
         <h3 class="mb-3 font-semibold">Thêm vật tư có sẵn vào phòng</h3>
         <form method="POST" action="{{ route('inventory.room.assets.store', $classroom) }}" class="grid gap-3 md:grid-cols-4">
             @csrf
-            <label class="text-sm font-semibold md:col-span-2">Vật tư trong bảng vật tư<select name="material_id" required class="mt-1 w-full rounded border p-2"><option value="">Chọn vật tư có sẵn</option>@foreach(($materials ?? collect()) as $material)<option value="{{ $material->id }}">{{ $material->code }} — {{ $material->name }} (tồn {{ $material->quantity }} {{ $material->unit }})</option>@endforeach</select></label>
-            <label class="text-sm font-semibold">Số lượng<input name="quantity" type="number" min=".01" step=".01" value="1" required class="mt-1 w-full rounded border p-2"></label>
+            <label class="text-sm font-semibold md:col-span-2">Vật tư trong bảng vật tư<select name="material_id" required class="mt-1 w-full rounded border p-2"><option value="">Chọn vật tư có sẵn</option>@foreach(($materials ?? collect()) as $material)<option value="{{ $material->id }}" data-quantity="{{ (int) $material->quantity }}">{{ $material->code }} — {{ $material->name }} (tồn {{ $material->quantity }} {{ $material->unit }})</option>@endforeach</select></label>
+            <label class="text-sm font-semibold">Số lượng<input name="quantity" type="number" min="1" step="1" value="1" required class="mt-1 w-full rounded border p-2"></label>
             <label class="text-sm font-semibold">Đơn vị quản lý<select name="holding_unit_id" class="mt-1 w-full rounded border p-2"><option value="">Theo đơn vị quản lý phòng</option>@foreach(($units ?? collect()) as $unit)<option value="{{ $unit->id }}" @selected((int) old('holding_unit_id', $classroom->managing_unit_id) === (int) $unit->id)>{{ $unit->name }}</option>@endforeach</select></label>
             <button class="w-fit rounded bg-blue-600 px-4 py-2 text-white">Thêm vào phòng</button>
         </form>
@@ -27,4 +27,5 @@
         <tr><td colspan="8" class="p-4 text-center text-slate-500">Phòng chưa có vật tư.</td></tr>
     @endforelse
     </tbody></table>
+    <script>document.addEventListener('DOMContentLoaded',function(){document.querySelectorAll('form[action*="/vat-tu/phong/"][action*="/vat-tu"]').forEach(function(form){const material=form.querySelector('select[name="material_id"]'),quantity=form.querySelector('input[name="quantity"]');if(!material||!quantity)return;const sync=function(){const max=parseInt(material.selectedOptions[0]?.dataset.quantity||'0',10);quantity.max=max||'';if(max&&parseInt(quantity.value||'0',10)>max)quantity.value=max;};material.addEventListener('change',sync);sync();});});</script>
 </section>

@@ -13,4 +13,8 @@ class InventoryMaterial extends Model
     public function building() { return $this->belongsTo(\Modules\Building\Models\Building::class); }
     public function classroom() { return $this->belongsTo(\Modules\Classroom\Models\Classroom::class); }
     public function movements() { return $this->hasMany(InventoryMovement::class, 'material_id')->latest(); }
+    public function assets() { return $this->hasMany(InventoryAsset::class, 'material_id'); }
+    public function warehouseItems() { return $this->hasMany(InventoryWarehouseItem::class, 'material_id'); }
+    public function proposalItems() { return $this->hasMany(InventoryProposalItem::class, 'material_id'); }
+    public function transfers() { return $this->hasMany(InventoryTransfer::class, 'material_id'); }
 }

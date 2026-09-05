@@ -11,6 +11,7 @@
 <div class="space-y-5">
     <div class="flex flex-col gap-3 border-b border-slate-200 pb-4 sm:flex-row sm:items-end sm:justify-between"><div><p class="mb-1 text-xs font-bold uppercase tracking-[.18em] text-indigo-600">Quản trị phân hệ</p><h1 class="text-2xl font-extrabold tracking-tight text-slate-900">{{ $title }}</h1><p class="mt-1 text-sm text-slate-500">Thực hiện nghiệp vụ nhanh, rõ ràng và có kiểm soát.</p></div><a href="{{ route('inventory.index') }}" class="inline-flex items-center gap-2 self-start rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 sm:self-auto"><i class="bi bi-arrow-left"></i> Tổng quan</a></div>
     @if(session('success'))<div class="rounded bg-green-100 p-3 text-green-800">{{ session('success') }}</div>@endif
+    @if($errors->any())<div class="rounded bg-red-100 p-3 text-red-800">{{ $errors->first() }}</div>@endif
     @if($section === 'category')
         @include('inventory::partials.category-management')
         @if(false)

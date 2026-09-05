@@ -84,7 +84,7 @@
         <form method="POST" action="{{ route('inventory.assets.change') }}" class="grid gap-4 md:grid-cols-4">@csrf
             <label class="text-sm font-semibold">Ngành vật tư<select id="single-industry" class="mt-1 w-full rounded-lg border px-3 py-2.5"><option value="">Chọn ngành vật tư</option>@foreach(($industries ?? collect()) as $item)<option value="{{ $item->id }}">{{ $item->code }} — {{ $item->name }}</option>@endforeach</select></label>
             <label class="text-sm font-semibold">Loại vật tư<select id="single-category" class="mt-1 w-full rounded-lg border px-3 py-2.5"><option value="">Chọn loại vật tư</option>@foreach(($categories ?? collect()) as $item)<option value="{{ $item->id }}" data-parent="{{ $item->parent_id }}">{{ $item->code }} — {{ $item->name }}</option>@endforeach</select></label>
-            <label class="text-sm font-semibold md:col-span-2">Vật tư<select id="single-asset" name="asset_id" required class="mt-1 w-full rounded-lg border px-3 py-2.5"><option value="">Chọn vật tư</option>@foreach(($materials ?? collect()) as $item)<option value="material-{{ $item->id }}" data-code="{{ $item->code }}" data-name="{{ $item->name }}" data-quantity="{{ (int) $item->quantity }}" data-grade="{{ $item->grade }}" data-category="{{ $item->category_id }}" data-address="{{ $item->location }}">{{ $item->code }} — {{ $item->name }}</option>@endforeach @foreach(($allAssets ?? collect()) as $item)<option value="{{ $item->id }}" data-code="{{ $item->asset_code }}" data-name="{{ $item->name }}" data-quantity="{{ (int) $item->quantity }}" data-grade="{{ $item->grade }}" data-category="{{ $item->material?->category_id }}" data-address="{{ $item->install_address }}">{{ $item->asset_code }} — {{ $item->name }}</option>@endforeach</select></label>
+            <label class="text-sm font-semibold md:col-span-2">Vật tư<select id="single-asset" name="asset_id" required class="mt-1 w-full rounded-lg border px-3 py-2.5"><option value="">Chọn vật tư</option>@foreach(($materials ?? collect())->where('quantity', '>', 0) as $item)<option value="material-{{ $item->id }}" data-code="{{ $item->code }}" data-name="{{ $item->name }}" data-quantity="{{ (int) $item->quantity }}" data-grade="{{ $item->grade }}" data-category="{{ $item->category_id }}" data-address="{{ $item->location }}">{{ $item->code }} — {{ $item->name }}</option>@endforeach</select></label>
             <label class="text-sm font-semibold">Mã vật tư<input id="single-selected-code" name="asset_code" readonly class="mt-1 w-full rounded-lg border bg-slate-50 px-3 py-2.5"></label>
             <label class="text-sm font-semibold">Tên vật tư<input id="single-selected-name" name="name" readonly class="mt-1 w-full rounded-lg border bg-slate-50 px-3 py-2.5"></label>
             <label class="text-sm font-semibold">Số lượng trước cập nhật<input id="single-before-quantity" readonly class="mt-1 w-full rounded-lg border bg-slate-50 px-3 py-2.5"></label>
@@ -143,15 +143,7 @@
                 'grade' => $material->grade,
             ],
         ]);
-        $singleAssetData = ($allAssets ?? collect())->mapWithKeys(fn ($asset) => [
-            (string) $asset->id => [
-                'code' => $asset->asset_code,
-                'name' => $asset->name,
-                'address' => $asset->install_address,
-                'quantity' => (int) $asset->quantity,
-                'grade' => $asset->grade,
-            ],
-        ]);
+        $singleAssetData = collect();
     @endphp
     <script>
         (()=>{const init=()=>{const p=document.getElementById('inventory-panel-single');if(!p||p.dataset.backendIdentity==='1')return;p.dataset.backendIdentity='1';const a=p.querySelector('#single-asset'),code=p.querySelector('#single-selected-code'),name=p.querySelector('#single-selected-name'),address=p.querySelector('#single-address'),hidden=p.querySelector('#single-address-value'),before=p.querySelector('#single-before-quantity'),grade=p.querySelector('#single-selected-grade'),items={...@json($singleMaterialData),...@json($singleAssetData)};const sync=()=>{const item=items[a.value]||{};code.value=item.code||'';name.value=item.name||'';address.value=item.address||'';hidden.value=item.address||'';before.value=item.quantity??'';if(item.grade)grade.value=item.grade};a.addEventListener('change',sync);sync();};document.addEventListener('DOMContentLoaded',init);document.addEventListener('turbo:load',init);if(document.readyState!=='loading')init();})();
