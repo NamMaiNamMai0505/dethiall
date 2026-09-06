@@ -103,6 +103,7 @@
             <tbody>
                 @foreach(($defaultTemplates ?? []) as $type => $template)
                     @php($customTemplate = ($customTemplates ?? collect())->get($type))
+                    @php($customDownloadUrl = $customTemplate && $customTemplate->file_path ? route('inventory.templates.download', $customTemplate).'?v='.($customTemplate->updated_at?->timestamp ?? time()) : null)
                     <tr class="border-t">
                         <td class="p-3">
                             <p class="font-semibold">{{ $template['name'] }}</p>
@@ -112,7 +113,7 @@
                         <td class="p-3">{{ $template['report'] ?? $template['name'] }}</td>
                         <td class="p-3">
                             @if($customTemplate && $customTemplate->file_path)
-                                <a href="{{ route('inventory.templates.download', $customTemplate) }}" class="break-words text-blue-600 underline">{{ $customTemplate->downloadName() }}</a>
+                                <a href="{{ $customDownloadUrl }}" class="break-words text-blue-600 underline">{{ $customTemplate->downloadName() }}</a>
                             @else
                                 <a href="{{ route('inventory.templates.variable.download', $type) }}" class="break-words text-blue-600 underline">{{ $template['variable_file'] ?? ('mau-bien-'.$type.'.docx') }}</a>
                             @endif
@@ -122,7 +123,7 @@
                         <td class="p-3 text-right">
                             <div class="inline-flex flex-wrap justify-end gap-2">
                                 <button type="button" data-template-toggle="default-{{ $type }}" class="rounded border px-3 py-1.5 text-xs font-semibold">Sửa</button>
-                                <a href="{{ ($customTemplate && $customTemplate->file_path) ? route('inventory.templates.download', $customTemplate) : route('inventory.templates.variable.download', $type) }}" class="rounded bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white">{{ ($customTemplate && $customTemplate->file_path) ? 'Tải file đang dùng' : 'Tải mẫu biến' }}</a>
+                                <a href="{{ $customDownloadUrl ?: route('inventory.templates.variable.download', $type) }}" class="rounded bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white">{{ ($customTemplate && $customTemplate->file_path) ? 'Tải file đang dùng' : 'Tải mẫu biến' }}</a>
                                 <form method="POST" action="{{ route('inventory.templates.default.delete', $type) }}" onsubmit="return confirm('Xóa hoàn toàn mẫu báo cáo này? Hệ thống sẽ không quay về file mặc định.')">
                                     @csrf
                                     @method('DELETE')
@@ -161,6 +162,7 @@
                     </tr>
                 @endforeach
                 @foreach(($uploadTemplates ?? collect()) as $item)
+                    @php($itemDownloadUrl = $item->file_path ? route('inventory.templates.download', $item).'?v='.($item->updated_at?->timestamp ?? time()) : null)
                     <tr class="border-t">
                         <td class="p-3">
                             <p class="font-semibold">{{ $item->name }}</p>
@@ -171,7 +173,7 @@
                         <td class="p-3">{{ $templateOption['label'] ?? ($item->description ?: 'Theo file Word đã tải lên') }}</td>
                         <td class="p-3">
                             @if($item->file_path)
-                                <a href="{{ route('inventory.templates.download', $item) }}" class="break-words text-blue-600 underline">{{ $item->downloadName() }}</a>
+                                <a href="{{ $itemDownloadUrl }}" class="break-words text-blue-600 underline">{{ $item->downloadName() }}</a>
                             @else
                                 Chưa có file
                             @endif
@@ -184,7 +186,7 @@
                             <div class="inline-flex flex-wrap justify-end gap-2">
                                 <button type="button" data-template-toggle="{{ $item->id }}" class="rounded border px-3 py-1.5 text-xs font-semibold">Sửa</button>
                                 @if($item->file_path)
-                                    <a href="{{ route('inventory.templates.download', $item) }}" class="rounded border px-3 py-1.5 text-xs font-semibold">Tải mẫu</a>
+                                    <a href="{{ $itemDownloadUrl }}" class="rounded border px-3 py-1.5 text-xs font-semibold">Tải mẫu</a>
                                 @endif
                                 <form method="POST" action="{{ route('inventory.templates.delete', $item) }}" onsubmit="return confirm('Xóa mẫu báo cáo này?')">
                                     @csrf
