@@ -57,14 +57,14 @@ class InventoryReportTemplateController extends ModuleBaseController
             abort_unless($path && is_file($path), 404, 'File mẫu báo cáo đã chọn không tồn tại.');
             abort_unless(strtolower(pathinfo($path, PATHINFO_EXTENSION)) === 'docx', 422, 'Mẫu báo cáo Word phải là file .docx.');
 
-            return [$path, basename((string) $template->file_path)];
+            return [$path, $template->downloadName()];
         }
 
         $custom = InventoryReportTemplate::where('report_type', $type)->where('active', true)->latest()->first();
         if ($custom) {
             $path = $custom->absolutePath();
             if ($path && is_file($path)) {
-                return [$path, basename((string) $custom->file_path)];
+                return [$path, $custom->downloadName()];
             }
         }
 

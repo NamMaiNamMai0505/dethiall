@@ -112,7 +112,7 @@
                         <td class="p-3">{{ $template['report'] ?? $template['name'] }}</td>
                         <td class="p-3">
                             @if($customTemplate && $customTemplate->file_path)
-                                <a href="{{ route('inventory.templates.download', $customTemplate) }}" class="break-words text-blue-600 underline">{{ basename($customTemplate->file_path) }}</a>
+                                <a href="{{ route('inventory.templates.download', $customTemplate) }}" class="break-words text-blue-600 underline">{{ $customTemplate->downloadName() }}</a>
                             @else
                                 <a href="{{ route('inventory.templates.variable.download', $type) }}" class="break-words text-blue-600 underline">{{ $template['variable_file'] ?? ('mau-bien-'.$type.'.docx') }}</a>
                             @endif
@@ -171,7 +171,7 @@
                         <td class="p-3">{{ $templateOption['label'] ?? ($item->description ?: 'Theo file Word đã tải lên') }}</td>
                         <td class="p-3">
                             @if($item->file_path)
-                                <a href="{{ route('inventory.templates.download', $item) }}" class="break-words text-blue-600 underline">{{ basename($item->file_path) }}</a>
+                                <a href="{{ route('inventory.templates.download', $item) }}" class="break-words text-blue-600 underline">{{ $item->downloadName() }}</a>
                             @else
                                 Chưa có file
                             @endif
