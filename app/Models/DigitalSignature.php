@@ -36,6 +36,12 @@ class DigitalSignature extends Model
 
     public const SLOT_KT_HIEU_TRUONG = 'kt_hieu_truong';
 
+    public const SLOT_LEAVE_AGENCY = 'leave_agency';
+
+    public const SLOT_LEAVE_PROPOSING_UNIT = 'leave_proposing_unit';
+
+    public const SLOT_LEAVE_HEAD = 'leave_head';
+
     public const SLOT_CUSTOM = 'custom';
 
     public static function systemSlots(): array
@@ -45,6 +51,20 @@ class DigitalSignature extends Model
             self::SLOT_KT_TRUONG_PHONG => 'KT. Trưởng phòng',
             self::SLOT_KT_HIEU_TRUONG => 'KT. Hiệu trưởng',
         ];
+    }
+
+    public static function leaveSlots(): array
+    {
+        return [
+            self::SLOT_LEAVE_PROPOSING_UNIT => 'Giay phep: Don vi de nghi',
+            self::SLOT_LEAVE_AGENCY => 'Giay phep: Quan luc / Co quan can bo',
+            self::SLOT_LEAVE_HEAD => 'Giay phep: Ban giam hieu',
+        ];
+    }
+
+    public static function allSlots(): array
+    {
+        return self::systemSlots() + self::leaveSlots();
     }
 
     public function user(): BelongsTo
@@ -123,7 +143,7 @@ class DigitalSignature extends Model
 
     public function slotLabel(): string
     {
-        return self::systemSlots()[$this->slot_key] ?? ($this->slot_key === self::SLOT_CUSTOM ? 'Tuỳ chọn' : $this->slot_key);
+        return self::allSlots()[$this->slot_key] ?? ($this->slot_key === self::SLOT_CUSTOM ? 'Tuỳ chọn' : $this->slot_key);
     }
 
     public function scopeActive($query)

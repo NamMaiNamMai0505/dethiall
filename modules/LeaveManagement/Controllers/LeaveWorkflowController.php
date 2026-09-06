@@ -1,6 +1,7 @@
 <?php
 namespace Modules\LeaveManagement\Controllers;
 use App\Http\Controllers\ModuleBaseController;
+use App\Models\DigitalSignature;
 use App\Support\ManagerUnitScope;
 use App\Support\PermissionCheck;
 use Illuminate\Http\Request;
@@ -120,29 +121,30 @@ class LeaveWorkflowController extends ModuleBaseController {
         $httpRequest=request();
         $user=request()->user();
         abort_unless(PermissionCheck::isLeaveAgency($user) || LeaveAccess::canApprove($user) || LeaveAccess::canHeadSign($user),403,'Chỉ tài khoản Cơ quan cán bộ, Quân lực hoặc thủ trưởng được in giấy nghỉ phép.');
-        $leaveRequest->forceFill(['printed_at'=>now()])->save();
-        LeaveAuditLog::create(['user_id'=>$user->id,'action'=>'PRINT','entity_type'=>'request','entity_id'=>$leaveRequest->id,'details'=>['printed_at'=>now()->toDateTimeString()]]);
-        $leaveRequest->load(['personnel.unitRelation.parent.parent.parent','commander']);
+        $this->markPermitPrinted($leaveRequest);
+        LeaveAuditLog::create(['user_id'=>$user->id,'action'=>'PRINT','entity_type'=>'request','entity_id'=>$leaveRequest->id,'details'=>['printed_at'=>now()->toDateTimeString(),'permit_number'=>$this->formatPermitNumber($leaveRequest)]]);
+        $leaveRequest->load(['personnel.unitRelation.parent.parent.parent','commander.position','replacement.unitRelation']);
         $printLocalityPath=$leaveRequest->locality_id ? (LeaveLocality::with('parent')->find($leaveRequest->locality_id)?->pathName() ?: $leaveRequest->locality_path) : $leaveRequest->locality_path;
         $unit=$leaveRequest->personnel?->unitRelation ?: ($leaveRequest->unit_id ? Unit::with('parent.parent.parent')->find($leaveRequest->unit_id) : null);
         $printUnitPath=$unit?->leafFirstHierarchyPath() ?: ($leaveRequest->unit_name ?? $leaveRequest->personnel?->unit ?? null);
-        if(in_array($httpRequest->query('format'),['word','pdf','print'],true)){
+        $format=(string)$httpRequest->query('format','print');
+        if(in_array($format,['word','pdf','print'],true)){
             $template=$this->activePermitTemplate();
-            if($template)return match($httpRequest->query('format')){
+            if($template)return match($format){
                 'pdf'=>$this->printPermitPdfFromTemplate($template,$leaveRequest,$printLocalityPath,$printUnitPath),
                 'print'=>$this->showPermitPdfPrintPage($template,$leaveRequest,$printLocalityPath,$printUnitPath),
                 default=>$this->downloadPermitFromTemplate($template,$leaveRequest,$printLocalityPath,$printUnitPath),
             };
         }
-        return view('leave-management::print-request',['request'=>$leaveRequest,'printLocalityPath'=>$printLocalityPath,'printUnitPath'=>$printUnitPath]);
+        return view('leave-management::print-request',['request'=>$leaveRequest,'printLocalityPath'=>$printLocalityPath,'printUnitPath'=>$printUnitPath,'permitNumber'=>$this->formatPermitNumber($leaveRequest),'permitSignatures'=>$this->resolvePermitSignatures($leaveRequest)]);
     }
     public function printRecord(Request $request, LeaveRecord $record){
         $user=$request->user();
         abort_unless(PermissionCheck::isLeaveAgency($user) || LeaveAccess::canApprove($user) || LeaveAccess::canHeadSign($user),403,'Chỉ tài khoản Cơ quan cán bộ, Quân lực hoặc thủ trưởng được in giấy nghỉ phép.');
         $record->loadMissing(['personnel.unitRelation']);
         $this->ensureRecordAccess($record,$user);
-        $source=$record->request_id?LeaveRequest::withoutGlobalScopes()->with(['personnel.unitRelation','replacement'])->find($record->request_id):null;
-        if($source)$source->forceFill(['printed_at'=>now()])->save();
+        $source=$record->request_id?LeaveRequest::withoutGlobalScopes()->with(['personnel.unitRelation','commander.position','replacement.unitRelation'])->find($record->request_id):null;
+        if($source)$this->markPermitPrinted($source);
         LeaveAuditLog::create(['user_id'=>$user->id,'action'=>'PRINT','entity_type'=>'record','entity_id'=>$record->id,'details'=>['request_id'=>$record->request_id,'printed_at'=>now()->toDateTimeString()]]);
         $printLocalityPath=$record->locality_id ? (LeaveLocality::with('parent')->find($record->locality_id)?->pathName() ?: $record->locality_path) : $record->locality_path;
         $unit=$record->unit_id?\Modules\Unit\Models\Unit::find($record->unit_id):null;
@@ -188,16 +190,18 @@ class LeaveWorkflowController extends ModuleBaseController {
             'created_at'=>$source?->created_at ?: $record->created_at,
         ]);
         $leaveRequest->setRelation('personnel',$source?->personnel ?: $record->personnel);
+        if($source?->relationLoaded('commander'))$leaveRequest->setRelation('commander',$source->commander);
         if($source?->relationLoaded('replacement'))$leaveRequest->setRelation('replacement',$source->replacement);
-        if(in_array($request->query('format'),['word','pdf','print'],true)){
+        $format=(string)$request->query('format','print');
+        if(in_array($format,['word','pdf','print'],true)){
             $template=$this->activePermitTemplate();
-            if($template)return match($request->query('format')){
+            if($template)return match($format){
                 'pdf'=>$this->printPermitPdfFromTemplate($template,$leaveRequest,$printLocalityPath,$printUnitPath),
                 'print'=>$this->showPermitPdfPrintPage($template,$leaveRequest,$printLocalityPath,$printUnitPath),
                 default=>$this->downloadPermitFromTemplate($template,$leaveRequest,$printLocalityPath,$printUnitPath),
             };
         }
-        return view('leave-management::print-request',['request'=>$leaveRequest,'printLocalityPath'=>$printLocalityPath,'printUnitPath'=>$printUnitPath]);
+        return view('leave-management::print-request',['request'=>$leaveRequest,'printLocalityPath'=>$printLocalityPath,'printUnitPath'=>$printUnitPath,'permitNumber'=>$this->formatPermitNumber($leaveRequest),'permitSignatures'=>$this->resolvePermitSignatures($leaveRequest)]);
     }
     public function approvals(){
         $user=request()->user();
@@ -351,50 +355,193 @@ class LeaveWorkflowController extends ModuleBaseController {
         $personNameFilter=function($q)use($keyword){if($keyword!=='')$q->where(function($x)use($keyword){$x->where('name','like','%'.$keyword.'%')->orWhere('staff_code','like','%'.$keyword.'%');});};
         $approved=LeaveRequest::with(['personnel.unitRelation'])->where('status','APPROVED')->whereYear('from_date',$year)->when($agency,$agencyFilter)->when($unitId,$unitFilter)->when($keyword,$nameFilter)->latest()->get()->map(function($item)use($today){$start=$item->from_date?->copy()->startOfDay();$end=$item->to_date?->copy()->startOfDay();$item->days_used=($start&&!$today->lt($start))?min((int)$item->total_days,$end&&!$today->gte($end)?$start->diffInDays($today)+1:(int)$item->total_days):0;$item->days_remaining=$end&&!$today->gte($end)?$today->diffInDays($end):0;return $item;});
         $registered=LeaveRequest::with(['personnel.unitRelation'])->whereYear('from_date',$year)->whereNotIn('status',['REJECTED'])->when($agency,$agencyFilter)->when($unitId,$unitFilter)->when($keyword,$nameFilter)->latest()->get();
+        $proposed=LeaveRequest::with(['personnel.unitRelation','replacement.unitRelation','commander.position'])->whereYear('from_date',$year)->whereNotIn('status',['DRAFT','REJECTED','CANCELLED'])->when($unitId,$unitFilter)->when($keyword,$nameFilter)->latest()->get();
         $taken=$approved->filter(fn($item)=>$item->from_date&&!$today->lt($item->from_date->copy()->startOfDay()))->values();$usedPersonnel=$taken->pluck('personnel_id')->filter()->unique();
         $notYet=LeavePersonnel::with(['unitRelation','requests'])->where('active',true)->when(in_array($agency,[LeaveAccess::QUAN_LUC,LeaveAccess::CO_QUAN_CAN_BO],true),fn($q)=>$q->where('managing_agency',$agency))->when($unitId,$personUnitFilter)->when($keyword,$personNameFilter)->when($usedPersonnel->isNotEmpty(),fn($q)=>$q->whereNotIn('id',$usedPersonnel->all()))->orderBy('name')->get();
         $yearSummary=$approved->groupBy('personnel_id')->map(fn($rows)=>['personnel'=>$rows->first()->personnel,'days'=>$rows->sum('total_days'),'quota'=>$rows->max('base_days')]);
         $countBase=fn()=>LeaveRequest::query()->whereYear('from_date',$year)->when($agency,$agencyFilter)->when($unitId,$unitFilter)->when($keyword,$nameFilter);
         $currentReportType=(string)$request->input('report_type','');
-        if(!in_array($currentReportType,['used','unused','tracking','registered'],true))$currentReportType='';
+        if(!in_array($currentReportType,['used','unused','tracking','registered','proposed'],true))$currentReportType='';
         $leaveNotifications=LeaveAlert::with('request')->where('user_id',$request->user()->id)->latest()->limit(50)->get();
-        return view('leave-management::feature',['section'=>'reports','title'=>'Báo cáo phép','year'=>$year,'taken'=>$taken,'notYet'=>$notYet,'yearSummary'=>$yearSummary,'comparison'=>$approved,'registered'=>$registered,'leaveNotifications'=>$leaveNotifications,'pending'=>$countBase()->whereIn('status',['PENDING','PENDING_COMMANDER','PENDING_AGENCY','PENDING_HEAD','RETURNED'])->count(),'approved'=>$countBase()->where('status','APPROVED')->count(),'rejected'=>$countBase()->where('status','REJECTED')->count(),'days'=>$approved->sum('total_days'),'reportTemplates'=>LeaveReportTemplate::where('template_kind','report')->where('active',true)->orderBy('name')->get()]);
+        return view('leave-management::feature',['section'=>'reports','title'=>'Báo cáo phép','year'=>$year,'taken'=>$taken,'notYet'=>$notYet,'yearSummary'=>$yearSummary,'comparison'=>$approved,'registered'=>$registered,'proposed'=>$proposed,'leaveNotifications'=>$leaveNotifications,'pending'=>$countBase()->whereIn('status',['PENDING','PENDING_COMMANDER','PENDING_AGENCY','PENDING_HEAD','RETURNED'])->count(),'approved'=>$countBase()->where('status','APPROVED')->count(),'rejected'=>$countBase()->where('status','REJECTED')->count(),'days'=>$approved->sum('total_days'),'reportTemplates'=>LeaveReportTemplate::where('template_kind','report')->where('active',true)->orderBy('name')->get()]);
     }
     public function reportTemplates(){return view('leave-management::feature',['section'=>'report-templates','title'=>'Mẫu báo cáo phép','items'=>LeaveReportTemplate::latest()->get()]);}
     public function reportTemplateStore(Request $request){
-        $data=$request->validate(['name'=>'required|string|max:255','template_kind'=>'nullable|in:report,permit','report_type'=>'nullable|required_if:template_kind,report|in:used,unused,tracking,registered','managing_agency'=>'nullable|required_if:template_kind,report|in:QUAN_LUC,CO_QUAN_CAN_BO','description'=>'nullable|string|max:2000','file'=>'required|file|mimes:docx|max:20480','active'=>'nullable|boolean']);
+        $data=$request->validate(['name'=>'required|string|max:255','template_kind'=>'nullable|in:report,permit','report_type'=>'nullable|required_if:template_kind,report|in:used,unused,tracking,registered,proposed','managing_agency'=>'nullable|required_if:template_kind,report|in:QUAN_LUC,CO_QUAN_CAN_BO,ALL','description'=>'nullable|string|max:2000','file'=>'required|file|mimes:docx|max:20480','active'=>'nullable|boolean']);
         $data['template_kind']=$data['template_kind']??'report';
         if($data['template_kind']==='permit'){$data['report_type']='permit';$data['managing_agency']='ALL';}
+        elseif(($data['report_type']??'')==='proposed'){$data['managing_agency']='ALL';}
         $file=$request->file('file');$path=$file->store('leave-report-templates','local');$active=$request->boolean('active',true);
         \DB::transaction(function()use($data,$file,$path,$active,$request):void{if($active){$query=LeaveReportTemplate::where('template_kind',$data['template_kind']);if($data['template_kind']==='report')$query->where('report_type',$data['report_type'])->where('managing_agency',$data['managing_agency']);$query->update(['active'=>false]);}LeaveReportTemplate::create(['name'=>$data['name'],'template_kind'=>$data['template_kind'],'report_type'=>$data['report_type'],'managing_agency'=>$data['managing_agency'],'description'=>$data['description']??null,'disk'=>'local','file_path'=>$path,'original_name'=>$file->getClientOriginalName(),'mime'=>$file->getMimeType(),'file_size'=>$file->getSize(),'active'=>$active,'created_by'=>$request->user()->id,'updated_by'=>$request->user()->id]);});
         return back()->with('success',$data['template_kind']==='permit'?'Đã thêm mẫu in giấy phép nghỉ.':'Đã thêm mẫu báo cáo phép.');
     }
     public function reportTemplateUpdate(Request $request, LeaveReportTemplate $template){
-        $data=$request->validate(['name'=>'required|string|max:255','template_kind'=>'nullable|in:report,permit','report_type'=>'nullable|required_if:template_kind,report|in:used,unused,tracking,registered','managing_agency'=>'nullable|required_if:template_kind,report|in:QUAN_LUC,CO_QUAN_CAN_BO','description'=>'nullable|string|max:2000','file'=>'nullable|file|mimes:docx|max:20480','active'=>'nullable|boolean']);
+        $data=$request->validate(['name'=>'required|string|max:255','template_kind'=>'nullable|in:report,permit','report_type'=>'nullable|required_if:template_kind,report|in:used,unused,tracking,registered,proposed','managing_agency'=>'nullable|required_if:template_kind,report|in:QUAN_LUC,CO_QUAN_CAN_BO,ALL','description'=>'nullable|string|max:2000','file'=>'nullable|file|mimes:docx|max:20480','active'=>'nullable|boolean']);
         $data['template_kind']=$data['template_kind']??($template->template_kind?:'report');
         if($data['template_kind']==='permit'){$data['report_type']='permit';$data['managing_agency']='ALL';}
+        elseif(($data['report_type']??'')==='proposed'){$data['managing_agency']='ALL';}
         $active=$request->boolean('active',false);$payload=['name'=>$data['name'],'template_kind'=>$data['template_kind'],'report_type'=>$data['report_type'],'managing_agency'=>$data['managing_agency'],'description'=>$data['description']??null,'active'=>$active,'updated_by'=>$request->user()->id];$oldDisk=null;$oldPath=null;
         if($request->hasFile('file')){$file=$request->file('file');$oldDisk=$template->disk?:'local';$oldPath=$template->file_path;$payload+=['disk'=>'local','file_path'=>$file->store('leave-report-templates','local'),'original_name'=>$file->getClientOriginalName(),'mime'=>$file->getMimeType(),'file_size'=>$file->getSize()];}
         \DB::transaction(function()use($template,$payload,$active,$data,$oldDisk,$oldPath):void{if($active){$query=LeaveReportTemplate::where('template_kind',$data['template_kind'])->whereKeyNot($template->id);if($data['template_kind']==='report')$query->where('report_type',$data['report_type'])->where('managing_agency',$data['managing_agency']);$query->update(['active'=>false]);}$template->update($payload);if($oldPath)\Illuminate\Support\Facades\Storage::disk($oldDisk?:'local')->delete($oldPath);});
         return back()->with('success',$data['template_kind']==='permit'?'Đã cập nhật mẫu in giấy phép nghỉ.':'Đã cập nhật mẫu báo cáo phép.');
     }
     public function reportTemplateDelete(LeaveReportTemplate $template){$path=$template->file_path;$disk=$template->disk?:'local';$template->delete();if($path)\Illuminate\Support\Facades\Storage::disk($disk)->delete($path);return back()->with('success','Đã xóa mẫu báo cáo phép.');}
-    public function reportTemplateDownload(LeaveReportTemplate $template){$path=$template->absolutePath();abort_unless($path&&is_file($path),404,'Không tìm thấy file mẫu.');return response()->download($path,$template->original_name?:('mau-bao-cao-'.$template->id.'.docx'));}
+    public function reportTemplateDownload(LeaveReportTemplate $template){
+        $path=$template->absolutePath();abort_unless($path&&is_file($path),404,'Không tìm thấy file mẫu.');
+        $original=$template->original_name?:('mau-bao-cao-'.$template->id.'.docx');
+        $base=pathinfo($original,PATHINFO_FILENAME)?:('mau-bao-cao-'.$template->id);
+        $downloadName=$base.'-mau-'.$template->id.'-'.$template->updated_at?->format('YmdHis').'.docx';
+        return response()->download($path,$downloadName,['Cache-Control'=>'no-store, no-cache, must-revalidate, max-age=0','Pragma'=>'no-cache','Expires'=>'0']);
+    }
     private function activePermitTemplate():?LeaveReportTemplate{
         return LeaveReportTemplate::where('template_kind','permit')->where('active',true)->latest()->get()->first(fn($template)=>$template->absolutePath()&&is_file($template->absolutePath()));
+    }
+    private function markPermitPrinted(LeaveRequest $leaveRequest):void{
+        if(!Schema::hasColumn('leave_requests','permit_year')||!Schema::hasColumn('leave_requests','permit_number')){
+            $leaveRequest->forceFill(['printed_at'=>now()])->save();
+            return;
+        }
+        \DB::transaction(function()use($leaveRequest):void{
+            $locked=LeaveRequest::withoutGlobalScopes()->whereKey($leaveRequest->id)->lockForUpdate()->firstOrFail();
+            $year=(int)($locked->permit_year ?: now()->year);
+            $payload=['printed_at'=>now()];
+            if(!$locked->permit_number){
+                $payload['permit_year']=$year;
+                $payload['permit_number']=((int)LeaveRequest::withoutGlobalScopes()->where('permit_year',$year)->lockForUpdate()->max('permit_number'))+1;
+            }
+            $locked->forceFill($payload)->save();
+            $leaveRequest->forceFill($locked->fresh()->getAttributes());
+        });
+    }
+    private function formatPermitNumber(LeaveRequest $leaveRequest):string{
+        if($leaveRequest->permit_year&&$leaveRequest->permit_number)return str_pad((string)$leaveRequest->permit_number,2,'0',STR_PAD_LEFT).'/GNP-CDHC-'.$leaveRequest->permit_year;
+        return $leaveRequest->id.'/GNP-CDHC';
+    }
+    private function resolvePermitSignatures(LeaveRequest $leaveRequest):array{
+        $proposingUserId=$leaveRequest->commander_user_id ?: LeaveAuditLog::where('entity_type','request')->where('entity_id',$leaveRequest->id)->where('action','COMMANDER_PROPOSED_LEAVE')->latest()->value('user_id');
+        $agencyUserId=LeaveAuditLog::where('entity_type','request')->where('entity_id',$leaveRequest->id)->where('action','AGENCY_SUBMITTED_TO_HEAD')->latest()->value('user_id');
+        if(!$agencyUserId && $leaveRequest->status==='PENDING_HEAD')$agencyUserId=$leaveRequest->decided_by_user_id;
+        $headUserId=$leaveRequest->bgh_signed_by_user_id ?: $leaveRequest->approved_by;
+        $resolve=function(string $slotKey,?int $userId):array{
+            $query=DigitalSignature::query()->active()->where('slot_key',$slotKey);
+            if($userId){
+                $owned=(clone $query)->where('user_id',$userId)->orderByDesc('is_default')->orderBy('sort_order')->orderByDesc('id')->first();
+                if($owned)return ['model'=>$owned,'name'=>(string)$owned->display_name,'role1'=>(string)$owned->role_line1,'role2'=>(string)$owned->role_line2,'url'=>$owned->imageUrl(),'path'=>$owned->absoluteImagePath()];
+                $ownedAny=DigitalSignature::query()->active()->where('user_id',$userId)->orderByDesc('is_default')->orderBy('sort_order')->orderByDesc('id')->first();
+                if($ownedAny)return ['model'=>$ownedAny,'name'=>(string)$ownedAny->display_name,'role1'=>(string)$ownedAny->role_line1,'role2'=>(string)$ownedAny->role_line2,'url'=>$ownedAny->imageUrl(),'path'=>$ownedAny->absoluteImagePath()];
+            }
+            $fallback=$query->orderByDesc('is_default')->orderBy('sort_order')->orderByDesc('id')->first();
+            return ['model'=>$fallback,'name'=>(string)($fallback?->display_name??''),'role1'=>(string)($fallback?->role_line1??''),'role2'=>(string)($fallback?->role_line2??''),'url'=>$fallback?->imageUrl(),'path'=>$fallback?->absoluteImagePath()];
+        };
+        $signatures=[
+            'proposing_unit'=>$resolve(DigitalSignature::SLOT_LEAVE_PROPOSING_UNIT,$proposingUserId?(int)$proposingUserId:null),
+            'agency'=>$resolve(DigitalSignature::SLOT_LEAVE_AGENCY,$agencyUserId?(int)$agencyUserId:null),
+            'head'=>$headUserId?$resolve(DigitalSignature::SLOT_LEAVE_HEAD,(int)$headUserId):['model'=>null,'name'=>'','role1'=>'','role2'=>'','url'=>null,'path'=>null],
+        ];
+        if($headUserId){
+            $headUser=\App\Models\User::with('militaryRank')->find((int)$headUserId);
+            $name=$this->formatRankedUserName($headUser);
+            if((int)($signatures['head']['model']?->user_id??0)!==(int)$headUserId){
+                $signatures['head']['model']=null;
+                $signatures['head']['url']=null;
+                $signatures['head']['path']=null;
+            }
+            if($name!=='')$signatures['head']['name']=$name;
+        }
+        return $signatures;
+    }
+    private function resolveReportSlotSignature(string $slotKey,?int $userId=null):array{
+        $query=DigitalSignature::query()->active()->where('slot_key',$slotKey);
+        if($userId){
+            $owned=(clone $query)->where('user_id',$userId)->orderByDesc('is_default')->orderBy('sort_order')->orderByDesc('id')->first();
+            if($owned)return ['model'=>$owned,'name'=>(string)$owned->display_name,'role1'=>(string)$owned->role_line1,'role2'=>(string)$owned->role_line2,'path'=>$owned->absoluteImagePath()];
+            $ownedAny=DigitalSignature::query()->active()->where('user_id',$userId)->orderByDesc('is_default')->orderBy('sort_order')->orderByDesc('id')->first();
+            if($ownedAny)return ['model'=>$ownedAny,'name'=>(string)$ownedAny->display_name,'role1'=>(string)$ownedAny->role_line1,'role2'=>(string)$ownedAny->role_line2,'path'=>$ownedAny->absoluteImagePath()];
+        }
+        return ['model'=>null,'name'=>'','role1'=>'','role2'=>'','path'=>null];
+    }
+    private function formatRankedUserName(?\App\Models\User $user):string{
+        if(!$user)return '';
+        $rank=trim((string)($user->militaryRank?->name??''));
+        $name=trim((string)$user->name);
+        return trim(($rank!==''?$rank.' ':'').$name);
+    }
+    private function setPermitSignatureImage(\PhpOffice\PhpWord\TemplateProcessor $processor,array $variables,string $macro,?string $path):void{
+        if($path&&is_file($path)&&in_array($macro,$variables,true)){
+            try{$processor->setImageValue($macro,['path'=>$path,'width'=>120,'height'=>55,'ratio'=>true]);return;}catch(\Throwable $e){\Log::warning('Leave permit signature image failed',['macro'=>$macro,'path'=>$path,'error'=>$e->getMessage()]);}
+        }
+        $processor->setValue($macro,' ');
+    }
+    private function replaceTemplateRawTextMacros(\PhpOffice\PhpWord\TemplateProcessor $processor,array $values):void{
+        try{
+            $property=new \ReflectionProperty($processor,'tempDocumentMainPart');
+            $property->setAccessible(true);
+            $xml=$property->getValue($processor);
+            foreach($values as $macro=>$value){
+                $escaped=htmlspecialchars((string)$value,ENT_QUOTES|ENT_XML1,'UTF-8');
+                if($macro==='thu_truong'){
+                    $xml=str_replace(['Đại tá ${thu_truong}','Đại tá $thu_truong'],$escaped,$xml);
+                }
+                $xml=str_replace(['${'.$macro.'}','$'.$macro],$escaped,$xml);
+                $splitBraced='/<w:t[^>]*>\$<\/w:t>(?:(?!<w:t).)*<w:t[^>]*>\{<\/w:t>(?:(?!<w:t).)*<w:t[^>]*>'.preg_quote($macro,'/').'<\/w:t>(?:(?!<w:t).)*<w:t[^>]*>\}<\/w:t>/s';
+                $splitPlain='/<w:t[^>]*>\$<\/w:t>(?:(?!<w:t).)*<w:t[^>]*>'.preg_quote($macro,'/').'<\/w:t>/s';
+                $xml=preg_replace([$splitBraced,$splitPlain],'<w:t>'.$escaped.'</w:t>',$xml)??$xml;
+            }
+            $property->setValue($processor,$xml);
+        }catch(\Throwable $e){
+            \Log::warning('Cannot replace raw Word macros',['error'=>$e->getMessage()]);
+        }
+    }
+    private function removeSignatureShapeBorders(\PhpOffice\PhpWord\TemplateProcessor $processor,array $macros):void{
+        try{
+            $property=new \ReflectionProperty($processor,'tempDocumentMainPart');
+            $property->setAccessible(true);
+            $xml=$property->getValue($processor);
+            foreach($macros as $macro){
+                $pattern='/<mc:AlternateContent\b(?:(?!<\/mc:AlternateContent>).)*'.preg_quote($macro,'/').'(?:(?!<\/mc:AlternateContent>).)*<\/mc:AlternateContent>/s';
+                $xml=preg_replace_callback($pattern,function(array $match):string{
+                    $block=$match[0];
+                    $block=preg_replace('/<wps:spPr\b([^>]*)>((?:(?!<\/wps:spPr>).)*)<\/wps:spPr>/s',function(array $sp):string{
+                        $inner=preg_replace('/<a:ln\b(?:(?!<\/a:ln>).)*<\/a:ln>/s','',$sp[2])??$sp[2];
+                        return '<wps:spPr'.$sp[1].'>'.$inner.'<a:ln><a:noFill/></a:ln></wps:spPr>';
+                    },$block)??$block;
+                    $block=preg_replace('/<wps:style\b(?:(?!<\/wps:style>).)*<\/wps:style>/s','',$block)??$block;
+                    $block=preg_replace_callback('/<v:rect\b([^>]*)>/s',function(array $rect):string{
+                        $attrs=preg_replace('/\sstroke(weight|color)="[^"]*"/','',$rect[1])??$rect[1];
+                        $attrs=preg_replace('/\sstroked="[^"]*"/','',$attrs)??$attrs;
+                        return '<v:rect'.$attrs.' stroked="f" strokeweight="0pt">';
+                    },$block)??$block;
+                    $block=preg_replace('/<v:stroke\b[^>]*\/>/s','<v:stroke on="f"/>',$block)??$block;
+                    return $block;
+                },$xml)??$xml;
+            }
+            $property->setValue($processor,$xml);
+        }catch(\Throwable $e){
+            \Log::warning('Cannot remove Word signature borders',['error'=>$e->getMessage()]);
+        }
     }
     private function buildPermitDocxFromTemplate(LeaveReportTemplate $template,LeaveRequest $leaveRequest,?string $printLocalityPath,?string $printUnitPath):string{
         $path=$template->absolutePath();abort_unless($path&&is_file($path),404,'Không tìm thấy file mẫu giấy phép.');
         $processor=new \PhpOffice\PhpWord\TemplateProcessor($path);
+        $this->removeSignatureShapeBorders($processor,['chu_ky_don_vi_de_nghi','chu_ky_nguoi_de_nghi','chu_ky_chi_huy','chu_ky_1','chu_ky_co_quan','chu_ky_quan_luc','chu_ky_can_bo','chu_ky_2','chu_ky_bgh','chu_ky_hieu_truong','chu_ky_ban_giam_hieu']);
         $person=$leaveRequest->personnel;
         $from=$leaveRequest->from_date;$to=$leaveRequest->to_date;$created=$leaveRequest->created_at ?: now();
-        $signer=$leaveRequest->bgh_signed_by_user_id ? \App\Models\User::find($leaveRequest->bgh_signed_by_user_id) : null;
+        $signer=$leaveRequest->bgh_signed_by_user_id ? \App\Models\User::with('militaryRank')->find($leaveRequest->bgh_signed_by_user_id) : null;
+        $commander=$leaveRequest->commander;
+        $permitSignatures=$this->resolvePermitSignatures($leaveRequest);
+        $hasHeadSigned=(bool)$leaveRequest->bgh_signed_at;
+        if(!$hasHeadSigned)$permitSignatures['head']=['model'=>null,'name'=>'','role1'=>'','role2'=>'','url'=>null,'path'=>null];
+        $requestingUnit=(string)($leaveRequest->unit_name?:$person?->unitRelation?->name?:$person?->unit);
+        $replacement=$leaveRequest->replacement;
+        $replacementUnit=(string)($replacement?->unitRelation?->name?:$replacement?->unit);
         $reason=trim((string)($leaveRequest->reason??''));
         if($leaveRequest->leave_type==='ANNUAL')$reason=$reason?:'Nghỉ phép năm';
         elseif($reason==='')$reason='Nghỉ phép.';
-        $signedDate=$leaveRequest->bgh_signed_at?->format('d/m/Y') ?: ($leaveRequest->approved_at?->format('d/m/Y') ?: '');
+        $signedDate=$hasHeadSigned?($leaveRequest->bgh_signed_at?->format('d/m/Y') ?: ($leaveRequest->approved_at?->format('d/m/Y') ?: '')):'';
+        if(!$hasHeadSigned)$this->replaceTemplateRawTextMacros($processor,['chu_ky_2'=>' ','chu_ky_bgh'=>' ','chu_ky_hieu_truong'=>' ','chu_ky_ban_giam_hieu'=>' ','nguoi_ky_bgh'=>' ','chuc_vu_ky_bgh'=>' ','thu_truong'=>' ']);
+        $headSignerName=$hasHeadSigned?($this->formatRankedUserName($signer) ?: (string)($permitSignatures['head']['name']??'')):'';
         $values=[
-            'so_giay_phep'=>$leaveRequest->id.'/GNP-CDHC',
+            'so_giay_phep'=>$this->formatPermitNumber($leaveRequest),
             'ma_don'=>(string)$leaveRequest->id,
             'ngay'=>now()->format('d'),
             'thang'=>now()->format('m'),
@@ -408,7 +555,12 @@ class LeaveWorkflowController extends ModuleBaseController {
             'ma_quan_nhan'=>(string)($leaveRequest->personnel_code?:$person?->staff_code),
             'cap_bac'=>(string)($leaveRequest->rank?:$person?->rank),
             'chuc_vu'=>(string)($leaveRequest->position?:$person?->position),
+            'chuc_vu_quan_nhan'=>(string)($leaveRequest->position?:$person?->position),
+            'chuc_vu_nguoi_nghi'=>(string)($leaveRequest->position?:$person?->position),
             'don_vi'=>(string)($printUnitPath?:$leaveRequest->unit_name?:$person?->unit),
+            'don_vi_de_nghi'=>$requestingUnit,
+            'co_quan_de_nghi'=>$requestingUnit,
+            'don_vi_quan_nhan'=>(string)($printUnitPath?:$leaveRequest->unit_name?:$person?->unit),
             'tu_ngay'=>$from?$from->format('d/m/Y'):'',
             'den_ngay'=>$to?$to->format('d/m/Y'):'',
             'tu_gio'=>'07h00',
@@ -420,16 +572,33 @@ class LeaveWorkflowController extends ModuleBaseController {
             'noi_nghi_phep'=>(string)($printLocalityPath?:$leaveRequest->locality_path),
             'ly_do'=>$reason,
             'loai_phep'=>(string)$leaveRequest->leave_type,
-            'nguoi_thay_the'=>(string)($leaveRequest->replacement_personnel_name?:$leaveRequest->replacement?->name),
-            'chuc_vu_thay_the'=>(string)($leaveRequest->replacement_position?:$leaveRequest->replacement?->position),
+            'nguoi_thay_the'=>(string)($leaveRequest->replacement_personnel_name?:$replacement?->name),
+            'ten_nguoi_thay_the'=>(string)($leaveRequest->replacement_personnel_name?:$replacement?->name),
+            'ho_ten_nguoi_thay_the'=>(string)($leaveRequest->replacement_personnel_name?:$replacement?->name),
+            'chuc_vu_thay_the'=>(string)($leaveRequest->replacement_position?:$replacement?->position),
+            'chuc_vu_nguoi_thay_the'=>(string)($leaveRequest->replacement_position?:$replacement?->position),
+            'don_vi_nguoi_thay_the'=>$replacementUnit,
+            'nguoi_de_nghi'=>(string)($commander?->name?:$leaveRequest->commander_name?:$leaveRequest->proposed_by_display_name?:$leaveRequest->proposed_by_username),
+            'chuc_vu_nguoi_de_nghi'=>(string)($commander?->position?->name??''),
             'ghi_chu'=>(string)($leaveRequest->note??''),
             'y_kien_xu_ly'=>(string)($leaveRequest->decision_note??''),
             'so_ngay_van_ban_ky'=>(string)($leaveRequest->bgh_note??''),
             'ngay_ky'=>$signedDate,
-            'nguoi_ky'=>(string)($signer?->name??$leaveRequest->decided_by_username??''),
-            'thu_truong'=>(string)($signer?->name??''),
+            'nguoi_ky'=>$headSignerName,
+            'thu_truong'=>$headSignerName,
+            'nguoi_ky_don_vi_de_nghi'=>(string)($permitSignatures['proposing_unit']['name']??''),
+            'chuc_vu_ky_don_vi_de_nghi'=>(string)trim(($permitSignatures['proposing_unit']['role1']??'').' '.($permitSignatures['proposing_unit']['role2']??'')),
+            'nguoi_ky_co_quan'=>(string)($permitSignatures['agency']['name']??''),
+            'chuc_vu_ky_co_quan'=>(string)trim(($permitSignatures['agency']['role1']??'').' '.($permitSignatures['agency']['role2']??'')),
+            'nguoi_ky_bgh'=>$headSignerName,
+            'chuc_vu_ky_bgh'=>$hasHeadSigned?(string)trim(($permitSignatures['head']['role1']??'').' '.($permitSignatures['head']['role2']??'')):'',
         ];
         foreach($values as $macro=>$value)$processor->setValue($macro,$value===''?' ':$value);
+        $variables=$processor->getVariables();
+        foreach(['chu_ky_don_vi_de_nghi','chu_ky_nguoi_de_nghi','chu_ky_chi_huy'] as $macro)$this->setPermitSignatureImage($processor,$variables,$macro,$permitSignatures['proposing_unit']['path']??null);
+        foreach(['chu_ky_1','chu_ky_co_quan','chu_ky_quan_luc','chu_ky_can_bo'] as $macro)$this->setPermitSignatureImage($processor,$variables,$macro,$permitSignatures['agency']['path']??null);
+        foreach(['chu_ky_2','chu_ky_bgh','chu_ky_hieu_truong','chu_ky_ban_giam_hieu'] as $macro)$this->setPermitSignatureImage($processor,$variables,$macro,$permitSignatures['head']['path']??null);
+        if(!$hasHeadSigned)$this->replaceTemplateRawTextMacros($processor,['chu_ky_2'=>' ','chu_ky_bgh'=>' ','chu_ky_hieu_truong'=>' ','chu_ky_ban_giam_hieu'=>' ','nguoi_ky_bgh'=>' ','chuc_vu_ky_bgh'=>' ','thu_truong'=>' ']);
         $output=storage_path('app/giay-nghi-phep-'.$leaveRequest->id.'-'.now()->format('YmdHis').'.docx');
         $processor->saveAs($output);
         return $output;
@@ -588,27 +757,33 @@ PS1);
         $year=(int)($request->input('year')?:now()->year);
         $unitId=$request->input('unit_id')?(int)$request->input('unit_id'):null;
         $selectedUnit=$unitId?\Modules\Unit\Models\Unit::find($unitId):null;
+        $selectedUnitIds=$unitId?ManagerUnitScope::unitAndDescendantIds($unitId):[];
+        $selectedUnitNames=$selectedUnitIds?Unit::whereIn('id',$selectedUnitIds)->pluck('name')->filter()->values()->all():[];
         $reportType=(string)$request->input('report_type','used');
         $agency=(string)$request->input('agency','');
         $keyword=trim((string)$request->input('q',''));
-        if(!in_array($reportType,['used','unused','tracking','registered'],true))$reportType='used';
-        abort_unless(in_array($agency,[LeaveAccess::CO_QUAN_CAN_BO,LeaveAccess::QUAN_LUC],true),422,'Vui lòng chọn diện quản lý trước khi xuất báo cáo.');
+        if(!in_array($reportType,['used','unused','tracking','registered','proposed'],true))$reportType='used';
+        if($reportType==='proposed')abort_unless($unitId,422,'Vui lòng chọn đơn vị báo cáo trước khi xuất danh sách đề nghị nghỉ phép.');
+        else abort_unless(in_array($agency,[LeaveAccess::CO_QUAN_CAN_BO,LeaveAccess::QUAN_LUC],true),422,'Vui lòng chọn diện quản lý trước khi xuất báo cáo.');
 
         $today=now()->startOfDay();
-        $agencyName=$agency===LeaveAccess::CO_QUAN_CAN_BO?'Cán bộ quản lý':'Quân lực quản lý';
-        $signature=$agency===LeaveAccess::CO_QUAN_CAN_BO
+        $agencyName=$reportType==='proposed'?'Đơn vị báo cáo':($agency===LeaveAccess::CO_QUAN_CAN_BO?'Cán bộ quản lý':'Quân lực quản lý');
+        $signature=$reportType==='proposed'
+            ? ['reporter'=>'','commander'=>'']
+            : ($agency===LeaveAccess::CO_QUAN_CAN_BO
             ? ['reporter'=>'Thiếu tá Trần Phương Tùng','commander'=>'Đại tá Nguyễn Viết Túy']
-            : ['reporter'=>'Thiếu tá QNCN Nguyễn Trung Tuấn','commander'=>'Đại tá Đinh Văn Tuyên'];
+            : ['reporter'=>'Thiếu tá QNCN Nguyễn Trung Tuấn','commander'=>'Đại tá Đinh Văn Tuyên']);
         $titles=[
             'used'=>'DANH SÁCH QUÂN NHÂN ĐÃ NGHỈ PHÉP NĂM '.$year,
             'unused'=>'DANH SÁCH QUÂN NHÂN CHƯA NGHỈ PHÉP NĂM '.$year,
             'tracking'=>'DANH SÁCH THEO DÕI QUÂN NHÂN ĐÃ NGHỈ PHÉP NĂM '.$year,
             'registered'=>'DANH SÁCH QUÂN NHÂN ĐĂNG KÝ NGHỈ PHÉP NĂM '.$year,
+            'proposed'=>'DANH SÁCH ĐỀ NGHỊ NGHỈ PHÉP NĂM '.$year,
         ];
 
         $agencyFilter=function($q)use($agency){$q->where(function($x)use($agency){$x->where('managing_agency',$agency)->orWhereHas('personnel',fn($p)=>$p->where('managing_agency',$agency));});};
-        $unitFilter=function($q)use($unitId,$selectedUnit){if($unitId)$q->where(function($x)use($unitId,$selectedUnit){$x->where('unit_id',$unitId)->orWhere('unit_name',$selectedUnit?->name)->orWhereHas('personnel',fn($p)=>$p->where('unit_id',$unitId)->orWhere('unit',$selectedUnit?->name));});};
-        $personUnitFilter=function($q)use($unitId,$selectedUnit){if($unitId)$q->where(function($x)use($unitId,$selectedUnit){$x->where('unit_id',$unitId)->orWhere('unit',$selectedUnit?->name);});};
+        $unitFilter=function($q)use($unitId,$selectedUnitIds,$selectedUnitNames){if($unitId)$q->where(function($x)use($selectedUnitIds,$selectedUnitNames){$x->whereIn('unit_id',$selectedUnitIds);if($selectedUnitNames)$x->orWhereIn('unit_name',$selectedUnitNames);$x->orWhereHas('personnel',fn($p)=>$p->whereIn('unit_id',$selectedUnitIds)->when($selectedUnitNames,fn($p)=>$p->orWhereIn('unit',$selectedUnitNames)));});};
+        $personUnitFilter=function($q)use($unitId,$selectedUnitIds,$selectedUnitNames){if($unitId)$q->where(function($x)use($selectedUnitIds,$selectedUnitNames){$x->whereIn('unit_id',$selectedUnitIds);if($selectedUnitNames)$x->orWhereIn('unit',$selectedUnitNames);});};
         $nameFilter=function($q)use($keyword){if($keyword!=='')$q->where(function($x)use($keyword){$x->where('personnel_name','like','%'.$keyword.'%')->orWhere('personnel_code','like','%'.$keyword.'%')->orWhereHas('personnel',fn($p)=>$p->where('name','like','%'.$keyword.'%')->orWhere('staff_code','like','%'.$keyword.'%'));});};
         $personNameFilter=function($q)use($keyword){if($keyword!=='')$q->where(function($x)use($keyword){$x->where('name','like','%'.$keyword.'%')->orWhere('staff_code','like','%'.$keyword.'%');});};
         $formatDate=fn($value)=>$value?$value->format('d/m/Y'):'';
@@ -616,8 +791,12 @@ PS1);
         $rankFor=function($rank)use($agency){$rank=(string)$rank;if($agency===LeaveAccess::CO_QUAN_CAN_BO)$rank=trim(str_replace(['QNCN','CNQP','VCQP'],'',$rank));return $rank;};
         $leaveReason=function($item)use($year){$type=strtoupper((string)$item->leave_type);if($type==='ANNUAL')return 'Phép năm '.$year;if(in_array($type,['SPECIAL','PERSONAL'],true))return 'Phép đặc biệt';return $item->reason?:$item->note?:$item->leave_type?:'';};
         $daysUsed=function($item)use($today){$start=$item->from_date?->copy()->startOfDay();$end=$item->to_date?->copy()->startOfDay();$total=(int)($item->total_days?:0);if(!$start||$today->lt($start))return 0;if($end&&$today->lt($end))return max(1,min($total,$start->diffInDays($today)+1));return $total;};
+        $statusLabel=fn($status)=>['PENDING'=>'Chờ duyệt','PENDING_COMMANDER'=>'Chờ chỉ huy','PENDING_AGENCY'=>'Chờ cơ quan thẩm định','PENDING_HEAD'=>'Chờ Ban giám hiệu','APPROVED'=>'Đã duyệt','RETURNED'=>'Trả lại','REJECTED'=>'Từ chối','CANCELLED'=>'Đã hủy','DRAFT'=>'Nháp'][(string)$status]??(string)$status;
 
-        $requests=LeaveRequest::with(['personnel.unitRelation'])->whereYear('from_date',$year)->when(true,$agencyFilter)->when($unitId,$unitFilter)->when($keyword,$nameFilter)->orderBy('unit_name')->orderBy('personnel_name')->get();
+        $requests=LeaveRequest::with(['personnel.unitRelation','replacement.unitRelation','commander.position'])->whereYear('from_date',$year)->when($reportType!=='proposed',$agencyFilter)->when($unitId,$unitFilter)->when($keyword,$nameFilter)->orderBy('unit_name')->orderBy('personnel_name')->get();
+        $commanderApprovalUserIds=$reportType==='proposed'&&$requests->isNotEmpty()
+            ? LeaveAuditLog::where('entity_type','request')->whereIn('entity_id',$requests->pluck('id')->all())->where('action','COMMANDER_PROPOSED_LEAVE')->latest()->get()->unique('entity_id')->pluck('user_id','entity_id')
+            : collect();
         $approved=$requests->where('status','APPROVED')->values();
         $taken=$approved->filter(fn($item)=>$item->from_date&&!$today->lt($item->from_date->copy()->startOfDay()))->values();
         $usedPersonnel=$taken->pluck('personnel_id')->filter()->unique();
@@ -628,6 +807,8 @@ PS1);
             $rows=$personnel->filter(fn($p)=>!$usedPersonnel->contains($p->id))->map(fn($p)=>['unit'=>$p->unitRelation?->name?:$p->unit?:'CHƯA CÓ ĐƠN VỊ','name'=>$p->name,'rank'=>$rankFor($p->rank),'enlistment'=>$formatMonth($p->enlistment_date),'hometown'=>$p->hometown,'permanent'=>$p->permanent_residence,'note'=>''])->values();
         }elseif($reportType==='registered'){
             $rows=$requests->whereNotIn('status',['REJECTED'])->map(function($item)use($formatDate,$formatMonth,$rankFor,$today){$p=$item->personnel;$started=$item->status==='APPROVED'&&$item->from_date&&!$today->lt($item->from_date->copy()->startOfDay());return ['unit'=>$item->unit_name?:$p?->unitRelation?->name?:$p?->unit?:'CHƯA CÓ ĐƠN VỊ','name'=>$item->personnel_name?:$p?->name,'rank'=>$rankFor($item->rank?:$p?->rank),'enlistment'=>$formatMonth($item->enlistment_date?:$p?->enlistment_date),'from'=>$formatDate($item->from_date),'to'=>$formatDate($item->to_date),'place'=>$item->locality_path?:$item->reason?:'','note'=>$started?'Đã nghỉ':'Chưa nghỉ'];})->values();
+        }elseif($reportType==='proposed'){
+            $rows=$requests->whereNotIn('status',['DRAFT','REJECTED','CANCELLED'])->map(function($item)use($formatDate,$formatMonth,$rankFor,$leaveReason,$statusLabel,$commanderApprovalUserIds){$p=$item->personnel;$replacement=$item->replacement;$commander=$item->commander;$commanderApprovalUserId=(int)($commanderApprovalUserIds[$item->id]??$item->commander_user_id);return ['unit'=>$item->unit_name?:$p?->unitRelation?->name?:$p?->unit?:'CHƯA CÓ ĐƠN VỊ','name'=>$item->personnel_name?:$p?->name,'rank'=>$rankFor($item->rank?:$p?->rank),'position'=>(string)($item->position?:$p?->position),'enlistment'=>$formatMonth($item->enlistment_date?:$p?->enlistment_date),'from'=>$formatDate($item->from_date),'to'=>$formatDate($item->to_date),'place'=>$item->locality_path?:$item->reason?:'','reason'=>$leaveReason($item),'note'=>$statusLabel($item->status),'proposer'=>$item->proposed_by_display_name?:$item->proposed_by_username?:($commander?->name?:$item->commander_name?:''),'proposer_position'=>(string)($commander?->position?->name?:''),'replacement'=>(string)($item->replacement_personnel_name?:$replacement?->name),'replacement_position'=>(string)($item->replacement_position?:$replacement?->position),'replacement_unit'=>(string)($replacement?->unitRelation?->name?:$replacement?->unit),'commander_approval_user_id'=>$commanderApprovalUserId,'commander_user_id'=>(int)$item->commander_user_id];})->values();
         }elseif($reportType==='tracking'){
             $rows=$approved->map(function($item)use($formatMonth,$rankFor,$daysUsed){$p=$item->personnel;$used=(int)$daysUsed($item);$total=(int)($item->total_days?:0);return ['unit'=>$item->unit_name?:$p?->unitRelation?->name?:$p?->unit?:'CHƯA CÓ ĐƠN VỊ','name'=>$item->personnel_name?:$p?->name,'rank'=>$rankFor($item->rank?:$p?->rank),'enlistment'=>$formatMonth($item->enlistment_date?:$p?->enlistment_date),'total'=>$total,'used'=>$used,'remaining'=>max(0,$total-$used),'place'=>$item->locality_path?:$item->reason?:'','reason'=>strtoupper((string)$item->leave_type)==='ANNUAL'?'Phép năm':'Phép đặc biệt'];})->values();
         }else{
@@ -635,9 +816,10 @@ PS1);
         }
 
         $selectedTemplateId=(int)$request->input('template_id');
-        $selectedTemplate=$selectedTemplateId?LeaveReportTemplate::whereKey($selectedTemplateId)->where('template_kind','report')->where('active',true)->where('report_type',$reportType)->where('managing_agency',$agency)->first():null;
+        $templateAgency=$reportType==='proposed'?'ALL':$agency;
+        $selectedTemplate=$selectedTemplateId?LeaveReportTemplate::whereKey($selectedTemplateId)->where('template_kind','report')->where('active',true)->where('report_type',$reportType)->where('managing_agency',$templateAgency)->first():null;
         if($selectedTemplate){
-            return $this->downloadReportFromTemplate($selectedTemplate,$rows,$reportType,$year,$agency,$agencyName,$signature,$titles[$reportType]);
+            return $this->downloadReportFromTemplate($selectedTemplate,$rows,$reportType,$year,$agency,$agencyName,$signature,$titles[$reportType],$selectedUnit?->name?:'');
         }
 
         $word=new \PhpOffice\PhpWord\PhpWord();$word->setDefaultFontName('Times New Roman');$word->setDefaultFontSize(12);
@@ -647,24 +829,25 @@ PS1);
         $leftCell=$top->addCell(6200);$leftCell->addText('TỔNG CỤC HẬU CẦN KỸ THUẬT',[],$center);$leftCell->addText('TRƯỜNG CAO ĐẲNG HẬU CẦN 2',$bold,$center);
         $rightCell=$top->addCell(7800);$rightCell->addText('CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM',$bold,$center);$rightCell->addText('Độc lập – Tự do – Hạnh phúc',$bold,$center);$rightCell->addText('Thành phố Hồ Chí Minh, ngày '.now()->format('d').' tháng '.now()->format('m').' năm '.now()->format('Y'),$italic,$center);
         $section->addTextBreak(1);
-        $section->addText('BÁO CÁO',$title,$center);$section->addText($titles[$reportType],$title,$center);$section->addText('(Diện '.$agencyName.')',$title,$center);$section->addTextBreak(1);
+        $section->addText('BÁO CÁO',$title,$center);$section->addText($titles[$reportType],$title,$center);$section->addText($reportType==='proposed'?'(Đơn vị báo cáo: '.($selectedUnit?->name?:'').')':'(Diện '.$agencyName.')',$title,$center);$section->addTextBreak(1);
 
         $headers=[
             'used'=>[['TT','Họ và tên','Cấp bậc','Nhập ngũ','Đã nghỉ phép','','','Lý do'],['','','','','Từ ngày','Đến ngày','Nơi nghỉ phép',''],[600,3000,1100,1100,1300,1300,3700,1800]],
             'unused'=>[['TT','Họ và tên','Cấp bậc','Nhập ngũ','Quê quán','Trú quán','Ghi chú'],null,[600,3000,1100,1100,3000,3400,1800]],
             'tracking'=>[['TT','Họ và tên','Cấp bậc','Nhập ngũ','Đã nghỉ phép','','','','Lý do'],['','','','','Số ngày được nghỉ','Số ngày đã nghỉ','Số ngày còn lại','Nơi nghỉ phép',''],[600,2800,1000,1000,1300,1200,1200,3400,1600]],
             'registered'=>[['TT','Họ và tên','Cấp bậc','Nhập ngũ','Đăng ký nghỉ phép năm','','','Ghi chú'],['','','','','Từ ngày','Đến ngày','Nơi nghỉ phép',''],[600,3000,1100,1100,1300,1300,3700,1800]],
+            'proposed'=>[['TT','Họ và tên','Cấp bậc','Nhập ngũ','Đề nghị nghỉ phép','','','Trạng thái'],['','','','','Từ ngày','Đến ngày','Nơi nghỉ phép',''],[600,3000,1100,1100,1300,1300,3700,1800]],
         ];
         [$h1,$h2,$widths]=$headers[$reportType];$table=$section->addTable($border+['alignment'=>\PhpOffice\PhpWord\SimpleType\JcTable::CENTER]);
-        $tr=$table->addRow();foreach($h1 as $i=>$text){$grid=($reportType==='tracking'&&$i===4)?4:(in_array($reportType,['used','registered'],true)&&$i===4?3:1);if($text===''&&$i>4)continue;$style=$cell+($grid>1?['gridSpan'=>$grid]:[])+(($h2&&($grid===1||$i<4||$i===count($h1)-1))?['vMerge'=>'restart']:[]);$tr->addCell($widths[$i],$style)->addText($text,$headerFont,$center);}
-        if($h2){$tr=$table->addRow();foreach($h1 as $i=>$text){if(($reportType==='tracking'&&$i>4&&$i<8)||(in_array($reportType,['used','registered'],true)&&$i>4&&$i<7)||($i>=4&&$h2[$i])){$tr->addCell($widths[$i],$cell)->addText($h2[$i],$headerFont,$center);}else{$tr->addCell($widths[$i],$cell+['vMerge'=>'continue'])->addText('',[],$center);}}}
+        $tr=$table->addRow();foreach($h1 as $i=>$text){$grid=($reportType==='tracking'&&$i===4)?4:(in_array($reportType,['used','registered','proposed'],true)&&$i===4?3:1);if($text===''&&$i>4)continue;$style=$cell+($grid>1?['gridSpan'=>$grid]:[])+(($h2&&($grid===1||$i<4||$i===count($h1)-1))?['vMerge'=>'restart']:[]);$tr->addCell($widths[$i],$style)->addText($text,$headerFont,$center);}
+        if($h2){$tr=$table->addRow();foreach($h1 as $i=>$text){if(($reportType==='tracking'&&$i>4&&$i<8)||(in_array($reportType,['used','registered','proposed'],true)&&$i>4&&$i<7)||($i>=4&&$h2[$i])){$tr->addCell($widths[$i],$cell)->addText($h2[$i],$headerFont,$center);}else{$tr->addCell($widths[$i],$cell+['vMerge'=>'continue'])->addText('',[],$center);}}}
         $grouped=$rows->groupBy(fn($row)=>mb_strtoupper((string)($row['unit']?:'CHƯA CÓ ĐƠN VỊ'),'UTF-8'));
-        foreach($grouped as $unitName=>$unitRows){$groupRow=$table->addRow();foreach($widths as $i=>$w)$groupRow->addCell($w,$unitCell)->addText($i===1?$unitName:'',$cellFont,$i===1?$left:$center);foreach($unitRows->values() as $i=>$item){$row=$table->addRow();$values=$reportType==='unused'?[$i+1,$item['name'],$item['rank'],$item['enlistment'],$item['hometown'],$item['permanent'],$item['note']]:($reportType==='tracking'?[$i+1,$item['name'],$item['rank'],$item['enlistment'],$item['total'],$item['used'],$item['remaining'],$item['place'],$item['reason']]:[$i+1,$item['name'],$item['rank'],$item['enlistment'],$item['from'],$item['to'],$item['place'],$item['reason']??$item['note']]);foreach($values as $j=>$value)$row->addCell($widths[$j],$personCell)->addText((string)($value!==''?$value:' '),$cellFont,$j===1?$left:$center);}}
+        foreach($grouped as $unitName=>$unitRows){$groupRow=$table->addRow();foreach($widths as $i=>$w)$groupRow->addCell($w,$unitCell)->addText($i===1?$unitName:'',$cellFont,$i===1?$left:$center);foreach($unitRows->values() as $i=>$item){$row=$table->addRow();$values=$reportType==='unused'?[$i+1,$item['name'],$item['rank'],$item['enlistment'],$item['hometown'],$item['permanent'],$item['note']]:($reportType==='tracking'?[$i+1,$item['name'],$item['rank'],$item['enlistment'],$item['total'],$item['used'],$item['remaining'],$item['place'],$item['reason']]:($reportType==='proposed'?[$i+1,$item['name'],$item['rank'],$item['enlistment'],$item['from'],$item['to'],$item['place'],$item['note']]:[$i+1,$item['name'],$item['rank'],$item['enlistment'],$item['from'],$item['to'],$item['place'],$item['reason']??$item['note']]));foreach($values as $j=>$value)$row->addCell($widths[$j],$personCell)->addText((string)($value!==''?$value:' '),$cellFont,$j===1?$left:$center);}}
         if($rows->isEmpty()){$row=$table->addRow();foreach($widths as $i=>$w)$row->addCell($w,$cell)->addText($i===1?'Không có dữ liệu trong năm '.$year.'.':'',$cellFont,$i===1?$left:$center);}
 
-        $summarySource=$reportType==='used'?$taken:$approved;
+        $summarySource=$reportType==='used'?$taken:($reportType==='proposed'?$rows:$approved);
         $annual=$summarySource->where('leave_type','ANNUAL')->count();$special=max(0,$summarySource->count()-$annual);
-        $summary=$reportType==='unused'?'* Tổng số: '.$rows->count().' đ/c.':($reportType==='registered'?'* Tổng số: '.$rows->count().' đ/c, trong đó: Đã nghỉ phép = '.$rows->where('note','Đã nghỉ')->count().' đ/c, Chưa nghỉ phép = '.$rows->where('note','Chưa nghỉ')->count().' đ/c.':'* Tổng số: '.$rows->count().' đ/c, trong đó: Phép năm = '.$annual.' đ/c, Phép đặc biệt = '.$special.' đ/c.');
+        $summary=$reportType==='unused'?'* Tổng số: '.$rows->count().' đ/c.':($reportType==='registered'?'* Tổng số: '.$rows->count().' đ/c, trong đó: Đã nghỉ phép = '.$rows->where('note','Đã nghỉ')->count().' đ/c, Chưa nghỉ phép = '.$rows->where('note','Chưa nghỉ')->count().' đ/c.':($reportType==='proposed'?'* Tổng số: '.$rows->count().' đ/c, trong đó: Đã duyệt = '.$rows->where('note','Đã duyệt')->count().' đ/c, Đang xử lý = '.($rows->count()-$rows->where('note','Đã duyệt')->count()).' đ/c.':'* Tổng số: '.$rows->count().' đ/c, trong đó: Phép năm = '.$annual.' đ/c, Phép đặc biệt = '.$special.' đ/c.'));
         $section->addText($summary,['size'=>14],$left);
         $footer=$section->addTable($noBorder);$footer->addRow();$reporter=$footer->addCell(7000);$commander=$footer->addCell(7000);
         foreach([[$reporter,'NGƯỜI BÁO CÁO',$signature['reporter']],[$commander,'THỦ TRƯỞNG ĐƠN VỊ',$signature['commander']]] as [$cellObj,$role,$name]){$cellObj->addText($role,$bold,$center);$cellObj->addTextBreak(3);$cellObj->addText($name,$bold,$center);}
@@ -672,10 +855,15 @@ PS1);
         return response()->download($path,'bao-cao-nghi-phep-'.$year.'-'.$reportType.'-'.$agency.'.docx')->deleteFileAfterSend(true);
     }
 
-    private function downloadReportFromTemplate(LeaveReportTemplate $template,$rows,string $reportType,int $year,string $agency,string $agencyName,array $signature,string $title){
+    private function downloadReportFromTemplate(LeaveReportTemplate $template,$rows,string $reportType,int $year,string $agency,string $agencyName,array $signature,string $title,string $reportUnitName=''){
         $path=$template->absolutePath();abort_unless($path&&is_file($path),404,'Không tìm thấy file mẫu báo cáo.');
         $processor=new \PhpOffice\PhpWord\TemplateProcessor($path);
         $today=now();
+        $reportSignature=null;
+        if($reportType==='proposed'){
+            $commanderApprovalUserId=(int)($rows->pluck('commander_approval_user_id')->filter()->first() ?: $rows->pluck('commander_user_id')->filter()->first() ?: 0);
+            $reportSignature=$this->resolveReportSlotSignature(DigitalSignature::SLOT_LEAVE_PROPOSING_UNIT,$commanderApprovalUserId ?: null);
+        }
         $annualCount=$rows->filter(fn($row)=>str_contains((string)($row['reason']??''),'Phép năm'))->count();
         $specialCount=max(0,$rows->count()-$annualCount);
         $registeredTaken=$rows->where('note','Đã nghỉ')->count();
@@ -689,9 +877,14 @@ PS1);
             'tieu_de'=>$title,
             'loai_bao_cao'=>$title,
             'dien_quan_ly'=>$agencyName,
-            'co_quan_quan_ly'=>$agency===LeaveAccess::CO_QUAN_CAN_BO?'Cơ quan cán bộ':'Quân lực',
+            'co_quan_quan_ly'=>$reportType==='proposed'?$reportUnitName:($agency===LeaveAccess::CO_QUAN_CAN_BO?'Cơ quan cán bộ':'Quân lực'),
+            'don_vi_bao_cao'=>$reportUnitName,
+            'don_vi_de_nghi'=>$reportUnitName,
+            'co_quan_de_nghi'=>$reportUnitName,
             'nguoi_bao_cao'=>$signature['reporter'],
             'thu_truong'=>$signature['commander'],
+            'nguoi_ky_don_vi_de_nghi'=>(string)($reportSignature['name']??''),
+            'chuc_vu_ky_don_vi_de_nghi'=>(string)trim(($reportSignature['role1']??'').' '.($reportSignature['role2']??'')),
             'tong_so'=>(string)$rows->count(),
             'so_phep_nam'=>(string)$annualCount,
             'so_phep_dac_biet'=>(string)$specialCount,
@@ -703,6 +896,11 @@ PS1);
                 'stt'=>$isGroup?'':(string)($index+1),
                 'ho_ten'=>$isGroup?mb_strtoupper((string)($row['unit']??'CHƯA CÓ ĐƠN VỊ'),'UTF-8'):(string)($row['name']??''),
                 'cap_bac'=>$isGroup?'':(string)($row['rank']??''),
+                'chuc_vu'=>$isGroup?'':(string)($row['position']??''),
+                'chuc_vu_nguoi_de_nghi'=>$isGroup?'':(string)(($row['proposer_position']??'') ?: ($row['position']??'')),
+                'chu_ky_chi_huy'=>$isGroup?'':(string)($row['position']??''),
+                'chu_ky_don_vi_de_nghi'=>$isGroup?'':(string)($row['position']??''),
+                'chu_ky_nguoi_de_nghi'=>$isGroup?'':(string)($row['position']??''),
                 'nhap_ngu'=>$isGroup?'':(string)($row['enlistment']??''),
                 'don_vi'=>(string)($row['unit']??''),
                 'don_vi_quan_nhan'=>$isGroup?mb_strtoupper((string)($row['unit']??'CHƯA CÓ ĐƠN VỊ'),'UTF-8'):'',
@@ -713,6 +911,14 @@ PS1);
                 'que_quan'=>$isGroup?'':(string)($row['hometown']??''),
                 'tru_quan'=>$isGroup?'':(string)($row['permanent']??''),
                 'ghi_chu'=>$isGroup?'':(string)($row['note']??''),
+                'trang_thai'=>$isGroup?'':(string)($row['note']??''),
+                'nguoi_de_nghi'=>$isGroup?'':(string)($row['proposer']??''),
+                'nguoi_thay_the'=>$isGroup?'':(string)($row['replacement']??''),
+                'ten_nguoi_thay_the'=>$isGroup?'':(string)($row['replacement']??''),
+                'ho_ten_nguoi_thay_the'=>$isGroup?'':(string)($row['replacement']??''),
+                'chuc_vu_thay_the'=>$isGroup?'':(string)($row['replacement_position']??''),
+                'chuc_vu_nguoi_thay_the'=>$isGroup?'':(string)($row['replacement_position']??''),
+                'don_vi_nguoi_thay_the'=>$isGroup?'':(string)($row['replacement_unit']??''),
                 'tong_ngay'=>$isGroup?'':(string)($row['total']??''),
                 'da_nghi'=>$isGroup?'':(string)($row['used']??''),
                 'con_lai'=>$isGroup?'':(string)($row['remaining']??''),
@@ -725,11 +931,15 @@ PS1);
             $templateRows[]=$makeTemplateRow(['unit'=>$unitName],0,true);
             foreach($unitRows->values() as $index=>$row)$templateRows[]=$makeTemplateRow($row,$index,false);
         }
-        if(!$templateRows)$templateRows=[['stt'=>'','ho_ten'=>'','cap_bac'=>'','nhap_ngu'=>'','don_vi'=>'','don_vi_quan_nhan'=>'','tu_ngay'=>'','den_ngay'=>'','noi_nghi_phep'=>'','ly_do'=>'','que_quan'=>'','tru_quan'=>'','ghi_chu'=>'','tong_ngay'=>'','da_nghi'=>'','con_lai'=>'']];
+        if(!$templateRows)$templateRows=[['stt'=>'','ho_ten'=>'','cap_bac'=>'','chuc_vu'=>'','chuc_vu_nguoi_de_nghi'=>'','chu_ky_chi_huy'=>'','chu_ky_don_vi_de_nghi'=>'','chu_ky_nguoi_de_nghi'=>'','nhap_ngu'=>'','don_vi'=>'','don_vi_quan_nhan'=>'','tu_ngay'=>'','den_ngay'=>'','noi_nghi_phep'=>'','ly_do'=>'','que_quan'=>'','tru_quan'=>'','ghi_chu'=>'','trang_thai'=>'','nguoi_de_nghi'=>'','nguoi_thay_the'=>'','ten_nguoi_thay_the'=>'','ho_ten_nguoi_thay_the'=>'','chuc_vu_thay_the'=>'','chuc_vu_nguoi_thay_the'=>'','don_vi_nguoi_thay_the'=>'','tong_ngay'=>'','da_nghi'=>'','con_lai'=>'']];
         if(!$this->fillReportTemplateUnitRows($processor,$rows,$reportType,$makeTemplateRow)){
             try{$processor->cloneRowAndSetValues('stt',$templateRows);}catch(\Throwable $e){$processor->setValue('bang_du_lieu',$rows->map(fn($row,$i)=>($i+1).'. '.($row['name']??'').' - '.($row['unit']??'').' - '.($row['from']??'').' '.($row['to']??''))->implode("\n"));}
         }
-        foreach(['stt','ho_ten','cap_bac','nhap_ngu','don_vi','don_vi_quan_nhan','tu_ngay','den_ngay','noi_nghi_phep','ly_do','que_quan','tru_quan','ghi_chu','tong_ngay','da_nghi','con_lai','bang_du_lieu'] as $macro)$processor->setValue($macro,'');
+        $variables=$processor->getVariables();
+        if($reportType==='proposed'){
+            foreach(['chu_ky_chi_huy','chu_ky_don_vi_de_nghi','chu_ky_nguoi_de_nghi'] as $macro)$this->setPermitSignatureImage($processor,$variables,$macro,$reportSignature['path']??null);
+        }
+        foreach(['stt','ho_ten','cap_bac','chuc_vu','chuc_vu_nguoi_de_nghi','nhap_ngu','don_vi','don_vi_quan_nhan','tu_ngay','den_ngay','noi_nghi_phep','ly_do','que_quan','tru_quan','ghi_chu','trang_thai','nguoi_de_nghi','nguoi_thay_the','ten_nguoi_thay_the','ho_ten_nguoi_thay_the','chuc_vu_thay_the','chuc_vu_nguoi_thay_the','don_vi_nguoi_thay_the','bang_du_lieu','tong_ngay','da_nghi','con_lai'] as $macro)$processor->setValue($macro,'');
         $output=storage_path('app/report-phep-template-'.now()->format('YmdHis').'-'.$template->id.'.docx');
         $processor->saveAs($output);
         return response()->download($output,'bao-cao-nghi-phep-'.$year.'-'.$reportType.'-'.$agency.'-mau-'.$template->id.'.docx')->deleteFileAfterSend(true);

@@ -15,6 +15,9 @@
         </thead>
         <tbody>
             @forelse($templateItems as $item)
+                @php
+                    $downloadUrl = route('leave-management.report-templates.download', $item).'?v='.($item->updated_at?->timestamp ?? time()).'-'.$item->file_size;
+                @endphp
                 <tr class="border-t align-top">
                     <td class="p-3">
                         <div class="font-bold text-slate-900">{{ $item->name }}</div>
@@ -25,7 +28,7 @@
                         <td class="p-3">{{ $agencyLabels[$item->managing_agency] ?? $item->managing_agency }}</td>
                     @endif
                     <td class="p-3">
-                        <a class="font-semibold text-blue-700" href="{{ route('leave-management.report-templates.download', $item) }}">{{ $item->original_name ?: basename($item->file_path) }}</a>
+                        <a class="font-semibold text-blue-700" href="{{ $downloadUrl }}">{{ $item->original_name ?: basename($item->file_path) }}</a>
                         <div class="text-xs text-slate-500">{{ number_format(((int) $item->file_size) / 1024, 1) }} KB</div>
                     </td>
                     <td class="p-3">
@@ -33,7 +36,7 @@
                     </td>
                     <td class="p-3">{{ $item->updated_at?->format('d/m/Y H:i') }}</td>
                     <td class="p-3">
-                        <a class="mb-2 inline-flex min-w-[118px] items-center justify-center gap-1 rounded bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700" href="{{ route('leave-management.report-templates.download', $item) }}">
+                        <a class="mb-2 inline-flex min-w-[118px] items-center justify-center gap-1 rounded bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700" href="{{ $downloadUrl }}">
                             <i class="bi bi-download"></i> Tải về
                         </a>
                         <details>

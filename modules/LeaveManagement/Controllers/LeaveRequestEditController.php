@@ -14,9 +14,15 @@ class LeaveRequestEditController extends ModuleBaseController
         $isAgency=$leaveRequest->status==='PENDING_AGENCY' && LeaveAccess::canHandleAgency((string)$leaveRequest->managing_agency,$r->user());
         abort_unless($r->user()->isSuperAdmin() || (int)$leaveRequest->created_by===(int)$r->user()->id || ($leaveRequest->status==='PENDING_COMMANDER' && LeaveAccess::canCommandRequest($leaveRequest->loadMissing('personnel'),$r->user())) || $isAgency,403);
         $d=$r->validate(['leave_type'=>'nullable|in:ANNUAL,EXTRA,SICK,PERSONAL,SHORT_LEAVE','from_date'=>'nullable|date','to_date'=>'nullable|date|after_or_equal:from_date','reason'=>'nullable|string','note'=>'nullable|string','travel_days'=>'nullable|integer|min:0','extra_standard_ids_marker'=>'nullable|boolean','extra_standard_ids'=>'nullable|array','extra_standard_ids.*'=>'integer|exists:leave_regulations,id','extra_days'=>'nullable|integer|min:0','extra_reasons'=>'nullable|array','locality_id'=>'nullable|exists:leave_localities,id','replacement_personnel_id'=>'nullable|exists:leave_personnel,id']);
+        if (array_key_exists('replacement_personnel_id', $d)) {
+            $d['replacement_personnel_name'] = null;
+            $d['replacement_position'] = null;
+        }
         if (!empty($d['replacement_personnel_id'])) {
             $replacement = LeavePersonnel::withoutGlobalScopes()->where('active', true)->findOrFail($d['replacement_personnel_id']);
             abort_unless((int) $replacement->unit_id === (int) $leaveRequest->unit_id, 422, 'Người thay thế phải thuộc cùng đơn vị với quân nhân nghỉ.');
+            $d['replacement_personnel_name'] = $replacement->name;
+            $d['replacement_position'] = $replacement->position;
         }
         $from=$d['from_date']??$leaveRequest->from_date; $to=$d['to_date']??$leaveRequest->to_date;
         $days=($from&&$to)?Carbon::parse($from)->diffInDays(Carbon::parse($to))+1:0;

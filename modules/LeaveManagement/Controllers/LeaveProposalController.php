@@ -165,6 +165,7 @@ class LeaveProposalController extends ModuleBaseController
         if ($people->isEmpty()) {
             return back()->withErrors(['personnel_ids' => in_array($scope, ['HSQBS_ANNUAL', 'HSQBS_SPECIAL'], true) ? 'Đơn vị chưa có quân nhân để đề xuất phép.' : 'Lớp chưa có học viên để đề xuất phép.'])->withInput();
         }
+        $replacement = null;
         if (!empty($data['replacement_personnel_id'])) {
             $replacement = LeavePersonnel::withoutGlobalScopes()->where('active', true)->findOrFail($data['replacement_personnel_id']);
             foreach ($people as $person) {
@@ -205,7 +206,7 @@ class LeaveProposalController extends ModuleBaseController
         $extraDays = $standards->sum('base_days');
         $created = 0;
 
-        DB::transaction(function () use ($people, $scope, $class, $classScopes, $data, $request, $from, $to, $totalDays, $extraDays, $travelDays, $fixedHsqbsDays, $standards, $locality, $isMilitaryAccount, &$created): void {
+        DB::transaction(function () use ($people, $scope, $class, $classScopes, $data, $request, $from, $to, $totalDays, $extraDays, $travelDays, $fixedHsqbsDays, $standards, $locality, $replacement, $isMilitaryAccount, &$created): void {
             foreach ($people as $person) {
                 // Thâm niên tính theo năm lịch: năm hiện tại - năm nhập ngũ.
                 // Không dùng số năm tròn theo ngày/tháng và không lấy phần thập phân.
@@ -281,6 +282,8 @@ class LeaveProposalController extends ModuleBaseController
                     'total_days' => $fixedHsqbsDays ?? ($scope === 'CLASS' || $scope === 'SHORT_LEAVE' ? $personRangeDays : $personTotalDays),
                     'leave_year' => $from->year, 'locality_id' => $personLocality?->id, 'locality_path' => $personLocality?->pathName() ?: $person->permanent_residence,
                     'replacement_personnel_id' => $data['replacement_personnel_id'] ?? null,
+                    'replacement_personnel_name' => $replacement?->name,
+                    'replacement_position' => $replacement?->position,
                     'commander_user_id' => $commander, 'commander_name' => $person->commander?->name ?: ($person->commander_name ?: $commanderUser?->name), 'managing_agency' => $managingAgency,
                 ];
                 $leave = LeaveRequest::create($payload);

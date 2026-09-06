@@ -5,9 +5,11 @@ namespace Modules\User\Controllers;
 use App\Http\Controllers\Controller;
 use App\Models\DigitalSignature;
 use App\Services\DigitalSignatureService;
+use App\Support\PermissionCheck;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
+use Modules\LeaveManagement\Support\LeaveAccess;
 
 class DigitalSignatureController extends Controller
 {
@@ -19,7 +21,7 @@ class DigitalSignatureController extends Controller
     {
         $user = Auth::user();
         $items = $this->signatures->listForUser($user);
-        $slots = DigitalSignature::systemSlots();
+        $slots = DigitalSignature::allSlots();
 
         return view('user::signatures.index', compact('items', 'slots', 'user'));
     }
@@ -38,7 +40,7 @@ class DigitalSignatureController extends Controller
 
         $path = $this->signatures->storeUpload($request->file('image'), $user);
         $slot = $data['slot_key'] ?? DigitalSignature::SLOT_CUSTOM;
-        if (! array_key_exists($slot, DigitalSignature::systemSlots())) {
+        if (! array_key_exists($slot, DigitalSignature::allSlots()) || ! $this->canUseSlot($slot, $user)) {
             $slot = DigitalSignature::SLOT_CUSTOM;
         }
 
@@ -75,15 +77,21 @@ class DigitalSignatureController extends Controller
             'display_name' => 'required|string|max:255',
             'role_line1' => 'nullable|string|max:255',
             'role_line2' => 'nullable|string|max:255',
+            'slot_key' => 'nullable|string|max:64',
             'image' => 'nullable|image|mimes:png,jpg,jpeg,webp|max:2048',
             'is_active' => 'nullable|boolean',
             'is_default' => 'nullable|boolean',
             'user_id' => 'nullable|integer|exists:users,id',
         ]);
+        $slot = $data['slot_key'] ?? $signature->slot_key;
+        if (! array_key_exists($slot, DigitalSignature::allSlots()) || ! $this->canUseSlot($slot, $user)) {
+            $slot = DigitalSignature::SLOT_CUSTOM;
+        }
 
         $signature->display_name = $data['display_name'];
         $signature->role_line1 = $data['role_line1'] ?? '';
         $signature->role_line2 = $data['role_line2'] ?? '';
+        $signature->slot_key = $slot;
         $signature->is_active = $request->boolean('is_active');
         $signature->is_default = $request->boolean('is_default');
 
@@ -162,5 +170,20 @@ class DigitalSignatureController extends Controller
             'success',
             "Đã seed {$n} mẫu, claim {$c} chữ ký theo tên user."
         );
+    }
+
+    private function canUseSlot(string $slot, $user): bool
+    {
+        if ($slot === DigitalSignature::SLOT_LEAVE_PROPOSING_UNIT) {
+            return LeaveAccess::isCommanderAccount($user) || LeaveAccess::canApprove($user);
+        }
+        if ($slot === DigitalSignature::SLOT_LEAVE_AGENCY) {
+            return PermissionCheck::isLeaveAgency($user) || LeaveAccess::canApprove($user);
+        }
+        if ($slot === DigitalSignature::SLOT_LEAVE_HEAD) {
+            return LeaveAccess::canHeadSign($user);
+        }
+
+        return true;
     }
 }

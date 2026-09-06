@@ -80,7 +80,10 @@ class LeaveDecisionController extends ModuleBaseController
         $this->notifyManagement($leaveRequest,'Đơn nghỉ phép #'.$leaveRequest->id.' đã được thủ trưởng/Ban Giám hiệu ký.');
         $this->notifyProposer($leaveRequest,'Đề xuất nghỉ phép đã được Ban Giám hiệu ký và cơ quan quản lý duyệt.');
         $this->sendFinalApprovalMail($leaveRequest);
-        return back()->with('success','Đã duyệt phép cuối cùng và gửi thông báo cho quân nhân.');
+        return back()
+            ->with('success','Đã duyệt phép cuối cùng và gửi thông báo cho quân nhân.')
+            ->with('leave_print_url',route('leave-management.requests.print',['leaveRequest'=>$leaveRequest->id,'format'=>'print']))
+            ->with('leave_print_window_name','leave-print-after-approve-'.$leaveRequest->id);
     }
 
     /**

@@ -142,9 +142,205 @@ class DigitalSignatureService
     public function storeUpload(UploadedFile $file, User $user): string
     {
         $dir = 'signatures/users/'.$user->id;
-        $name = 'sig_'.time().'_'.Str::random(6).'.'.$file->getClientOriginalExtension();
+        $name = 'sig_'.time().'_'.Str::random(6).'.png';
 
-        return $file->storeAs($dir, $name, 'public');
+        $cleaned = $this->makeSignatureBackgroundTransparent($file);
+        if ($cleaned !== null) {
+            Storage::disk('public')->put($dir.'/'.$name, $cleaned);
+
+            return $dir.'/'.$name;
+        }
+
+        $fallbackName = 'sig_'.time().'_'.Str::random(6).'.'.$file->getClientOriginalExtension();
+
+        return $file->storeAs($dir, $fallbackName, 'public');
+    }
+
+    private function makeSignatureBackgroundTransparent(UploadedFile $file): ?string
+    {
+        return $this->cleanSignatureImageBinary((string) file_get_contents($file->getRealPath()));
+    }
+
+    public function removeBackgroundFromStoredImage(string $relativePath): bool
+    {
+        if (! Storage::disk('public')->exists($relativePath)) {
+            return false;
+        }
+        $cleaned = $this->cleanSignatureImageBinary((string) Storage::disk('public')->get($relativePath));
+        if ($cleaned === null) {
+            return false;
+        }
+        Storage::disk('public')->put($relativePath, $cleaned);
+
+        return true;
+    }
+
+    private function cleanSignatureImageBinary(string $binary): ?string
+    {
+        if (! extension_loaded('gd')) {
+            return null;
+        }
+
+        $source = @imagecreatefromstring($binary);
+        if (! $source) {
+            return null;
+        }
+
+        $width = imagesx($source);
+        $height = imagesy($source);
+        $background = $this->estimateSignatureBackgroundColor($source, $width, $height);
+        $rowCounts = array_fill(0, $height, 0);
+        $isInkPixel = function (int $r, int $g, int $b) use ($background): bool {
+            $spread = max($r, $g, $b) - min($r, $g, $b);
+            $average = ($r + $g + $b) / 3;
+            $distanceToBackground = sqrt(($r - $background[0]) ** 2 + ($g - $background[1]) ** 2 + ($b - $background[2]) ** 2);
+            $blueInk = $b > $r + 18 && $b > $g + 6 && $spread > 28 && $average < 220;
+            $purpleInk = $b > $g + 18 && $r > $g + 8 && $spread > 22 && $average < 220;
+            $darkInk = ($average < 125 || ($average < 150 && $spread > 12)) && $distanceToBackground > 48;
+
+            return $blueInk || $purpleInk || $darkInk;
+        };
+
+        for ($y = 0; $y < $height; $y++) {
+            for ($x = 0; $x < $width; $x++) {
+                $rgba = imagecolorsforindex($source, imagecolorat($source, $x, $y));
+                if ($isInkPixel((int) $rgba['red'], (int) $rgba['green'], (int) $rgba['blue'])) {
+                    $rowCounts[$y]++;
+                }
+            }
+        }
+
+        [$cropTop, $cropBottom] = $this->dominantInkRange($rowCounts, max(2, (int) floor($width * 0.002)), 0, $height - 1);
+        $colCounts = array_fill(0, $width, 0);
+        for ($y = $cropTop; $y <= $cropBottom; $y++) {
+            for ($x = 0; $x < $width; $x++) {
+                $rgba = imagecolorsforindex($source, imagecolorat($source, $x, $y));
+                if ($isInkPixel((int) $rgba['red'], (int) $rgba['green'], (int) $rgba['blue'])) {
+                    $colCounts[$x]++;
+                }
+            }
+        }
+
+        [$cropLeft, $cropRight] = $this->dominantInkRange($colCounts, max(1, (int) floor(($cropBottom - $cropTop + 1) * 0.002)), 0, $width - 1);
+        $padding = max(8, (int) floor(min($width, $height) * 0.012));
+        $cropLeft = max(0, $cropLeft - $padding);
+        $cropRight = min($width - 1, $cropRight + $padding);
+        $cropTop = max(0, $cropTop - $padding);
+        $cropBottom = min($height - 1, $cropBottom + $padding);
+        $targetWidth = max(1, $cropRight - $cropLeft + 1);
+        $targetHeight = max(1, $cropBottom - $cropTop + 1);
+
+        $target = imagecreatetruecolor($targetWidth, $targetHeight);
+        imagealphablending($target, false);
+        imagesavealpha($target, true);
+        $transparent = imagecolorallocatealpha($target, 255, 255, 255, 127);
+        imagefill($target, 0, 0, $transparent);
+
+        for ($y = $cropTop; $y <= $cropBottom; $y++) {
+            for ($x = $cropLeft; $x <= $cropRight; $x++) {
+                $rgba = imagecolorsforindex($source, imagecolorat($source, $x, $y));
+                $r = (int) $rgba['red'];
+                $g = (int) $rgba['green'];
+                $b = (int) $rgba['blue'];
+                $alpha = (int) ($rgba['alpha'] ?? 0);
+                $spread = max($r, $g, $b) - min($r, $g, $b);
+                $average = ($r + $g + $b) / 3;
+                $distanceToBackground = sqrt(($r - $background[0]) ** 2 + ($g - $background[1]) ** 2 + ($b - $background[2]) ** 2);
+                $isInk = $isInkPixel($r, $g, $b);
+                $isPaper = ! $isInk && (
+                    ($r >= 238 && $g >= 238 && $b >= 238)
+                    || ($average >= 182 && $spread <= 42)
+                    || ($distanceToBackground <= 62 && $spread <= 55)
+                );
+                if ($isPaper || ! $isInk) {
+                    imagesetpixel($target, $x - $cropLeft, $y - $cropTop, $transparent);
+                    continue;
+                }
+                $outputAlpha = min(126, max($alpha, 0));
+                $color = imagecolorallocatealpha($target, $r, $g, $b, $outputAlpha);
+                imagesetpixel($target, $x - $cropLeft, $y - $cropTop, $color);
+            }
+        }
+
+        ob_start();
+        imagepng($target);
+        $binary = ob_get_clean();
+        imagedestroy($source);
+        imagedestroy($target);
+
+        return is_string($binary) && $binary !== '' ? $binary : null;
+    }
+
+    /**
+     * @param  array<int,int>  $counts
+     * @return array{0:int,1:int}
+     */
+    private function dominantInkRange(array $counts, int $threshold, int $fallbackStart, int $fallbackEnd): array
+    {
+        $bestStart = null;
+        $bestEnd = null;
+        $bestWeight = 0;
+        $currentStart = null;
+        $currentWeight = 0;
+        $lastIndex = $fallbackStart;
+
+        foreach ($counts as $index => $count) {
+            if ($count >= $threshold) {
+                if ($currentStart === null) {
+                    $currentStart = (int) $index;
+                    $currentWeight = 0;
+                }
+                $currentWeight += (int) $count;
+                $lastIndex = (int) $index;
+                continue;
+            }
+            if ($currentStart !== null && $currentWeight > $bestWeight) {
+                $bestStart = $currentStart;
+                $bestEnd = $lastIndex;
+                $bestWeight = $currentWeight;
+            }
+            $currentStart = null;
+            $currentWeight = 0;
+        }
+
+        if ($currentStart !== null && $currentWeight > $bestWeight) {
+            $bestStart = $currentStart;
+            $bestEnd = $lastIndex;
+        }
+
+        return [$bestStart ?? $fallbackStart, $bestEnd ?? $fallbackEnd];
+    }
+
+    /**
+     * The uploaded signature is often a phone photo, so the paper may be gray.
+     * Sampling the outer frame gives us the actual paper color for that photo.
+     *
+     * @return array{0:int,1:int,2:int}
+     */
+    private function estimateSignatureBackgroundColor(\GdImage $source, int $width, int $height): array
+    {
+        $step = max(1, (int) floor(min($width, $height) / 80));
+        $samples = [];
+        for ($x = 0; $x < $width; $x += $step) {
+            $samples[] = imagecolorsforindex($source, imagecolorat($source, $x, 0));
+            $samples[] = imagecolorsforindex($source, imagecolorat($source, $x, $height - 1));
+        }
+        for ($y = 0; $y < $height; $y += $step) {
+            $samples[] = imagecolorsforindex($source, imagecolorat($source, 0, $y));
+            $samples[] = imagecolorsforindex($source, imagecolorat($source, $width - 1, $y));
+        }
+        $channels = ['red' => [], 'green' => [], 'blue' => []];
+        foreach ($samples as $sample) {
+            foreach ($channels as $channel => $_) {
+                $channels[$channel][] = (int) $sample[$channel];
+            }
+        }
+        foreach ($channels as $channel => $values) {
+            sort($values);
+            $channels[$channel] = $values[(int) floor(count($values) / 2)] ?? 255;
+        }
+
+        return [(int) $channels['red'], (int) $channels['green'], (int) $channels['blue']];
     }
 
     /**

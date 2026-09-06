@@ -4,6 +4,7 @@
         'unused' => 'report-not-used',
         'tracking' => 'report-compare',
         'registered' => 'report-registered',
+        'proposed' => 'report-proposed',
     ][request('report_type')] ?? '';
     $canEditReportLeave = auth()->user()?->isSuperAdmin() || \App\Support\PermissionCheck::can(auth()->user(), 'leave-management.edit') || \App\Support\PermissionCheck::can(auth()->user(), 'leave-management.requests.create') || \App\Support\PermissionCheck::can(auth()->user(), 'leave-management.create');
     $canDeleteReportLeave = auth()->user()?->isSuperAdmin() || \App\Support\PermissionCheck::can(auth()->user(), 'leave-management.delete');
@@ -31,6 +32,7 @@
         <button type="button" class="report-tab rounded border px-3 py-2 text-sm font-bold" data-target="report-not-used">Chưa nghỉ</button>
         <button type="button" class="report-tab rounded border px-3 py-2 text-sm font-bold" data-target="report-compare">Theo dõi ngày</button>
         <button type="button" class="report-tab rounded border px-3 py-2 text-sm font-bold" data-target="report-registered">Đăng ký phép năm</button>
+        <button type="button" class="report-tab rounded border px-3 py-2 text-sm font-bold" data-target="report-proposed">Đề nghị nghỉ phép</button>
     </div>
 
     <div id="report-used" class="report-panel hidden overflow-x-auto pt-3">
@@ -169,6 +171,41 @@
             </tbody>
         </table>
     </div>
+
+    <div id="report-proposed" class="report-panel hidden overflow-x-auto pt-3">
+        <table class="w-full min-w-[1180px] text-left text-sm">
+            <thead class="bg-slate-100"><tr><th class="p-3">STT</th><th class="p-3">Quân nhân</th><th class="p-3">Chức vụ</th><th class="p-3">Đơn vị</th><th class="p-3">Người đề nghị</th><th class="p-3">Từ ngày</th><th class="p-3">Đến ngày</th><th class="p-3">Nơi nghỉ phép</th><th class="p-3">Người thay thế</th><th class="p-3">Trạng thái</th><th class="p-3">Thao tác</th></tr></thead>
+            <tbody>
+                @foreach(($proposed ?? collect()) as $i => $item)
+                    @php($meta = $rowMeta($item))
+                    @php($statusText = ['PENDING'=>'Chờ duyệt','PENDING_COMMANDER'=>'Chờ chỉ huy','PENDING_AGENCY'=>'Chờ cơ quan thẩm định','PENDING_HEAD'=>'Chờ Ban giám hiệu','APPROVED'=>'Đã duyệt','RETURNED'=>'Trả lại'][$item->status] ?? $item->status)
+                    <tr class="border-t" data-report-row data-agency="{{ $meta['agency'] }}" data-unit-id="{{ $meta['unit'] }}" data-search="{{ $meta['search'] }}">
+                        <td class="p-3" data-row-index>{{ $i + 1 }}</td>
+                        <td class="p-3 font-semibold">{{ $item->personnel_name ?: $item->personnel?->name }}</td>
+                        <td class="p-3">{{ $item->position ?: $item->personnel?->position ?: '—' }}</td>
+                        <td class="p-3">{{ $item->unit_name ?: $item->personnel?->unitRelation?->name ?: $item->personnel?->unit }}</td>
+                        <td class="p-3">{{ $item->proposed_by_display_name ?? $item->proposed_by_username ?? '—' }}</td>
+                        <td class="p-3">{{ $item->from_date?->format('d-m-Y') }}</td>
+                        <td class="p-3">{{ $item->to_date?->format('d-m-Y') }}</td>
+                        <td class="p-3">{{ $item->locality_path ?: $item->reason ?: '—' }}</td>
+                        <td class="p-3">{{ $item->replacement_personnel_name ?: $item->replacement?->name ?: '—' }}</td>
+                        <td class="p-3">{{ $statusText }}</td>
+                        <td class="p-3">
+                            <div class="flex flex-wrap gap-2">
+                                @if($canEditReportLeave)
+                                    <a href="{{ route('leave-management.requests.show', $item) }}" class="rounded bg-blue-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-700">Sửa</a>
+                                @endif
+                                @if($canDeleteReportLeave)
+                                    <form method="POST" action="{{ route('leave-management.requests.destroy', $item) }}" onsubmit="return confirm('Xóa đơn phép này khỏi báo cáo? Hồ sơ lưu trữ liên quan cũng sẽ được xóa.');">@csrf @method('DELETE')<button class="rounded bg-rose-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-rose-700">Xóa</button></form>
+                                @endif
+                            </div>
+                        </td>
+                    </tr>
+                @endforeach
+                <tr class="hidden" data-filter-empty><td colspan="11" class="p-6 text-center">Không có dữ liệu phù hợp bộ lọc.</td></tr>
+            </tbody>
+        </table>
+    </div>
 </div>
 
 <script>
@@ -177,10 +214,10 @@ document.addEventListener('DOMContentLoaded',function(){
     const agency=document.getElementById('leave-report-agency');
     const unit=document.getElementById('leave-report-unit');
     const search=document.getElementById('leave-report-search');
-    const targetToType={used:'report-used',unused:'report-not-used',tracking:'report-compare',registered:'report-registered'};
-    const typeToTarget={'report-used':'used','report-not-used':'unused','report-compare':'tracking','report-registered':'registered'};
+    const targetToType={used:'report-used',unused:'report-not-used',tracking:'report-compare',registered:'report-registered',proposed:'report-proposed'};
+    const typeToTarget={'report-used':'used','report-not-used':'unused','report-compare':'tracking','report-registered':'registered','report-proposed':'proposed'};
     const applyFilters=function(){
-        const agencyValue=agency?.value||'';
+        const agencyValue=type?.value==='proposed'?'':(agency?.value||'');
         const unitValue=unit?.value||'';
         const searchValue=(search?.value||'').trim().toLowerCase();
         document.querySelectorAll('[data-report-row]').forEach(function(row){

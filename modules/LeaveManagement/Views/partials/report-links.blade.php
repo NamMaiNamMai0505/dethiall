@@ -7,9 +7,10 @@
             <option value="unused" @selected(request('report_type')==='unused')>QN chưa nghỉ phép</option>
             <option value="tracking" @selected(request('report_type')==='tracking')>Theo dõi thời gian nghỉ phép</option>
             <option value="registered" @selected(request('report_type')==='registered')>QN đăng ký nghỉ phép năm</option>
+            <option value="proposed" @selected(request('report_type')==='proposed')>Danh sách đề nghị nghỉ phép</option>
         </select>
     </label>
-    <label class="text-sm font-semibold">Diện quản lý
+    <label data-report-agency-label class="text-sm font-semibold">Diện quản lý
         <select id="leave-report-agency" data-native-select class="mt-1 block w-64 rounded border p-2">
             <option value="">Chọn diện quản lý</option>
             <option value="QUAN_LUC" @selected(request('agency')==='QUAN_LUC')>Diện Quân lực quản lý</option>
@@ -48,12 +49,22 @@
 document.addEventListener('DOMContentLoaded',function(){
     const unit=document.getElementById('leave-report-unit'),input=document.getElementById('leave-report-recipient'),type=document.getElementById('leave-report-type'),agency=document.getElementById('leave-report-agency'),year=document.getElementById('leave-report-year'),search=document.getElementById('leave-report-search'),template=document.getElementById('leave-report-template');
     const allTemplates=template?Array.from(template.options).filter(function(option){return option.value;}).map(function(option){return {value:option.value,text:option.textContent,reportType:option.dataset.reportType||'',agency:option.dataset.agency||''};}):[];
+    const agencyLabel=document.querySelector('[data-report-agency-label]');
+    const syncAgencyVisibility=function(){
+        const proposed=type?.value==='proposed';
+        agencyLabel?.classList.toggle('hidden',proposed);
+        if(proposed&&agency){
+            if(agency.tomselect)agency.tomselect.clear(true);
+            agency.value='';
+        }
+    };
     const syncTemplates=function(){
+        syncAgencyVisibility();
         if(!template||!type||!agency)return;
         const current=template.value;
         const items=[{value:'',text:'Mẫu mặc định của hệ thống'}];
         allTemplates.forEach(function(item){
-            if(type.value&&agency.value&&item.reportType===type.value&&item.agency===agency.value)items.push({value:item.value,text:item.text,data:{reportType:item.reportType,agency:item.agency}});
+            if(type.value&&item.reportType===type.value&&((type.value==='proposed'&&item.agency==='ALL')||(type.value!=='proposed'&&agency.value&&item.agency===agency.value)))items.push({value:item.value,text:item.text,data:{reportType:item.reportType,agency:item.agency}});
         });
         const selected=items.some(function(item){return item.value===current;})?current:'';
         if(typeof window.setTomSelectOptions==='function'&&template.tomselect){
@@ -85,7 +96,8 @@ document.addEventListener('DOMContentLoaded',function(){
     unit&&unit.addEventListener('change',function(){window.applyLeaveReportFilters?.();});
     agency&&agency.addEventListener('change',function(){syncTemplates();window.applyLeaveReportFilters?.();});
     const activateReportType=function(){
-        const map={used:'report-used',unused:'report-not-used',tracking:'report-compare',registered:'report-registered'};
+        syncAgencyVisibility();
+        const map={used:'report-used',unused:'report-not-used',tracking:'report-compare',registered:'report-registered',proposed:'report-proposed'};
         document.querySelectorAll('.report-panel').forEach(function(panel){panel.classList.add('hidden');});
         document.querySelectorAll('.report-tab').forEach(function(tab){tab.classList.remove('bg-blue-600','text-white');});
         if(!type||!map[type.value])return;
@@ -102,6 +114,6 @@ document.addEventListener('DOMContentLoaded',function(){
         search.addEventListener('input',function(){clearTimeout(timer);timer=setTimeout(function(){window.applyLeaveReportFilters?.();},250);});
         search.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();window.applyLeaveReportFilters?.();}});
     }
-    document.querySelectorAll('[data-report-export]').forEach(function(link){link.addEventListener('click',function(e){syncTemplates();if(type&&!type.value){e.preventDefault();alert('Vui lòng chọn loại báo cáo trước khi xuất.');return;}if(agency&&!agency.value){e.preventDefault();alert('Vui lòng chọn diện quản lý trước khi xuất.');return;}link.href=fillUrl(link.href).toString();});});
+    document.querySelectorAll('[data-report-export]').forEach(function(link){link.addEventListener('click',function(e){syncTemplates();if(type&&!type.value){e.preventDefault();alert('Vui lòng chọn loại báo cáo trước khi xuất.');return;}if(type&&type.value==='proposed'&&unit&&!unit.value){e.preventDefault();alert('Vui lòng chọn đơn vị báo cáo trước khi xuất danh sách đề nghị nghỉ phép.');return;}if(type&&type.value!=='proposed'&&agency&&!agency.value){e.preventDefault();alert('Vui lòng chọn diện quản lý trước khi xuất.');return;}link.href=fillUrl(link.href).toString();});});
 });
 </script>

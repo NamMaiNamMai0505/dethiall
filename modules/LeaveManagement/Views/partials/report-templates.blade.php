@@ -4,22 +4,27 @@
         'unused' => 'QN chưa nghỉ phép',
         'tracking' => 'Theo dõi thời gian nghỉ phép',
         'registered' => 'QN đăng ký nghỉ phép năm',
+        'proposed' => 'Danh sách đề nghị nghỉ phép',
     ];
     $agencyLabels = [
         'QUAN_LUC' => 'Diện Quân lực quản lý',
         'CO_QUAN_CAN_BO' => 'Diện Cán bộ quản lý',
+        'ALL' => 'Không áp dụng với danh sách đề nghị',
     ];
     $reportItems = $items->filter(fn ($item) => ($item->template_kind ?: 'report') === 'report')->values();
     $permitItems = $items->filter(fn ($item) => $item->template_kind === 'permit')->values();
     $reportPlaceholders = [
-        'Thông tin chung' => ['nam', 'ngay_bao_cao', 'ngay', 'thang', 'nam_hien_tai', 'tieu_de', 'loai_bao_cao', 'dien_quan_ly', 'co_quan_quan_ly', 'don_vi_quan_nhan', 'nguoi_bao_cao', 'thu_truong', 'tong_so', 'so_phep_nam', 'so_phep_dac_biet', 'so_da_nghi', 'so_chua_nghi'],
-        'Dòng dữ liệu' => ['stt', 'ho_ten', 'cap_bac', 'nhap_ngu', 'don_vi', 'tu_ngay', 'den_ngay', 'noi_nghi_phep', 'ly_do', 'que_quan', 'tru_quan', 'ghi_chu', 'tong_ngay', 'da_nghi', 'con_lai'],
+        'Thông tin chung' => ['nam', 'ngay_bao_cao', 'ngay', 'thang', 'nam_hien_tai', 'tieu_de', 'loai_bao_cao', 'dien_quan_ly', 'co_quan_quan_ly', 'don_vi_bao_cao', 'don_vi_quan_nhan', 'nguoi_bao_cao', 'thu_truong', 'tong_so', 'so_phep_nam', 'so_phep_dac_biet', 'so_da_nghi', 'so_chua_nghi'],
+        'Dòng dữ liệu' => ['stt', 'ho_ten', 'cap_bac', 'chuc_vu', 'chuc_vu_nguoi_de_nghi', 'nhap_ngu', 'don_vi', 'tu_ngay', 'den_ngay', 'noi_nghi_phep', 'ly_do', 'que_quan', 'tru_quan', 'ghi_chu', 'trang_thai', 'nguoi_de_nghi', 'nguoi_thay_the', 'ten_nguoi_thay_the', 'ho_ten_nguoi_thay_the', 'chuc_vu_thay_the', 'chuc_vu_nguoi_thay_the', 'don_vi_nguoi_thay_the', 'tong_ngay', 'da_nghi', 'con_lai'],
+        'Chữ ký báo cáo đề nghị' => ['chu_ky_chi_huy', 'chu_ky_don_vi_de_nghi', 'chu_ky_nguoi_de_nghi', 'nguoi_ky_don_vi_de_nghi', 'chuc_vu_ky_don_vi_de_nghi'],
     ];
     $permitPlaceholders = [
         'Thông tin giấy phép' => ['so_giay_phep', 'ma_don', 'ngay', 'thang', 'nam', 'ngay_lap', 'ngay_lap_ngay', 'ngay_lap_thang', 'ngay_lap_nam'],
-        'Quân nhân' => ['ho_ten', 'ho_ten_thuong', 'ma_quan_nhan', 'cap_bac', 'chuc_vu', 'don_vi'],
+        'Quân nhân' => ['ho_ten', 'ho_ten_thuong', 'ma_quan_nhan', 'cap_bac', 'chuc_vu', 'chuc_vu_quan_nhan', 'chuc_vu_nguoi_nghi', 'don_vi', 'don_vi_quan_nhan'],
         'Nghỉ phép' => ['tu_ngay', 'den_ngay', 'tu_gio', 'den_gio', 'tu_gio_so', 'den_gio_so', 'thoi_gian_nghi', 'tong_ngay', 'noi_nghi_phep', 'ly_do', 'loai_phep', 'ghi_chu'],
-        'Ký duyệt' => ['nguoi_thay_the', 'chuc_vu_thay_the', 'y_kien_xu_ly', 'so_ngay_van_ban_ky', 'ngay_ky', 'nguoi_ky', 'thu_truong'],
+        'Đơn vị đề nghị' => ['don_vi_de_nghi', 'co_quan_de_nghi', 'nguoi_de_nghi', 'chuc_vu_nguoi_de_nghi', 'nguoi_ky_don_vi_de_nghi', 'chuc_vu_ky_don_vi_de_nghi', 'chu_ky_don_vi_de_nghi', 'chu_ky_nguoi_de_nghi', 'chu_ky_chi_huy'],
+        'Người thay thế' => ['nguoi_thay_the', 'ten_nguoi_thay_the', 'ho_ten_nguoi_thay_the', 'chuc_vu_thay_the', 'chuc_vu_nguoi_thay_the', 'don_vi_nguoi_thay_the'],
+        'Ký duyệt' => ['y_kien_xu_ly', 'so_ngay_van_ban_ky', 'ngay_ky', 'nguoi_ky', 'thu_truong', 'nguoi_ky_co_quan', 'chuc_vu_ky_co_quan', 'nguoi_ky_bgh', 'chuc_vu_ky_bgh', 'chu_ky_1', 'chu_ky_2', 'chu_ky_co_quan', 'chu_ky_bgh'],
     ];
 @endphp
 

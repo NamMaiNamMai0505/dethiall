@@ -18,9 +18,11 @@
         .row { display: grid; grid-template-columns: 42mm 1fr; }
         .label { white-space: nowrap; }
         .name { font-weight: bold; text-transform: uppercase; }
-        .signatures { display: grid; grid-template-columns: 1fr 1fr; margin-top: 70px; text-align: center; font-weight: bold; }
+        .signatures { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8mm; margin-top: 70px; text-align: center; font-weight: bold; }
         .hint { display: block; font-weight: normal; font-style: italic; margin-top: 4px; }
         .sign-space { height: 64mm; }
+        .signature-image { height: 24mm; margin: 5mm auto 2mm; display: block; max-width: 48mm; object-fit: contain; background: transparent; }
+        .signature-name { min-height: 7mm; }
         .actions { margin: 15px auto; text-align: center; font-family: Arial, sans-serif; }
         .actions button { padding: 8px 18px; cursor: pointer; }
         @media print { .actions { display: none; } }
@@ -32,7 +34,7 @@
         <div><strong>TỔNG CỤC HẬU CẦN</strong><strong>TRƯỜNG CAO ĐẲNG HẬU CẦN 2</strong></div>
         <div class="right"><strong>CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM</strong><strong>Độc lập - Tự do - Hạnh phúc</strong><em>Thành phố Hồ Chí Minh, ngày {{ $request->created_at?->format('d') }} tháng {{ $request->created_at?->format('m') }} năm {{ $request->created_at?->format('Y') }}</em></div>
     </div>
-    <div class="number">Số: {{ $request->id }}/GNP-CDHC</div>
+    <div class="number">Số: {{ $permitNumber ?? ($request->id.'/GNP-CDHC') }}</div>
     <h1>GIẤY NGHỈ PHÉP</h1>
     <div class="info">
         <div class="row"><span class="label">Họ và tên:</span><span class="name">{{ $request->personnel?->name ?? $request->personnel_name }}</span></div>
@@ -54,10 +56,39 @@
         @if($request->decision_note)
             <div class="row"><span class="label">Lý do trả về/từ chối:</span><span>{{ $request->decision_note }}</span></div>
         @endif
+        @if($request->bgh_note)
+            <div class="row"><span class="label">Số/ngày VB ký:</span><span>{{ $request->bgh_note }}</span></div>
+        @endif
     </div>
     <div class="signatures">
-        <div><div>XÁC NHẬN</div><div>Của chính quyền địa phương<br>nơi nghỉ phép</div><span class="hint">(Ký, đóng dấu)</span><div class="sign-space"></div></div>
-        <div><div>KT. HIỆU TRƯỞNG</div><div>PHÓ HIỆU TRƯỞNG</div><div class="sign-space"></div><div>........................................</div></div>
+        <div>
+            <div>ĐƠN VỊ ĐỀ NGHỊ</div>
+            @if(!empty($permitSignatures['proposing_unit']['url']))
+                <img src="{{ $permitSignatures['proposing_unit']['url'] }}" alt="" class="signature-image">
+            @else
+                <div class="sign-space"></div>
+            @endif
+            <div class="signature-name">{{ ($permitSignatures['proposing_unit']['name'] ?? '') ?: '........................................' }}</div>
+        </div>
+        <div>
+            <div>XÁC NHẬN</div>
+            <div>Của Quân lực / Cơ quan cán bộ</div>
+            @if(!empty($permitSignatures['agency']['url']))
+                <img src="{{ $permitSignatures['agency']['url'] }}" alt="" class="signature-image">
+            @else
+                <div class="sign-space"></div>
+            @endif
+            <div class="signature-name">{{ ($permitSignatures['agency']['name'] ?? '') ?: '........................................' }}</div>
+        </div>
+        <div>
+            <div>HIỆU TRƯỞNG</div>
+            @if(!empty($permitSignatures['head']['url']))
+                <img src="{{ $permitSignatures['head']['url'] }}" alt="" class="signature-image">
+            @else
+                <div class="sign-space"></div>
+            @endif
+            <div class="signature-name">{{ $request->bgh_signed_at ? (($permitSignatures['head']['name'] ?? '') ?: '') : '' }}</div>
+        </div>
     </div>
 </main>
 <div class="actions"><button onclick="window.print()">In giấy nghỉ phép</button><a href="{{ route('leave-management.approvals') }}">← Quay lại trang duyệt</a></div>

@@ -39,6 +39,9 @@
             </form>
         @endif
     </div>
+    <div class="mb-5 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+        Giấy nghỉ phép sẽ tự lấy chữ ký theo vị trí sử dụng: Đơn vị đề nghị dùng chữ ký chỉ huy/đơn vị gửi đề nghị, Quân lực/Cơ quan cán bộ dùng ô ký 1, Ban giám hiệu dùng ô ký 2.
+    </div>
 
     <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {{-- Upload mới --}}
@@ -63,7 +66,7 @@
                                class="w-full border rounded-lg px-3 py-2 text-sm">
                     </div>
                     <div>
-                        <label class="block text-xs font-semibold text-slate-600 mb-1">Vị trí LHL (tuỳ chọn)</label>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">Vị trí sử dụng</label>
                         <select name="slot_key" class="w-full border rounded-lg px-3 py-2 text-sm">
                             <option value="custom">Tuỳ chọn</option>
                             @foreach($slots as $k => $label)
@@ -137,6 +140,12 @@
                                            class="border rounded-lg px-2 py-1.5 text-xs" placeholder="Chức danh 1">
                                     <input type="text" name="role_line2" value="{{ $sig->role_line2 }}"
                                            class="border rounded-lg px-2 py-1.5 text-xs" placeholder="Chức danh 2">
+                                    <select name="slot_key" class="border rounded-lg px-2 py-1.5 text-xs">
+                                        <option value="custom" @selected($sig->slot_key === 'custom')>Tuỳ chọn</option>
+                                        @foreach($slots as $k => $label)
+                                            <option value="{{ $k }}" @selected($sig->slot_key === $k)>{{ $label }}</option>
+                                        @endforeach
+                                    </select>
                                     <input type="file" name="image" accept="image/*" class="text-xs">
                                     @if($user->isSuperAdmin())
                                         <input type="number" name="user_id" value="{{ $sig->user_id }}"

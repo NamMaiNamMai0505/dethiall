@@ -100,6 +100,10 @@
         #class-students-table-wrap:focus-within {
             min-height: 24rem;
         }
+        #leave-proposal-form div:has(> #personal-total-days),
+        #leave-proposal-form div:has(> #military-total-days) {
+            display: none !important;
+        }
     </style>
     <div class="border-b border-blue-100 bg-gradient-to-r from-blue-50 via-white to-sky-50 px-5 py-4">
         <p class="text-xs font-bold uppercase tracking-[.16em] text-blue-600">Quy trình đề xuất</p>
