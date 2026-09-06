@@ -363,10 +363,12 @@ class InventoryWorkflowController extends ModuleBaseController
         $filename=$originalName?:((trim($code)?:'mau-bao-cao-vat-tu').'.docx');
         $filename=preg_replace('/[\\\\\/:*?"<>|]+/','-',trim($filename));
         if(strtolower(pathinfo($filename,PATHINFO_EXTENSION))!=='docx')$filename=pathinfo($filename,PATHINFO_FILENAME).'.docx';
-        $base=pathinfo($filename,PATHINFO_FILENAME) ?: (trim($code) ?: 'mau-bao-cao-vat-tu');
-        $relative='inventory-templates/'.$base.'-'.now()->format('YmdHis').'-'.bin2hex(random_bytes(3)).'.docx';
+        $relative='inventory-templates/'.$filename;
+        if(Storage::disk('local')->exists($relative)){
+            $relative='inventory-templates/'.pathinfo($filename,PATHINFO_FILENAME).'-'.now()->format('YmdHis').'.docx';
+        }
         $target=Storage::disk('local')->path($relative);
-        abort_unless(copy($source,$target),500,'Không lưu được file mẫu báo cáo vật tư.');
+        copy($source,$target);
         return $relative;
     }
     private function wordFileHasVariables(string $path): bool
