@@ -178,7 +178,7 @@
             <tbody>
                 @foreach(($proposed ?? collect()) as $i => $item)
                     @php($meta = $rowMeta($item))
-                    @php($statusText = ['PENDING'=>'Chờ duyệt','PENDING_COMMANDER'=>'Chờ chỉ huy','PENDING_AGENCY'=>'Chờ cơ quan thẩm định','PENDING_HEAD'=>'Chờ Ban giám hiệu','APPROVED'=>'Đã duyệt','RETURNED'=>'Trả lại'][$item->status] ?? $item->status)
+                    @php($statusText = ['PENDING'=>'Chờ chỉ huy','PENDING_COMMANDER'=>'Chờ chỉ huy','PENDING_AGENCY'=>'Chờ cơ quan thẩm định','PENDING_HEAD'=>'Chờ Ban giám hiệu','APPROVED'=>'Đã duyệt','RETURNED'=>'Trả lại'][$item->status] ?? $item->status)
                     <tr class="border-t" data-report-row data-agency="{{ $meta['agency'] }}" data-unit-id="{{ $meta['unit'] }}" data-search="{{ $meta['search'] }}">
                         <td class="p-3" data-row-index>{{ $i + 1 }}</td>
                         <td class="p-3 font-semibold">{{ $item->personnel_name ?: $item->personnel?->name }}</td>
