@@ -2,7 +2,6 @@
 @section('title', 'Tổ chức thi')
 @section('page-title', 'Tổ chức thi')
 @section('content')
-@include('partials.module-menu', ['module' => 'exam'])
 @php($selectedPlan = $selectedPlan ?? null)
 <style>
     .exam-page { max-width:1440px; margin:0 auto; color:#1e293b; }

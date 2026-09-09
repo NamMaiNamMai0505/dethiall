@@ -71,7 +71,7 @@ class DigitalSignatureController extends Controller
     public function update(Request $request, DigitalSignature $signature)
     {
         $user = Auth::user();
-        abort_unless($signature->canManage($user), 403);
+        abort_unless($signature->isOwnedBy($user), 403);
 
         $data = $request->validate([
             'display_name' => 'required|string|max:255',
@@ -81,7 +81,6 @@ class DigitalSignatureController extends Controller
             'image' => 'nullable|image|mimes:png,jpg,jpeg,webp|max:2048',
             'is_active' => 'nullable|boolean',
             'is_default' => 'nullable|boolean',
-            'user_id' => 'nullable|integer|exists:users,id',
         ]);
         $slot = $data['slot_key'] ?? $signature->slot_key;
         if (! array_key_exists($slot, DigitalSignature::allSlots()) || ! $this->canUseSlot($slot, $user)) {
@@ -111,11 +110,6 @@ class DigitalSignatureController extends Controller
                 ->update(['is_default' => false]);
         }
 
-        // Super-admin gán chủ sở hữu
-        if ($user->isSuperAdmin() && array_key_exists('user_id', $data)) {
-            $signature->user_id = $data['user_id'] ?: null;
-        }
-
         $signature->save();
 
         return redirect()->route('signatures.index')->with('success', 'Đã cập nhật chữ ký.');
@@ -124,16 +118,10 @@ class DigitalSignatureController extends Controller
     public function destroy(DigitalSignature $signature)
     {
         $user = Auth::user();
-        abort_unless($signature->canManage($user), 403);
+        abort_unless($signature->isOwnedBy($user), 403);
 
         // Không xoá hẳn mẫu hệ thống — chỉ unclaim / deactivate
         if ($signature->is_system_template) {
-            if ($user->isSuperAdmin()) {
-                $signature->user_id = null;
-                $signature->save();
-
-                return redirect()->route('signatures.index')->with('success', 'Đã gỡ gán mẫu hệ thống (unclaim).');
-            }
             abort(403, 'Không thể xoá mẫu chữ ký hệ thống.');
         }
 

@@ -2,22 +2,30 @@
 @php
     $user = auth()->user();
     $showGrades = false;
+    $showDashboard = false;
+    $lmsUrl = null;
     if ($user && ! $user->isStudent()) {
-        if (method_exists($user, 'canAccessGrades')) {
-            $showGrades = $user->canAccessGrades();
-        } elseif (class_exists(\Modules\Grades\Services\GradeAccess::class)) {
-            $showGrades = \Modules\Grades\Services\GradeAccess::canEnter($user);
-        } else {
-            $showGrades = $user->isSuperAdmin()
-                || $user->isManager()
-                || $user->isInstructor()
-                || $user->can('grades.index')
-                || $user->can('grades.manage')
-                || $user->hasRole('super-admin');
+        $showDashboard = Route::has('dashboard') && \App\Support\PermissionCheck::can($user, 'dashboards.index');
+        if (class_exists(\Modules\Grades\Services\GradeAccess::class)) {
+            try {
+                $showGrades = \Modules\Grades\Services\GradeAccess::canEnter($user);
+            } catch (\Throwable) {
+                $showGrades = false;
+            }
         }
-        // Super-admin luôn thấy (kể cả khi permission chưa sync)
-        if ($user->isSuperAdmin() || $user->hasRole('super-admin')) {
-            $showGrades = true;
+    }
+    if ($user && \App\Support\PermissionCheck::can($user, 'lms.index')) {
+        $entryRoute = class_exists(\Modules\Lms\Support\LmsAccess::class)
+            ? \Modules\Lms\Support\LmsAccess::entryRouteName($user)
+            : null;
+        if ($entryRoute && Route::has($entryRoute)) {
+            $lmsUrl = route($entryRoute);
+        } elseif (Route::has('lms.entry')) {
+            $lmsUrl = route('lms.entry');
+        } elseif (Route::has('lms.hub')) {
+            $lmsUrl = route('lms.hub');
+        } elseif (Route::has('lms.learn.home')) {
+            $lmsUrl = route('lms.learn.home');
         }
     }
     $compact = $compact ?? false;
@@ -25,7 +33,7 @@
 
 @if($user)
 <nav class="portal-switcher flex flex-wrap items-center gap-1.5 {{ $compact ? '' : 'mb-4' }}" aria-label="Chuyển cổng ứng dụng">
-    @if(Route::has('dashboard') && ($user->can('dashboards.index') || $user->isSuperAdmin()))
+    @if($showDashboard)
         <a href="{{ route('dashboard') }}"
            class="portal-chip portal-chip-dash {{ request()->routeIs('dashboard*') ? 'is-active' : '' }}"
            data-turbo="false">
@@ -34,11 +42,7 @@
         </a>
     @endif
 
-    @if(Route::has('lms.entry') || Route::has('lms.hub') || Route::has('lms.learn.home'))
-        @php
-            $lmsUrl = Route::has('lms.entry') ? route('lms.entry')
-                : (Route::has('lms.hub') ? route('lms.hub') : route('lms.learn.home'));
-        @endphp
+    @if($lmsUrl)
         <a href="{{ $lmsUrl }}"
            class="portal-chip portal-chip-lms {{ request()->routeIs('lms.*') ? 'is-active' : '' }}"
            data-turbo="false">

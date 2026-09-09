@@ -344,7 +344,7 @@ class DigitalSignatureService
     }
 
     /**
-     * Chữ ký user được phép quản lý (owned + super-admin xem all owned by self).
+     * Chữ ký thuộc đúng tài khoản đang đăng nhập.
      *
      * @return Collection<int, DigitalSignature>
      */
@@ -354,15 +354,7 @@ class DigitalSignatureService
         $this->claimMatchingTemplates($user);
 
         return DigitalSignature::query()
-            ->where(function ($q) use ($user) {
-                $q->where('user_id', $user->id);
-                if ($user->isSuperAdmin()) {
-                    // Super-admin cũng thấy mẫu chưa claim để gán
-                    $q->orWhere(function ($q2) {
-                        $q2->where('is_system_template', true);
-                    });
-                }
-            })
+            ->where('user_id', $user->id)
             ->orderBy('sort_order')
             ->orderBy('id')
             ->get();

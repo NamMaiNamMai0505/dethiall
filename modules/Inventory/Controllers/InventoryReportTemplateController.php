@@ -51,21 +51,26 @@ class InventoryReportTemplateController extends ModuleBaseController
     private function resolveTemplate(Request $request, string $defaultFilename, string $type): array
     {
         if ($this->hasUploadedTemplate($request)) {
-            $template = InventoryReportTemplate::whereKey($request->integer('template_id'))->where('active', true)->where('report_type', $type)->first();
-            abort_unless($template, 404, 'Không tìm thấy mẫu báo cáo đã chọn.');
-            $path = $template->absolutePath();
-            abort_unless($path && is_file($path), 404, 'File mẫu báo cáo đã chọn không tồn tại.');
-            abort_unless(strtolower(pathinfo($path, PATHINFO_EXTENSION)) === 'docx', 422, 'Mẫu báo cáo Word phải là file .docx.');
+            $template = InventoryReportTemplate::whereKey($request->integer('template_id'))->where('active', true)->first();
+            $path = $template?->absolutePath();
+            if ($template && $template->report_type === $type && $path && is_file($path)) {
+                abort_unless(strtolower(pathinfo($path, PATHINFO_EXTENSION)) === 'docx', 422, 'Mẫu báo cáo Word phải là file .docx.');
 
-            return [$path, $template->downloadName()];
+                return [$path, $template->versionedDownloadName()];
+            }
         }
 
         $custom = InventoryReportTemplate::where('report_type', $type)->where('active', true)->latest()->first();
         if ($custom) {
             $path = $custom->absolutePath();
             if ($path && is_file($path)) {
-                return [$path, $custom->downloadName()];
+                return [$path, $custom->versionedDownloadName()];
             }
+        }
+
+        $defaultPath = resource_path('inventory-report-templates/'.$defaultFilename);
+        if (is_file($defaultPath)) {
+            return [$defaultPath, $defaultFilename];
         }
 
         abort(404, 'Chưa có mẫu báo cáo Word đang dùng cho loại báo cáo này.');
@@ -160,6 +165,7 @@ class InventoryReportTemplateController extends ModuleBaseController
         $safeCode = preg_replace('/[^A-Za-z0-9_-]+/', '-', $template->code ?: 'mau-bao-cao-vat-tu');
         $output = storage_path('app/'.$safeCode.'-'.now()->format('YmdHis').'.docx');
         $processor->saveAs($output);
+        $this->applyRequestedPaperSizeToDocx($request, $output);
 
         return response()->download($output, $safeCode.'.docx')->deleteFileAfterSend(true);
     }
@@ -286,6 +292,7 @@ class InventoryReportTemplateController extends ModuleBaseController
             $this->removeEmptyRepairSection($xpath, $assets->whereIn('status', ['BROKEN', 'REPAIRING'])->values());
         }
         $this->replaceScalarTemplateValues($xpath, $request, $type);
+        $this->applyRequestedPaperSize($xml, $xpath, $request, 'landscape');
         $documentXml = $xml->saveXML();
         $zip->close();
         return $this->writeReportZip($template, $documentXml, $filename);
@@ -585,7 +592,7 @@ class InventoryReportTemplateController extends ModuleBaseController
         $fixedWidths = $this->positionFixedColumnWidths($fixedColumns);
         $unitColumnWidth = $this->positionUnitColumnWidth($unitColumns->count(), $fixedColumns);
         $tableWidth = array_sum($fixedWidths) + ($unitColumnWidth * $unitColumns->count());
-        $this->setDocumentLandscapeWidth($xml, $xpath, $tableWidth + 1800);
+        $this->setDocumentLandscapeWidth($xml, $xpath, $request, $tableWidth + 1800);
         $this->setTableFixedWidth($xml, $xpath, $table, $tableWidth);
         $this->setUnitHeaderGroupSpan($xml, $xpath, $rows->item(0), $fixedColumns, $unitColumns->count());
         $this->resizeRowCells($xml, $xpath, $rows->item(1), $fixedColumns + $unitColumns->count());
@@ -622,7 +629,7 @@ class InventoryReportTemplateController extends ModuleBaseController
                 $typeNo++;
                 $typeCategory = $typeAssets->first()?->material?->category;
                 $this->setTemplateRow($xml, $categoryTemplate->cloneNode(true), array_merge($this->positionRowValues($fixedColumns, [$typeCategory?->code, $materialTypeName, null, null, $typeAssets->sum('quantity')]), $this->unitQuantities($typeAssets, $unitColumns)), $table);
-                $materials = $typeAssets->groupBy(fn ($asset) => $asset->material_id ?: $asset->asset_code ?: $asset->name);
+                $materials = $typeAssets->groupBy(fn ($asset) => ($asset->material_id ?: $asset->asset_code ?: $asset->name).'|grade:'.($asset->grade ?: ''));
                 foreach ($materials as $materialAssets) {
                     $first = $materialAssets->first();
                     $total = $materialAssets->sum('quantity');
@@ -681,6 +688,7 @@ class InventoryReportTemplateController extends ModuleBaseController
         $this->replaceReportDate($xpath, $request);
         $this->replaceUnitReportTitle($xpath, $request);
         $this->replaceScalarTemplateValues($xpath, $request, $type);
+        $this->applyRequestedPaperSize($xml, $xpath, $request, 'landscape');
         $documentXml = $xml->saveXML();
         $zip->close();
 
@@ -958,10 +966,17 @@ class InventoryReportTemplateController extends ModuleBaseController
         }
     }
 
-    private function setDocumentLandscapeWidth(\DOMDocument $xml, \DOMXPath $xpath, int $contentWidth): void
+    private function setDocumentLandscapeWidth(\DOMDocument $xml, \DOMXPath $xpath, Request $request, int $contentWidth): void
     {
-        $pageWidth = max(23811, $contentWidth);
-        $pageHeight = 16838;
+        $requestedSize = $this->requestedPaperSize($request);
+        if ($requestedSize) {
+            $dimensions = $this->paperDimensions($requestedSize);
+            $orientation = $this->requestedPaperOrientation($request) ?: 'landscape';
+            [$pageWidth, $pageHeight] = $this->orientedPaperDimensions($dimensions, $orientation);
+        } else {
+            $pageWidth = max(23811, $contentWidth);
+            $pageHeight = 16838;
+        }
 
         foreach ($xpath->query('//w:sectPr') as $sectionProperties) {
             $pageSize = $xpath->query('./w:pgSz', $sectionProperties)->item(0);
@@ -972,8 +987,90 @@ class InventoryReportTemplateController extends ModuleBaseController
 
             $pageSize->setAttribute('w:w', (string) $pageWidth);
             $pageSize->setAttribute('w:h', (string) $pageHeight);
-            $pageSize->setAttribute('w:orient', 'landscape');
+            if ($pageWidth > $pageHeight) {
+                $pageSize->setAttribute('w:orient', 'landscape');
+            } else {
+                $pageSize->removeAttribute('w:orient');
+            }
         }
+    }
+
+    private function applyRequestedPaperSize(\DOMDocument $xml, \DOMXPath $xpath, Request $request, string $defaultOrientation = 'portrait'): void
+    {
+        $requestedSize = $this->requestedPaperSize($request);
+        if (!$requestedSize) return;
+
+        $orientation = $this->requestedPaperOrientation($request) ?: $defaultOrientation;
+        [$pageWidth, $pageHeight] = $this->orientedPaperDimensions($this->paperDimensions($requestedSize), $orientation);
+
+        foreach ($xpath->query('//w:sectPr') as $sectionProperties) {
+            $pageSize = $xpath->query('./w:pgSz', $sectionProperties)->item(0);
+            if (!$pageSize) {
+                $pageSize = $xml->createElement('w:pgSz');
+                $sectionProperties->insertBefore($pageSize, $sectionProperties->firstChild);
+            }
+
+            $pageSize->setAttribute('w:w', (string) $pageWidth);
+            $pageSize->setAttribute('w:h', (string) $pageHeight);
+            if ($orientation === 'landscape') {
+                $pageSize->setAttribute('w:orient', 'landscape');
+            } else {
+                $pageSize->removeAttribute('w:orient');
+            }
+        }
+    }
+
+    private function applyRequestedPaperSizeToDocx(Request $request, string $path): void
+    {
+        $requestedSize = $this->requestedPaperSize($request);
+        if (!$requestedSize) return;
+
+        $zip = new \ZipArchive();
+        if ($zip->open($path) !== true) return;
+
+        $documentXml = $zip->getFromName('word/document.xml');
+        if (!$documentXml) {
+            $zip->close();
+            return;
+        }
+
+        $xml = new \DOMDocument();
+        $xml->loadXML($documentXml);
+        $xpath = new \DOMXPath($xml);
+        $xpath->registerNamespace('w', 'http://schemas.openxmlformats.org/wordprocessingml/2006/main');
+        $this->applyRequestedPaperSize($xml, $xpath, $request);
+        $zip->addFromString('word/document.xml', $xml->saveXML());
+        $zip->close();
+    }
+
+    private function requestedPaperSize(Request $request): ?string
+    {
+        $size = strtoupper((string) $request->input('paper_size', 'auto'));
+
+        return in_array($size, ['A4', 'A3', 'A2'], true) ? $size : null;
+    }
+
+    private function requestedPaperOrientation(Request $request): ?string
+    {
+        $orientation = strtolower((string) $request->input('paper_orientation', 'auto'));
+
+        return in_array($orientation, ['portrait', 'landscape'], true) ? $orientation : null;
+    }
+
+    private function paperDimensions(string $paperSize): array
+    {
+        return match ($paperSize) {
+            'A2' => [23811, 33676],
+            'A3' => [16838, 23811],
+            default => [11906, 16838],
+        };
+    }
+
+    private function orientedPaperDimensions(array $dimensions, string $orientation): array
+    {
+        [$shortSide, $longSide] = $dimensions;
+
+        return $orientation === 'landscape' ? [$longSide, $shortSide] : [$shortSide, $longSide];
     }
 
     private function setTableFixedWidth(\DOMDocument $xml, \DOMXPath $xpath, \DOMNode $table, int $width): void

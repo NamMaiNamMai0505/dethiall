@@ -63,12 +63,12 @@
                         Cài đặt
                     </a>
                 @endif
-                @if(Route::has('lms.learn.home'))
+                @if(\App\Support\PermissionCheck::can(auth()->user(), 'lms.index') && Route::has('lms.learn.home'))
                     <a href="{{ route('lms.learn.home') }}" data-turbo="false">← LMS</a>
-                @elseif(Route::has('lms.entry'))
+                @elseif(\App\Support\PermissionCheck::can(auth()->user(), 'lms.index') && Route::has('lms.entry'))
                     <a href="{{ route('lms.entry') }}" data-turbo="false">← LMS</a>
                 @endif
-                @if(Route::has('dashboard'))
+                @if(Route::has('dashboard') && \App\Support\PermissionCheck::can(auth()->user(), 'dashboards.index'))
                     <a href="{{ route('dashboard') }}" data-turbo="false">Dashboard</a>
                 @endif
 

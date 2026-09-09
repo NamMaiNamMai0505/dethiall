@@ -16,44 +16,32 @@
         $gradesRoute = null;
         $inventoryRoute = null;
         $leaveRoute = null;
+        $canUse = fn (string $permission): bool => \App\Support\PermissionCheck::can(Auth::user(), $permission);
         if (auth()->check()) {
             $u = Auth::user();
-            // Học viên: chỉ LMS (không Dashboard / không Quản lý điểm)
-            if ($u->isStudent()) {
+            // Chỉ gán route khi user có quyền vào route tương ứng, tránh hiện nút dẫn tới 403.
+            if ($u->isStudent() && $canUse('lms.index') && Route::has('lms.learn.home')) {
                 $lmsRoute = route('lms.learn.home');
-            } else {
-                if ($u->isInstructor()) {
+            } elseif (! $u->isStudent()) {
+                if ($u->isInstructor() && Route::has('standard-hours.my-results.index') && $canUse('standard-hours.declarations.index')) {
                     // Dashboard: kê khai giờ chuẩn; lịch dạy nằm trong LMS
-                    $dashboardRoute = Route::has('standard-hours.my-results.index')
-                        ? route('standard-hours.my-results.index')
-                        : route('dashboard');
-                } else {
+                    $dashboardRoute = route('standard-hours.my-results.index');
+                } elseif (Route::has('dashboard') && $canUse('dashboards.index')) {
                     $dashboardRoute = route('dashboard');
                 }
-                if ($u->can('lms.index') || $u->can('lms.learn') || $u->can('lms.edit')) {
-                    $lmsRoute = \Modules\Lms\Support\LmsAccess::entryUrl($u);
+                if ($canUse('lms.index') && class_exists(\Modules\Lms\Support\LmsAccess::class)) {
+                    $entryRoute = \Modules\Lms\Support\LmsAccess::entryRouteName($u);
+                    if (Route::has($entryRoute)) {
+                        $lmsRoute = route($entryRoute);
+                    }
                 }
-                // Quản lý điểm: GV / Manager / Super-admin (và user có grades.*)
-                // Super-admin / admin luôn thấy nút (không phụ thuộc sync permission).
-                $canGrades = $u->isSuperAdmin()
-                    || $u->hasRole('super-admin')
-                    || $u->isManager()
-                    || $u->isInstructor()
-                    || $u->can('grades.index')
-                    || $u->can('grades.manage');
-                if (! $canGrades && method_exists($u, 'canAccessGrades')) {
-                    $canGrades = $u->canAccessGrades();
-                }
-                if (! $canGrades && class_exists(\Modules\Grades\Services\GradeAccess::class)) {
+                $canGrades = false;
+                if (class_exists(\Modules\Grades\Services\GradeAccess::class)) {
                     try {
                         $canGrades = \Modules\Grades\Services\GradeAccess::canEnter($u);
                     } catch (\Throwable) {
                         $canGrades = false;
                     }
-                }
-                // User vào được admin dashboard ⇒ cho vào portal điểm (trừ student đã lọc trên)
-                if (! $canGrades && $u->can('dashboards.index')) {
-                    $canGrades = true;
                 }
                 if ($canGrades && Route::has('grades.hub')) {
                     $gradesRoute = route('grades.hub');
@@ -61,7 +49,7 @@
                 if (($u->isSuperAdmin() || \App\Support\PermissionCheck::can($u, 'inventory.access.index')) && Route::has('inventory.portal')) {
                     $inventoryRoute = route('inventory.portal');
                 }
-                if (($u->isSuperAdmin() || $u->can('leave-management.index') || $u->can('leave-management.access.index')) && Route::has('leave-management.portal')) {
+                if (($canUse('leave-management.index') || $canUse('leave-management.access.index')) && Route::has('leave-management.portal')) {
                     $leaveRoute = route('leave-management.portal');
                 }
             }
@@ -920,12 +908,6 @@
                                 Quản lý điểm
                             </a>
                         @endif
-                        @if($inventoryRoute)
-                            <a href="{{ $inventoryRoute }}" class="btn-solid btn-inventory-home portal-action" data-turbo="false">
-                                <span class="portal-action-icon" aria-hidden="true"><svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5v-9Zm0 0 8 4.5 8-4.5M12 12v9M8 5.25l8 4.5"/></svg></span>
-                                <span class="portal-action-copy"><strong>Quản lý vật tư</strong><small>Kho · tài sản · đề xuất</small></span>
-                            </a>
-                        @endif
                         @if($leaveRoute)
                             <a href="{{ $leaveRoute }}" class="btn-solid btn-leave-home portal-action" data-turbo="false">
                                 <span class="portal-action-icon" aria-hidden="true"><svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M7 3h10v18H7zM9.5 7h5M9.5 11h5M9.5 15h3M9 3v-1h6v1"/></svg></span>
@@ -1015,12 +997,6 @@
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                                 </svg>
                                 Quản lý điểm
-                            </a>
-                        @endif
-                        @if($inventoryRoute)
-                            <a href="{{ $inventoryRoute }}" class="btn-solid btn-hero btn-inventory-home portal-action" data-turbo="false">
-                                <span class="portal-action-icon" aria-hidden="true"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5v-9Zm0 0 8 4.5 8-4.5M12 12v9M8 5.25l8 4.5"/></svg></span>
-                                <span class="portal-action-copy"><strong>Vào Quản lý vật tư</strong><small>Kho · tài sản · điều động</small></span>
                             </a>
                         @endif
                         @if($leaveRoute)

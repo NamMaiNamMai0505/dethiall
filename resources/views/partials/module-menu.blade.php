@@ -9,7 +9,6 @@
                 ['label' => 'Tổng quan', 'items' => [
                     ['label' => 'Tổng quan', 'route' => 'inventory.index', 'icon' => 'bi-grid-1x2'],
                     ['label' => 'Tìm kiếm', 'route' => 'inventory.search', 'icon' => 'bi-search'],
-                    ['label' => 'Vật tư của tôi', 'route' => 'inventory.my-catalog', 'icon' => 'bi-person-badge'],
                 ]],
                 ['label' => 'Danh mục & kho', 'items' => [
                     ['label' => 'Tòa nhà', 'route' => 'inventory.buildings', 'icon' => 'bi-building'],
@@ -98,7 +97,23 @@
         }, $config['groups']);
     }
     $routePermissions = [
-        'inventory.' => 'inventory.index',
+        'inventory.index' => 'inventory.access.index',
+        'inventory.search' => 'inventory.search.index',
+        'inventory.buildings' => 'inventory.locations.index',
+        'inventory.classrooms' => 'inventory.locations.index',
+        'inventory.category' => 'inventory.categories.index',
+        'inventory.types' => 'inventory.categories.index',
+        'inventory.materials' => 'inventory.materials.index',
+        'inventory.warehouse' => 'inventory.warehouses.index',
+        'inventory.assets' => 'inventory.assets.index',
+        'inventory.proposals' => 'inventory.proposals.index',
+        'inventory.proposals.approval' => 'inventory.proposals.approve',
+        'inventory.repairs' => 'inventory.repairs.index',
+        'inventory.transfers' => 'inventory.transfers.index',
+        'inventory.logs' => 'inventory.logs.index',
+        'inventory.reports' => 'inventory.reports.index',
+        'inventory.movement-report' => 'inventory.reports.index',
+        'inventory.templates' => 'inventory.templates.index',
         'leave-management.index' => 'leave-management.index',
         'leave-management.personnel' => 'leave-management.personnel.index',
         'leave-management.requests' => ['leave-management.requests.index', 'leave-management.requests.create', 'leave-management.create'],
@@ -132,7 +147,7 @@
                 if ($route === $item['route'] || (str_ends_with($route, '.') && str_starts_with($item['route'], $route))) { $permission = $required; break; }
             }
             $permissions = is_array($permission) ? $permission : [$permission];
-            return $permission === null || collect($permissions)->contains(fn ($item) => auth()->user()?->can($item));
+            return $permission === null || collect($permissions)->contains(fn ($permission) => \App\Support\PermissionCheck::can(auth()->user(), $permission));
         }));
         return $group;
     }, $config['groups']), fn (array $group): bool => count($group['items']) > 0));

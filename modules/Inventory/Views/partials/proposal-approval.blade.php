@@ -1,7 +1,21 @@
+@php
+    $canPrintProposals = \App\Support\PermissionCheck::userCan('inventory.proposals.export');
+    $digitalSignature = auth()->id()
+        ? \App\Models\DigitalSignature::query()
+            ->active()
+            ->forUser((int) auth()->id())
+            ->orderByDesc('is_default')
+            ->orderBy('sort_order')
+            ->orderByDesc('id')
+            ->first()
+        : null;
+    $hasDigitalSignature = (bool) ($digitalSignature?->imageUrl());
+@endphp
+
 <div class="space-y-4">
     <div class="rounded-xl border border-indigo-100 bg-indigo-50 p-5">
-        <h2 class="text-xl font-bold text-slate-900">Duyệt đề xuất</h2>
-        <p class="mt-1 text-sm text-slate-600">Danh sách các đề xuất đang chờ duyệt và đã được duyệt.</p>
+        <h2 class="text-xl font-bold text-slate-900">Duyệt đề xuất thanh lý</h2>
+        <p class="mt-1 text-sm text-slate-600">Danh sách các đề xuất thanh lý đang chờ duyệt và đã được duyệt.</p>
     </div>
     <div class="overflow-x-auto rounded-xl border bg-white shadow-sm">
         <table class="w-full min-w-[1100px] text-left text-sm">
@@ -11,7 +25,7 @@
                 @php($item = $proposal->items->first())
                 <tr class="border-t align-top">
                     <td class="p-3">{{ $i + 1 }}</td>
-                    <td class="p-3">{{ ['REPAIR'=>'Sửa chữa','RECALL'=>'Thu hồi / trả về kho','LIQUIDATION'=>'Thanh lý'][$proposal->type] ?? $proposal->type }}</td>
+                    <td class="p-3">Thanh lý</td>
                     <td class="p-3 font-semibold">{{ $proposal->title }}<div class="mt-1 text-xs text-slate-500">{{ $proposal->description ?: '—' }}</div></td>
                     <td class="p-3">{{ $proposal->nganh_code ?: '—' }}</td>
                     <td class="p-3">{{ $item?->material_code ?: $item?->original_code ?: '—' }} — {{ $item?->material_name ?: $item?->name ?: '—' }}<div class="text-xs text-slate-500">Số lượng: {{ (int)($item?->quantity ?? 0) }}</div></td>
@@ -20,14 +34,50 @@
                     <td class="p-3">
                         <a href="{{ route('inventory.proposals.detail',$proposal) }}" class="mb-2 inline-block rounded border border-slate-300 px-3 py-2 text-sm text-blue-700">Xem chi tiết</a>
                         @if($proposal->status === 'PENDING')
-                            <div class="flex min-w-max flex-nowrap items-center gap-2 whitespace-nowrap"><form method="POST" action="{{ route('inventory.proposals.decide',$proposal) }}" class="inline-flex shrink-0">@csrf @method('PATCH')<button name="status" value="APPROVED" class="whitespace-nowrap rounded bg-emerald-600 px-3 py-2 font-semibold text-white">Duyệt</button></form><form method="POST" action="{{ route('inventory.proposals.decide',$proposal) }}" class="inline-flex shrink-0 items-center gap-2">@csrf @method('PATCH')<textarea name="decision_note" required minlength="3" rows="1" class="w-32 resize-none rounded border p-2 text-sm" placeholder="Lý do từ chối..."></textarea><button name="status" value="REJECTED" class="whitespace-nowrap rounded bg-rose-600 px-3 py-2 font-semibold text-white">Từ chối</button></form></div>
+                            <div class="flex min-w-[460px] flex-nowrap items-center gap-2 whitespace-nowrap">
+                                @if($canPrintProposals)
+                                    <form method="POST" action="{{ route('inventory.proposals.print',$proposal) }}" target="_blank" class="inline-flex shrink-0">
+                                        @csrf
+                                        <input type="hidden" name="print_mode" value="preview">
+                                        <button class="rounded bg-slate-900 px-3 py-2 font-semibold text-white">In xem trước</button>
+                                    </form>
+                                @endif
+                                @if($proposal->printed_at)
+                                    <form method="POST" action="{{ route('inventory.proposals.decide',$proposal) }}" class="inline-flex shrink-0">
+                                        @csrf @method('PATCH')
+                                        <button name="status" value="APPROVED" class="whitespace-nowrap rounded bg-emerald-600 px-3 py-2 font-semibold text-white">Duyệt</button>
+                                    </form>
+                                @else
+                                    <span class="text-sm text-amber-700">Chờ in phiếu</span>
+                                @endif
+                                <form method="POST" action="{{ route('inventory.proposals.decide',$proposal) }}" class="inline-flex min-w-0 flex-1 items-center gap-2">
+                                    @csrf @method('PATCH')
+                                    <input name="decision_note" required minlength="3" class="min-w-[150px] flex-1 rounded border p-2 text-sm" placeholder="Lý do từ chối">
+                                    <button name="status" value="REJECTED" class="whitespace-nowrap rounded bg-rose-600 px-3 py-2 font-semibold text-white">Từ chối</button>
+                                </form>
+                            </div>
                         @elseif($proposal->status === 'APPROVED')
-                            <form method="POST" action="{{ route('inventory.proposals.decide',$proposal) }}">@csrf @method('PATCH')<button name="status" value="COMPLETED" class="rounded bg-blue-600 px-3 py-2 font-semibold text-white">Hoàn thành</button></form>
+                            <div class="flex min-w-max flex-nowrap items-center gap-2 whitespace-nowrap">
+                                @if($canPrintProposals && $hasDigitalSignature)
+                                    <form method="POST" action="{{ route('inventory.proposals.print',$proposal) }}" target="_blank" class="inline-flex shrink-0">
+                                        @csrf
+                                        <input type="hidden" name="print_mode" value="digital">
+                                        <button class="rounded bg-blue-600 px-3 py-2 font-semibold text-white">In chữ ký số</button>
+                                    </form>
+                                @elseif($canPrintProposals)
+                                    <a href="{{ route('inventory.proposals.detail',$proposal) }}" class="rounded border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700">Ký / in</a>
+                                @endif
+                                @if($proposal->printed_at)
+                                    <form method="POST" action="{{ route('inventory.proposals.decide', $proposal) }}">@csrf @method('PATCH')<button name="status" value="COMPLETED" class="rounded bg-indigo-600 px-3 py-2 font-semibold text-white">Hoàn thành</button></form>
+                                @else
+                                    <span class="text-sm text-amber-700">Chờ in phiếu</span>
+                                @endif
+                            </div>
                         @else <span class="text-slate-500">Đã xử lý</span> @endif
                     </td>
                 </tr>
             @empty
-                <tr><td colspan="8" class="p-8 text-center text-slate-500">Không có đề xuất cần duyệt.</td></tr>
+                <tr><td colspan="8" class="p-8 text-center text-slate-500">Không có đề xuất thanh lý cần duyệt.</td></tr>
             @endforelse
             </tbody>
         </table>
@@ -35,8 +85,8 @@
 </div>
 <div class="space-y-4">
     <div class="rounded-xl border border-amber-100 bg-amber-50 p-5">
-        <h2 class="text-xl font-bold text-slate-900">Đề xuất điều động / thu hồi</h2>
-        <p class="mt-1 text-sm text-slate-600">Các phiếu điều động và thu hồi cũng được duyệt trong quy trình đề xuất.</p>
+        <h2 class="text-xl font-bold text-slate-900">Điều động / thu hồi</h2>
+        <p class="mt-1 text-sm text-slate-600">Các phiếu điều động và thu hồi được duyệt theo quy trình riêng.</p>
     </div>
     <div class="overflow-x-auto rounded-xl border bg-white shadow-sm">
         <table class="w-full min-w-[1100px] text-left text-sm">

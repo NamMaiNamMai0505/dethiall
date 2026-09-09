@@ -11,13 +11,15 @@
         <a href="{{ route('export-templates.index', $k ? ['scope'=>$k] : []) }}"
            class="px-3 py-1.5 rounded-lg border {{ ($scope??'')===$k || ($k==='' && empty($scope)) ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-700' }}">{{ $lab }}</a>
     @endforeach
-    @if(Route::has('grades.hub'))
+    @if(Route::has('grades.hub') && class_exists(\Modules\Grades\Services\GradeAccess::class) && \Modules\Grades\Services\GradeAccess::canEnter(auth()->user()))
         <a href="{{ route('grades.hub') }}" class="px-3 py-1.5 rounded-lg border border-orange-200 text-orange-800 bg-orange-50" data-turbo="false">→ Quản lý điểm</a>
     @endif
-    @if(Route::has('lms.hub'))
+    @if(Route::has('lms.hub') && \App\Support\PermissionCheck::can(auth()->user(), 'lms.index'))
         <a href="{{ route('lms.hub') }}" class="px-3 py-1.5 rounded-lg border border-teal-200 text-teal-800 bg-teal-50" data-turbo="false">→ LMS</a>
     @endif
-    <a href="{{ route('dashboard') }}" class="px-3 py-1.5 rounded-lg border bg-white">→ Dashboard</a>
+    @if(Route::has('dashboard') && \App\Support\PermissionCheck::can(auth()->user(), 'dashboards.index'))
+        <a href="{{ route('dashboard') }}" class="px-3 py-1.5 rounded-lg border bg-white">→ Dashboard</a>
+    @endif
 </div>
 
 <div class="bg-white rounded-lg shadow border overflow-hidden">

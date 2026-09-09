@@ -14,9 +14,9 @@
     <div class="bg-white rounded-lg border p-5 text-sm">
         <h3 class="font-semibold mb-2">Placeholders phát hiện</h3>
         @forelse($template->placeholders ?? [] as $ph)
-            <code class="inline-block bg-teal-50 text-teal-900 px-2 py-0.5 rounded mr-1 mb-1">{{'{{'.$ph.'}}'}}</code>
+            <code class="inline-block bg-teal-50 text-teal-900 px-2 py-0.5 rounded mr-1 mb-1">{{ '{' . '{' . $ph . '}' . '}' }}</code>
         @empty
-            <p class="text-slate-500">Không có <code>{{'{{var}}'}}</code> trong file — dùng gợi ý nhãn bên dưới.</p>
+            <p class="text-slate-500">Không có <code>@{{var}}</code> trong file — dùng gợi ý nhãn bên dưới.</p>
         @endforelse
         <h3 class="font-semibold mt-4 mb-2">Gợi ý nhãn (AI light)</h3>
         <ul class="space-y-1 max-h-64 overflow-y-auto text-xs">

@@ -224,7 +224,7 @@
             @if(auth()->check() && auth()->user()->can('exam-organization.view'))
                 <li><a href="{{ route('exam-organization.index') }}" class="sidebar-tooltip flex items-center px-4 py-2 text-sm hover:bg-gray-700 {{ request()->routeIs('exam-organization.*') ? 'bg-blue-600' : '' }}" data-tooltip="Tổ chức thi"><i class="bi bi-calendar2-check mr-3 flex-shrink-0"></i><span class="sidebar-text">Tổ chức thi</span></a></li>
             @endif
-            @if(auth()->check() && auth()->user()->can('inventory.index'))
+            @if(auth()->check() && \App\Support\PermissionCheck::can(auth()->user(), 'inventory.access.index'))
                 <li><a href="{{ route('inventory.index') }}" class="sidebar-tooltip flex items-center px-4 py-2 text-sm hover:bg-gray-700 {{ request()->routeIs('inventory.*') ? 'bg-blue-600' : '' }}" data-tooltip="Quản lý vật tư"><i class="bi bi-box-seam mr-3 flex-shrink-0"></i><span class="sidebar-text">Quản lý vật tư</span></a></li>
             @endif
             @if(auth()->check() && auth()->user()->can('leave-management.index'))

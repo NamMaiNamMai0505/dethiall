@@ -11,7 +11,7 @@
 
     <x-page-header
         title="CHỮ KÝ SỐ"
-        subtitle="Upload & quản lý chữ ký ảnh. 3 mẫu LHL (HK2) tự gán khi tên tài khoản khớp."
+        subtitle="Upload và quản lý chữ ký của tài khoản đang đăng nhập."
     />
 
     @if(session('success'))
@@ -30,14 +30,6 @@
                 <i class="bi bi-person-check mr-2"></i> Nhận chữ ký mẫu khớp tên
             </button>
         </form>
-        @if($user->isSuperAdmin())
-            <form method="POST" action="{{ route('signatures.admin-claim-all') }}">
-                @csrf
-                <button type="submit" class="inline-flex items-center px-4 py-2 rounded-lg bg-slate-700 text-white text-sm font-semibold hover:bg-slate-800">
-                    <i class="bi bi-people mr-2"></i> Admin: seed + claim tất cả user
-                </button>
-            </form>
-        @endif
     </div>
     <div class="mb-5 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
         Giấy nghỉ phép sẽ tự lấy chữ ký theo vị trí sử dụng: Đơn vị đề nghị dùng chữ ký chỉ huy/đơn vị gửi đề nghị, Quân lực/Cơ quan cán bộ dùng ô ký 1, Ban giám hiệu dùng ô ký 2.
@@ -120,15 +112,6 @@
                                 {{ $sig->role_line1 }}
                                 @if($sig->role_line2) · {{ $sig->role_line2 }} @endif
                             </p>
-                            <p class="text-[11px] text-slate-400 mt-1">
-                                Chủ:
-                                @if($sig->user_id)
-                                    #{{ $sig->user_id }} {{ $sig->user?->name ?? '' }}
-                                @else
-                                    <em>Chưa gán (chờ claim theo tên)</em>
-                                @endif
-                            </p>
-
                             @if($sig->canManage($user))
                                 <form method="POST" action="{{ route('signatures.update', $sig) }}" enctype="multipart/form-data"
                                       class="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 border-t pt-3">
@@ -147,10 +130,6 @@
                                         @endforeach
                                     </select>
                                     <input type="file" name="image" accept="image/*" class="text-xs">
-                                    @if($user->isSuperAdmin())
-                                        <input type="number" name="user_id" value="{{ $sig->user_id }}"
-                                               class="border rounded-lg px-2 py-1.5 text-xs" placeholder="user_id gán (admin)">
-                                    @endif
                                     <label class="inline-flex items-center gap-1 text-xs">
                                         <input type="checkbox" name="is_active" value="1" @checked($sig->is_active)> Active
                                     </label>

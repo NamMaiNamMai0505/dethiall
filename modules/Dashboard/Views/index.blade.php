@@ -66,16 +66,16 @@
                 <i class="bi bi-calendar-week"></i><span>Lịch huấn luyện</span><i class="bi bi-arrow-right"></i>
             </a>
         @endif
-        @if(Route::has('lms.entry'))
+        @if(\App\Support\PermissionCheck::can(auth()->user(), 'lms.index') && Route::has('lms.entry'))
             <a href="{{ route('lms.entry') }}" data-turbo="false">
                 <i class="bi bi-mortarboard"></i><span>Cổng LMS</span><i class="bi bi-arrow-right"></i>
             </a>
-        @elseif(Route::has('lms.hub'))
+        @elseif(\App\Support\PermissionCheck::can(auth()->user(), 'lms.index') && Route::has('lms.hub'))
             <a href="{{ route('lms.hub') }}" data-turbo="false">
                 <i class="bi bi-mortarboard"></i><span>Cổng LMS</span><i class="bi bi-arrow-right"></i>
             </a>
         @endif
-        @if(Route::has('standard-hours.my-results.index') && (auth()->user()->can('standard-hours.view') || auth()->user()->can('standard-hours.index')))
+        @if(Route::has('standard-hours.my-results.index') && \App\Support\PermissionCheck::can(auth()->user(), 'standard-hours.declarations.index'))
             <a href="{{ route('standard-hours.my-results.index') }}">
                 <i class="bi bi-hourglass-split"></i><span>Giờ chuẩn GV</span><i class="bi bi-arrow-right"></i>
             </a>

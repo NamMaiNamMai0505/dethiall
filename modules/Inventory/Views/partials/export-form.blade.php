@@ -31,6 +31,15 @@
                 </select>
             </label>
 
+            <label class="text-sm font-semibold">Khổ giấy
+                <select name="paper_size" class="mt-1 block w-full rounded-lg border px-3 py-2.5">
+                    <option value="auto">Tự động / theo mẫu</option>
+                    <option value="A4">A4</option>
+                    <option value="A3">A3</option>
+                    <option value="A2">A2</option>
+                </select>
+            </label>
+
             <label class="text-sm font-semibold">Loại báo cáo
                 <select name="report_type" class="mt-1 block w-full rounded-lg border px-3 py-2.5">
                     <option value="summary">Thống kê thực lực hiện có</option>

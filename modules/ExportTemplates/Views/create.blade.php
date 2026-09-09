@@ -6,7 +6,7 @@
 
 <div class="bg-white rounded-lg shadow border p-6 max-w-2xl">
     <p class="text-sm text-slate-600 mb-4">
-        Tải file <strong>xlsx/docx</strong>. Hệ thống quét <code class="bg-slate-100 px-1 rounded">{{'{{bien}}'}}</code>
+        Tải file <strong>xlsx/docx</strong>. Hệ thống quét <code class="bg-slate-100 px-1 rounded">@{{bien}}</code>
         và nhãn tiếng Việt (Họ tên, 15 phút, Điểm thi…) để gợi ý map ô.
         Chọn <strong>phạm vi</strong> (Dashboard / LMS / Điểm / Chung) và <strong>feature_key</strong> để biết mẫu dùng chỗ nào.
     </p>
@@ -28,20 +28,24 @@
             </div>
             <div>
                 <label class="block text-sm font-medium mb-1">Feature key *</label>
-                @php($availableFeatures = $featureHints ?? ['lhl.training_plan', 'grades.score_sheet', 'grades.summary', 'grades.transcript'])
+                @php
+                    $availableFeatures = $featureHints ?? ['lhl.training_plan', 'grades.score_sheet', 'grades.summary', 'grades.transcript'];
+                @endphp
                 <select id="export-template-feature-key" name="feature_key" required
                         class="w-full border rounded-lg px-3 py-2 text-sm font-mono"
                         data-searchable="1" data-placeholder="Chọn feature key">
                     <option value="">-- Chọn feature --</option>
                     @foreach($availableFeatures as $feature)
-                        @php($featureLabel = match ($feature) {
+                        @php
+                            $featureLabel = match ($feature) {
                             'lhl.training_plan' => 'Lịch huấn luyện — Slot cố định 1–3 / 4–5 / 6–9',
                             'lhl.training_plan.grouped_periods' => 'Lịch huấn luyện — Chia nhóm tiết',
                             'grades.score_sheet' => 'Quản lý điểm — Bảng điểm',
                             'grades.summary' => 'Quản lý điểm — Bảng tổng hợp',
                             'grades.transcript' => 'Quản lý điểm — Phiếu điểm',
                             default => $feature,
-                        })
+                        };
+                        @endphp
                         <option value="{{ $feature }}" @selected(old('feature_key') === $feature)>{{ $featureLabel }} ({{ $feature }})</option>
                     @endforeach
                 </select>
