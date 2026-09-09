@@ -15,6 +15,7 @@
         @if($currentUserUnitId)
             <input type="hidden" name="unit_id" value="{{ $currentUserUnitId }}">
         @endif
+        <input type="hidden" name="type" value="LIQUIDATION">
         <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <div class="text-sm font-semibold text-slate-700">Loại đề xuất
                 <div class="mt-1 rounded-lg border bg-slate-50 p-2.5 text-slate-900">Thanh lý</div>
@@ -89,7 +90,6 @@ document.addEventListener('DOMContentLoaded', function () {
     const material = document.getElementById('proposal-material');
     const classroom = document.getElementById('proposal-classroom');
     const roomQuantity = document.getElementById('proposal-room-quantity');
-    const requestedQuantity = document.querySelector('[name="quantity"]');
     const add = document.getElementById('add-proposal-item');
     const preview = document.getElementById('proposal-item-preview');
     const body = document.getElementById('proposal-item-preview-body');
@@ -98,10 +98,6 @@ document.addEventListener('DOMContentLoaded', function () {
         if (!roomQuantity) return;
         const value = roomQuantityMap[(material?.value || '0') + '|' + (classroom?.value || '0')] || 0;
         roomQuantity.value = Number.isInteger(value) ? value : Number(value).toFixed(2);
-        if (requestedQuantity) {
-            requestedQuantity.max = value || '';
-            if (value && Number(requestedQuantity.value || 0) > Number(value)) requestedQuantity.value = value;
-        }
     };
     if (industry && type && material) {
         const typeOptions = [...type.options].slice(1).map(option => option.cloneNode(true));
@@ -162,7 +158,6 @@ document.addEventListener('DOMContentLoaded', function () {
         const types=@json($proposalTypesJson);
         const classroom=document.getElementById('proposal-classroom');
         const roomQuantity=document.getElementById('proposal-room-quantity');
-        const requestedQuantity=document.querySelector('[name="quantity"]');
         const roomQuantities=@json($proposalRoomQuantitiesJson);
         const materialRooms=@json(($assets ?? collect())->groupBy('material_id')->map(fn($items)=>$items->pluck('classroom_id')->filter()->unique()->values())->all());
         const materials=@json($proposalMaterialsJson);
@@ -171,7 +166,6 @@ document.addEventListener('DOMContentLoaded', function () {
             const key=String(material.tomselect?material.tomselect.getValue():material.value||0)+'|'+String(classroom?.value||0);
             const value=roomQuantities[key]||0;
             roomQuantity.value=Number.isInteger(value)?value:Number(value).toFixed(2);
-            if(requestedQuantity){requestedQuantity.max=value||'';if(value&&Number(requestedQuantity.value||0)>Number(value))requestedQuantity.value=value;}
         };
         const setOptions=(select,items,empty)=>{
             const current=select.value;
