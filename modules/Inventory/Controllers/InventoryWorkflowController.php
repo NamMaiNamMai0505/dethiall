@@ -3,14 +3,16 @@
 namespace Modules\Inventory\Controllers;
 
 use App\Http\Controllers\ModuleBaseController;
+use App\Models\DigitalSignature;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
+use Modules\ExportTemplates\Contracts\DocumentConverterInterface;
 use Modules\Building\Models\Building;
 use Modules\Classroom\Models\Classroom;
-use Modules\Inventory\Models\{InventoryAsset,InventoryAuditLog,InventoryBrokenLog,InventoryCategory,InventoryMaterial,InventoryMovement,InventoryProposal,InventoryRepair,InventoryReportTemplate,InventoryRoomImage,InventoryRoomUser,InventoryTransfer,InventoryUserCategory,InventoryWarehouse,InventoryWarehouseItem};
+use Modules\Inventory\Models\{InventoryAsset,InventoryAuditLog,InventoryBrokenLog,InventoryCategory,InventoryMaterial,InventoryMovement,InventoryProposal,InventoryRepair,InventoryReportTemplate,InventoryRoomBreakReport,InventoryRoomImage,InventoryRoomRepair,InventoryRoomUser,InventoryTransfer,InventoryUserCategory,InventoryWarehouse,InventoryWarehouseItem};
 
 class InventoryWorkflowController extends ModuleBaseController
 {
@@ -18,13 +20,61 @@ class InventoryWorkflowController extends ModuleBaseController
     private const INVENTORY_STATUS_FIXED_WIDTHS = [900, 3000, 430, 480, 720];
     private const INVENTORY_STATUS_TABLE_WIDTH = 15400;
 
-    public function category(Request $r){$isTypes=$r->routeIs('inventory.types');$categories=InventoryCategory::with('parent')->withCount('materials')->when($isTypes,fn($q)=>$q->whereNotNull('parent_id'),fn($q)=>$q->whereNull('parent_id'))->orderBy('code')->get();return view('inventory::feature',['section'=>'category','title'=>$isTypes?'Danh mục loại vật tư':'Danh mục ngành vật tư','categories'=>$categories,'parents'=>InventoryCategory::whereNull('parent_id')->orderBy('code')->get(),'isTypes'=>$isTypes,'users'=>\App\Models\User::where('status',1)->orderBy('name')->get()]);}
-    public function categoryShow(InventoryCategory $category){$category->load(['parent','children'=>fn($q)=>$q->withCount('materials')->orderBy('code'),'materials'=>fn($q)=>$q->with('category')->withCount(['assets','warehouseItems','proposalItems','transfers','movements'])]);return view('inventory::feature',['section'=>'category-detail','title'=>'Chi tiết '.$category->name,'category'=>$category,'isRoot'=>$category->parent_id===null]);}
+    private function assignedInventoryRoomIds($user = null): ?array
+    {
+        $user = $user ?: auth()->user();
+        if (! $user || $user->isSuperAdmin()) {
+            return null;
+        }
+
+        $roomIds = InventoryRoomUser::where('user_id', $user->id)->pluck('classroom_id')->map(fn($id) => (int) $id)->values()->all();
+
+        return $roomIds ?: null;
+    }
+
+    private function scopedMaterialIds(?array $roomIds): ?array
+    {
+        if ($roomIds === null) {
+            return null;
+        }
+
+        return InventoryAsset::whereIn('classroom_id', $roomIds)->whereNotNull('material_id')->distinct()->pluck('material_id')->map(fn($id) => (int) $id)->values()->all();
+    }
+
+    private function scopedCategoryIds(?array $materialIds): ?array
+    {
+        if ($materialIds === null) {
+            return null;
+        }
+
+        $typeIds = InventoryMaterial::whereIn('id', $materialIds)->whereNotNull('category_id')->distinct()->pluck('category_id')->map(fn($id) => (int) $id);
+        $industryIds = InventoryCategory::whereIn('id', $typeIds)->whereNotNull('parent_id')->distinct()->pluck('parent_id')->map(fn($id) => (int) $id);
+
+        return $typeIds->merge($industryIds)->unique()->values()->all();
+    }
+
+    private function scopedBuildingIds(?array $roomIds): ?array
+    {
+        if ($roomIds === null) {
+            return null;
+        }
+
+        return Classroom::whereIn('id', $roomIds)->whereNotNull('building_id')->distinct()->pluck('building_id')->map(fn($id) => (int) $id)->values()->all();
+    }
+
+    private function ensureInventoryRoomAllowed(Classroom $classroom): void
+    {
+        $roomIds = $this->assignedInventoryRoomIds();
+        abort_if($roomIds !== null && ! in_array((int) $classroom->id, $roomIds, true), 403, 'Tài khoản này không được gán phòng vật tư này.');
+    }
+
+    public function category(Request $r){$isTypes=$r->routeIs('inventory.types');$roomIds=$this->assignedInventoryRoomIds($r->user());$materialIds=$this->scopedMaterialIds($roomIds);$categoryIds=$this->scopedCategoryIds($materialIds);$categories=InventoryCategory::with('parent')->withCount(['materials'=>fn($q)=>$q->when($materialIds!==null,fn($x)=>$x->whereIn('id',$materialIds))])->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->when($isTypes,fn($q)=>$q->whereNotNull('parent_id'),fn($q)=>$q->whereNull('parent_id'))->orderBy('code')->get();return view('inventory::feature',['section'=>'category','title'=>$isTypes?'Danh mục loại vật tư':'Danh mục ngành vật tư','categories'=>$categories,'parents'=>InventoryCategory::whereNull('parent_id')->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get(),'isTypes'=>$isTypes,'users'=>\App\Models\User::where('status',1)->orderBy('name')->get()]);}
+    public function categoryShow(InventoryCategory $category){$roomIds=$this->assignedInventoryRoomIds();$materialIds=$this->scopedMaterialIds($roomIds);$categoryIds=$this->scopedCategoryIds($materialIds);abort_if($categoryIds!==null&&!in_array((int)$category->id,$categoryIds,true),403,'Tài khoản này không được gán ngành / loại vật tư này.');$category->load(['parent','children'=>fn($q)=>$q->when($categoryIds!==null,fn($x)=>$x->whereIn('id',$categoryIds))->withCount(['materials'=>fn($m)=>$m->when($materialIds!==null,fn($x)=>$x->whereIn('id',$materialIds))])->orderBy('code'),'materials'=>fn($q)=>$q->when($materialIds!==null,fn($x)=>$x->whereIn('id',$materialIds))->with('category')->withCount(['assets','warehouseItems','proposalItems','transfers','movements'])]);return view('inventory::feature',['section'=>'category-detail','title'=>'Chi tiết '.$category->name,'category'=>$category,'isRoot'=>$category->parent_id===null]);}
     public function categoryStore(Request $r){$d=$r->validate(['parent_id'=>'nullable|exists:inventory_categories,id','code'=>'nullable|string|max:50|unique:inventory_categories,code','name'=>'required|string|max:255','description'=>'nullable|string']);if(!empty($d['parent_id'])){$parent=InventoryCategory::findOrFail($d['parent_id']);$prefix=$parent->code;$next=InventoryCategory::where('parent_id',$parent->id)->get()->map(fn($x)=>(int) substr($x->code,strlen($prefix)))->max()+1;$d['code']=$prefix.str_pad((string)$next,2,'0',STR_PAD_LEFT);}else{abort_if(empty($d['code']),422,'Ngành gốc phải có mã ngành.');}InventoryCategory::create($d);return back()->with('success','Đã thêm ngành/loại vật tư.');}
     public function categoryUpdate(Request $r,InventoryCategory $category){$rules=['name'=>'required|string|max:255','description'=>'nullable|string'];if($category->parent_id===null)$rules['code']='required|string|max:50|unique:inventory_categories,code,'.$category->id;$category->update($r->validate($rules));return back()->with('success','Đã cập nhật danh mục.');}
     public function categoryDelete(InventoryCategory $category){if($category->materials()->exists()||$category->children()->exists())return back()->withErrors(['category'=>'Không thể xóa danh mục đang có dữ liệu con.']);$category->delete();return back()->with('success','Đã xóa danh mục.');}
 
-    public function assets(Request $r){$assets=InventoryAsset::with(['material','classroom'])->when($r->search,fn($q,$s)=>$q->where(fn($x)=>$x->where('asset_code','like',"%$s%")->orWhere('name','like',"%$s%")))->latest()->paginate(20)->withQueryString();$allAssets=InventoryAsset::with(['material','classroom'])->latest()->get();$auditLogs=InventoryAuditLog::with('user')->latest()->limit(100)->get()->each->resolveDetails();return view('inventory::feature',['section'=>'assets','title'=>'Cập nhật vật tư','assets'=>$assets,'allAssets'=>$allAssets,'auditLogs'=>$auditLogs,'materials'=>InventoryMaterial::with('category')->orderBy('name')->get(),'classrooms'=>Classroom::active()->orderBy('name')->get(),'categories'=>InventoryCategory::whereNotNull('parent_id')->orderBy('code')->get(),'industries'=>InventoryCategory::whereNull('parent_id')->orderBy('code')->get(),'buildings'=>Building::orderBy('name')->get(),'units'=>\Modules\Unit\Models\Unit::active()->orderBy('name')->get()]);}
+    public function assets(Request $r){$roomIds=$this->assignedInventoryRoomIds($r->user());$materialIds=$this->scopedMaterialIds($roomIds);$categoryIds=$this->scopedCategoryIds($materialIds);$buildingIds=$this->scopedBuildingIds($roomIds);$assets=InventoryAsset::with(['material','classroom'])->when($roomIds!==null,fn($q)=>$q->whereIn('classroom_id',$roomIds))->when($r->search,fn($q,$s)=>$q->where(fn($x)=>$x->where('asset_code','like',"%$s%")->orWhere('name','like',"%$s%")))->latest()->paginate(20)->withQueryString();$allAssets=InventoryAsset::with(['material','classroom'])->when($roomIds!==null,fn($q)=>$q->whereIn('classroom_id',$roomIds))->latest()->get();$auditLogs=InventoryAuditLog::with('user')->latest()->limit(100)->get()->each->resolveDetails();return view('inventory::feature',['section'=>'assets','title'=>'Cập nhật vật tư','assets'=>$assets,'allAssets'=>$allAssets,'auditLogs'=>$auditLogs,'materials'=>InventoryMaterial::with('category')->when($materialIds!==null,fn($q)=>$q->whereIn('id',$materialIds))->orderBy('name')->get(),'classrooms'=>Classroom::active()->when($roomIds!==null,fn($q)=>$q->whereIn('id',$roomIds))->orderBy('name')->get(),'categories'=>InventoryCategory::whereNotNull('parent_id')->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get(),'industries'=>InventoryCategory::whereNull('parent_id')->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get(),'buildings'=>Building::when($buildingIds!==null,fn($q)=>$q->whereIn('id',$buildingIds))->orderBy('name')->get(),'units'=>\Modules\Unit\Models\Unit::active()->orderBy('name')->get()]);}
     public function assetBulkStoreDelta(Request $r)
     {
         $data = $r->validate([
@@ -128,7 +178,7 @@ class InventoryWorkflowController extends ModuleBaseController
     public function assetUpdate(Request $r,InventoryAsset $asset){$d=$r->validate(['material_id'=>'nullable|exists:inventory_materials,id','industry_id'=>'required|exists:inventory_categories,id','category_id'=>'required|exists:inventory_categories,id','classroom_id'=>'nullable|exists:classrooms,id','holding_unit_id'=>'nullable|exists:units,id','asset_code'=>'required|string|max:100|unique:inventory_assets,asset_code,'.$asset->id,'name'=>'required|string|max:255','category'=>'nullable|string|max:255','quantity'=>'required|numeric|min:.01','broken_quantity'=>'nullable|numeric|min:0','unit'=>'nullable|string|max:30','grade'=>'nullable|integer|min:1|max:5','manufacture_year'=>'nullable|integer|min:1900|max:2200','usage_year'=>'nullable|integer|min:1900|max:2200','install_address'=>'nullable|string|max:255','status'=>'required|in:NORMAL,BROKEN,REPAIRING,LIQUIDATED','purchase_date'=>'nullable|date','expiry_date'=>'nullable|date','broken_at'=>'nullable|date','repair_started_at'=>'nullable|date','repair_completed_at'=>'nullable|date','repair_performer'=>'nullable|string|max:255','note'=>'nullable|string','description'=>'nullable|string']);$type=InventoryCategory::whereKey($d['category_id'])->where('parent_id',$d['industry_id'])->where('active',true)->firstOrFail();$d['category']=$type->name;unset($d['industry_id'],$d['category_id']);$asset->update($d);return back()->with('success','Đã cập nhật tài sản.');}
     public function assetDelete(InventoryAsset $asset){if($asset->repairs()->exists()||$asset->proposals()->exists())return back()->withErrors(['asset'=>'Không thể xóa tài sản đã có lịch sử.']);$asset->delete();return back()->with('success','Đã xóa tài sản.');}
 
-    public function warehouse(){return view('inventory::feature',['section'=>'warehouse','title'=>'Kho vật tư','warehouses'=>InventoryWarehouse::with(['manager','industry','items.material.category.parent'])->latest()->get(),'users'=>\App\Models\User::where('status',1)->orderBy('name')->get(),'industries'=>InventoryCategory::whereNull('parent_id')->where('active',true)->orderBy('code')->get(),'materials'=>InventoryMaterial::with('category.parent')->orderBy('name')->get()]);}
+    public function warehouse(){$roomIds=$this->assignedInventoryRoomIds();$materialIds=$this->scopedMaterialIds($roomIds);$categoryIds=$this->scopedCategoryIds($materialIds);return view('inventory::feature',['section'=>'warehouse','title'=>'Kho vật tư','warehouses'=>InventoryWarehouse::with(['manager','industry','items'=>fn($q)=>$q->when($materialIds!==null,fn($x)=>$x->whereIn('material_id',$materialIds)),'items.material.category.parent'])->latest()->get(),'users'=>\App\Models\User::where('status',1)->orderBy('name')->get(),'industries'=>InventoryCategory::whereNull('parent_id')->where('active',true)->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get(),'materials'=>InventoryMaterial::with('category.parent')->when($materialIds!==null,fn($q)=>$q->whereIn('id',$materialIds))->orderBy('name')->get()]);}
     public function warehouseStore(Request $r){InventoryWarehouse::create($r->validate(['code'=>'required|string|max:80|unique:inventory_warehouses,code','name'=>'required|string|max:255','industry_id'=>'required|exists:inventory_categories,id','location'=>'nullable|string|max:255','manager_id'=>'nullable|exists:users,id','description'=>'nullable|string']));return back()->with('success','Đã thêm kho theo ngành vật tư.');}
     public function warehouseUpdate(Request $r,InventoryWarehouse $warehouse){$d=$r->validate(['code'=>'required|string|max:80|unique:inventory_warehouses,code,'.$warehouse->id,'name'=>'required|string|max:255','location'=>'nullable|string|max:255','manager_id'=>'nullable|exists:users,id','description'=>'nullable|string','active'=>'nullable|boolean']);$warehouse->update($d);return back()->with('success','Đã sửa kho.');}
     public function warehouseDestroy(InventoryWarehouse $warehouse){$warehouse->delete();return back()->with('success','Đã xóa kho và các mặt hàng tồn trong kho.');}
@@ -136,20 +186,422 @@ class InventoryWorkflowController extends ModuleBaseController
     public function warehouseItemUpdate(Request $r,InventoryWarehouse $warehouse,InventoryWarehouseItem $item){abort_unless((int)$item->warehouse_id===(int)$warehouse->id,404);$d=$r->validate(['material_id'=>'nullable|exists:inventory_materials,id','code'=>['required','string','max:100',Rule::unique('inventory_warehouse_items','code')->where(fn($q)=>$q->where('warehouse_id',$warehouse->id))->ignore($item->id)],'name'=>'required|string|max:255','unit'=>'nullable|string|max:30','quantity'=>'required|numeric|min:0','minimum_quantity'=>'nullable|numeric|min:0','note'=>'nullable|string']);$item->update($d);return back()->with('success','Đã sửa mặt hàng trong kho.');}
     public function warehouseItemDestroy(InventoryWarehouse $warehouse,InventoryWarehouseItem $item){abort_unless((int)$item->warehouse_id===(int)$warehouse->id,404);$item->delete();return back()->with('success','Đã xóa mặt hàng khỏi kho.');}
 
-    public function proposals(){$liquidated=InventoryProposal::where('type','LIQUIDATION')->whereIn('status',['APPROVED','COMPLETED'])->with('items')->get()->sum(fn($p)=>$p->items->sum('quantity'));$recalled=InventoryProposal::where('type','RECALL')->whereIn('status',['APPROVED','COMPLETED'])->with('items')->get()->sum(fn($p)=>$p->items->sum('quantity'));$repaired=InventoryRepair::where('status','COMPLETED')->with('asset')->get()->sum(fn($r)=>(int)($r->asset?->quantity??0));return view('inventory::feature',['section'=>'proposals','title'=>'Đề xuất / thanh lý','proposals'=>InventoryProposal::with(['unit','items'])->latest()->get(),'liquidatedQuantity'=>$liquidated,'recalledQuantity'=>$recalled,'repairedQuantity'=>$repaired,'units'=>\Modules\Unit\Models\Unit::active()->orderBy('name')->get(),'assets'=>InventoryAsset::with('classroom')->orderBy('name')->get(),'materials'=>InventoryMaterial::with(['category.parent'])->orderBy('name')->get(),'categories'=>InventoryCategory::where('active',true)->whereNull('parent_id')->orderBy('code')->get(),'types'=>InventoryCategory::with('parent')->where('active',true)->whereNotNull('parent_id')->orderBy('code')->get(),'classrooms'=>Classroom::active()->with('building')->orderBy('name')->get()]);}
-    public function proposalApproval(){return view('inventory::feature',['section'=>'proposal-approval','title'=>'Duyệt đề xuất','proposals'=>InventoryProposal::with(['unit','items'])->whereIn('status',['PENDING','APPROVED'])->latest()->get(),'transferProposals'=>InventoryTransfer::with(['asset','fromClassroom','toClassroom','warehouse'])->whereIn('status',['PENDING','APPROVED'])->latest()->get()]);}
-    public function proposalDetail(InventoryProposal $proposal){return view('inventory::feature',['section'=>'proposal-detail','title'=>'Chi tiết đề xuất','proposal'=>$proposal->load(['unit','items'])]);}
-    public function proposalPrint(Request $r,InventoryProposal $proposal){$d=$r->validate(['print_mode'=>'required|in:unsigned,image,direct','signature_data'=>'nullable|string|max:7000000']);$signaturePath=$proposal->signature_path;$method=null;if($d['print_mode']!=='unsigned'){abort_unless(preg_match('/^data:image\/png;base64,(.+)$/s',(string)$d['signature_data'],$m),422,'Chữ ký phải là ảnh PNG hợp lệ.');$binary=base64_decode($m[1],true);abort_unless($binary!==false&&strlen($binary)>100,422,'Ảnh chữ ký không hợp lệ.');$signaturePath='inventory/signatures/'.now()->format('Y/m').'/proposal-'.$proposal->id.'-'.bin2hex(random_bytes(5)).'.png';Storage::disk('public')->put($signaturePath,$binary);$method=$d['print_mode']==='image'?'upload':'draw';}$proposal->update(['print_mode'=>$d['print_mode'],'signature_method'=>$method,'signature_path'=>$signaturePath,'printed_at'=>now()]);return view('inventory::partials.proposal-print',['proposal'=>$proposal->fresh()->load(['unit','items']),'signatureUrl'=>$signaturePath?Storage::disk('public')->url($signaturePath):null]);}
-    public function proposalStore(Request $r){$d=$r->validate(['type'=>'required|in:REPAIR,RECALL,LIQUIDATION','title'=>'required|string|max:255','description'=>'nullable|string','unit_id'=>'nullable|exists:units,id','asset_id'=>'nullable|exists:inventory_assets,id','material_id'=>'nullable|exists:inventory_materials,id','loai_id'=>'required|exists:inventory_categories,id','classroom_id'=>'nullable|exists:classrooms,id','quantity'=>'nullable|numeric|min:.01','item_note'=>'nullable|string','location_note'=>'nullable|string|max:255','nganh_code'=>'required|string|max:80']);$industry=InventoryCategory::whereNull('parent_id')->where('code',$d['nganh_code'])->where('active',true)->first();$type=InventoryCategory::whereKey($d['loai_id'])->where('parent_id',$industry?->id)->where('active',true)->first();abort_unless($industry&&$type,422,'Loại vật tư không thuộc ngành đã chọn.');$materialId=$d['material_id']??null;$material=$materialId?InventoryMaterial::with('category')->findOrFail($materialId):null;abort_unless(!$material||((int)$material->category_id===(int)$type->id),422,'Vật tư không thuộc loại vật tư đã chọn.');$p=DB::transaction(function()use($d,$r,$materialId){$p=InventoryProposal::create(collect($d)->except(['asset_id','material_id','loai_id','classroom_id','quantity','item_note','location_note'])->merge(['created_by'=>$r->user()->id,'proposed_by_user_id'=>$r->user()->id,'proposed_by_username'=>$r->user()->email,'proposed_by_display_name'=>$r->user()->name])->all());$assetId=$d['asset_id']??null;if($materialId||$assetId){$m=$materialId?InventoryMaterial::find($materialId):null;$a=$assetId?InventoryAsset::find($assetId):null;$p->items()->create(['asset_id'=>$a?->id,'material_id'=>$m?->id,'material_code'=>$m?->code,'material_name'=>$m?->name??$a?->name,'name'=>$m?->name??$a?->name??$d['title'],'quantity'=>$d['quantity']??1,'unit'=>$m?->unit??$a?->unit,'from_classroom_id'=>$d['classroom_id']??$a?->classroom_id,'location_note'=>$d['location_note']??null,'note'=>$d['item_note']??null,'original_grade'=>$a?->grade,'original_code'=>$a?->asset_code]);}InventoryAuditLog::create(['user_id'=>$r->user()->id,'action'=>'CREATE','entity_type'=>'proposal','entity_id'=>$p->id,'details'=>$d]);return $p;});return back()->with('success','Đã tạo đề xuất.');}
-    public function proposalUpdate(Request $r,InventoryProposal $proposal){$d=$r->validate(['type'=>'required|in:REPAIR,RECALL,LIQUIDATION,PURCHASE','title'=>'required|string|max:255','description'=>'nullable|string','unit_id'=>'nullable|exists:units,id','status'=>'required|in:PENDING,APPROVED,REJECTED,COMPLETED','decision_number'=>'nullable|string|max:100','decision_note'=>'nullable|string|max:2000']);$proposal->update($d);InventoryAuditLog::create(['user_id'=>$r->user()->id,'action'=>'UPDATE','entity_type'=>'proposal','entity_id'=>$proposal->id,'details'=>$d]);return back()->with('success','Đã cập nhật đề xuất vật tư.');}
+    public function proposals(){$roomIds=$this->assignedInventoryRoomIds();$materialIds=$this->scopedMaterialIds($roomIds);$categoryIds=$this->scopedCategoryIds($materialIds);$proposalScope=fn($q)=>$roomIds===null?$q:$q->whereHas('items',fn($i)=>$i->whereIn('from_classroom_id',$roomIds)->orWhereIn('target_room_id',$roomIds)->orWhereHas('asset',fn($a)=>$a->whereIn('classroom_id',$roomIds)));$liquidated=$proposalScope(InventoryProposal::where('type','LIQUIDATION')->whereIn('status',['APPROVED','COMPLETED']))->with('items')->get()->sum(fn($p)=>$p->items->sum('quantity'));return view('inventory::feature',['section'=>'proposals','title'=>'Đề xuất thanh lý','proposals'=>$proposalScope(InventoryProposal::with(['unit','items'])->where('type','LIQUIDATION'))->latest()->get(),'liquidatedQuantity'=>$liquidated,'recalledQuantity'=>0,'repairedQuantity'=>0,'units'=>\Modules\Unit\Models\Unit::active()->orderBy('name')->get(),'assets'=>InventoryAsset::with('classroom')->when($roomIds!==null,fn($q)=>$q->whereIn('classroom_id',$roomIds))->orderBy('name')->get(),'materials'=>InventoryMaterial::with(['category.parent'])->when($materialIds!==null,fn($q)=>$q->whereIn('id',$materialIds))->orderBy('name')->get(),'categories'=>InventoryCategory::where('active',true)->whereNull('parent_id')->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get(),'types'=>InventoryCategory::with('parent')->where('active',true)->whereNotNull('parent_id')->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get(),'classrooms'=>Classroom::active()->with('building')->when($roomIds!==null,fn($q)=>$q->whereIn('id',$roomIds))->orderBy('name')->get()]);}
+    public function proposalApproval(){return view('inventory::feature',['section'=>'proposal-approval','title'=>'Duyệt đề xuất thanh lý','proposals'=>InventoryProposal::with(['unit','items.asset'])->where('type','LIQUIDATION')->whereIn('status',['PENDING','APPROVED'])->latest()->get(),'transferProposals'=>InventoryTransfer::with(['asset','fromClassroom','toClassroom','warehouse'])->whereIn('status',['PENDING','APPROVED'])->latest()->get()]);}
+    public function proposalDetail(InventoryProposal $proposal){abort_unless($proposal->type==='LIQUIDATION',404);return view('inventory::feature',['section'=>'proposal-detail','title'=>'Chi tiết đề xuất thanh lý','proposal'=>$proposal->load(['unit','items.asset','items.fromClassroom'])]);}
+    public function proposalPrint(Request $r,InventoryProposal $proposal)
+    {
+        abort_unless($proposal->type === 'LIQUIDATION', 404);
+        abort_unless(in_array($proposal->status, ['PENDING', 'APPROVED', 'COMPLETED'], true), 403, 'Phiếu ở trạng thái này không thể in.');
+
+        $d = $r->validate([
+            'print_mode' => 'required|in:preview,digital,direct',
+            'signature_data' => 'nullable|string|max:7000000',
+        ]);
+        abort_if($proposal->status === 'PENDING' && $d['print_mode'] !== 'preview', 422, 'Phiếu chưa duyệt chỉ được in bản xem trước không chữ ký.');
+        abort_if(in_array($proposal->status, ['APPROVED', 'COMPLETED'], true) && $d['print_mode'] === 'preview', 422, 'Phiếu đã duyệt phải in bản có chữ ký.');
+
+        $signaturePath = $proposal->signature_path;
+        $signatureUrl = null;
+        $signatureImagePath = null;
+        $method = null;
+
+        if ($d['print_mode'] === 'digital') {
+            $digitalSignature = DigitalSignature::query()
+                ->active()
+                ->forUser((int) $r->user()->id)
+                ->orderByDesc('is_default')
+                ->orderBy('sort_order')
+                ->orderByDesc('id')
+                ->first();
+
+            abort_unless($digitalSignature && $digitalSignature->imageUrl(), 422, 'Tài khoản chưa có chữ ký số. Vui lòng cập nhật chữ ký số hoặc ký trực tiếp.');
+
+            $signaturePath = $digitalSignature->image_path;
+            $signatureUrl = $digitalSignature->imageUrl();
+            $signatureImagePath = $digitalSignature->absoluteImagePath();
+            $method = 'digital';
+        }
+
+        if ($d['print_mode'] === 'direct') {
+            abort_unless(preg_match('/^data:image\/png;base64,(.+)$/s', (string) $d['signature_data'], $m), 422, 'Chữ ký phải là ảnh PNG hợp lệ.');
+            $binary = base64_decode($m[1], true);
+            abort_unless($binary !== false && strlen($binary) > 100, 422, 'Ảnh chữ ký không hợp lệ.');
+            $signaturePath = 'inventory/signatures/'.now()->format('Y/m').'/proposal-'.$proposal->id.'-'.bin2hex(random_bytes(5)).'.png';
+            Storage::disk('public')->put($signaturePath, $binary);
+            $signatureUrl = Storage::disk('public')->url($signaturePath);
+            $signatureImagePath = Storage::disk('public')->path($signaturePath);
+            $method = 'draw';
+        }
+
+        $proposal->update([
+            'print_mode' => $d['print_mode'],
+            'signature_method' => $method,
+            'signature_path' => $signaturePath,
+            'printed_at' => now(),
+        ]);
+
+        $url = route('inventory.proposals.print.pdf', ['proposal' => $proposal, 'print_mode' => $d['print_mode'] === 'preview' ? 'preview' : 'saved']);
+        if ($r->expectsJson() || str_contains((string) $r->header('Accept'), 'application/json')) {
+            return response()->json(['url' => $url]);
+        }
+
+        return redirect()->away($url);
+    }
+
+    public function proposalPrintPdf(Request $r, InventoryProposal $proposal)
+    {
+        abort_unless($proposal->type === 'LIQUIDATION', 404);
+        abort_unless(in_array($proposal->status, ['PENDING', 'APPROVED', 'COMPLETED'], true), 403, 'Phiếu ở trạng thái này không thể in.');
+
+        $mode = (string) $r->input('print_mode', 'preview');
+        abort_unless(in_array($mode, ['preview', 'saved'], true), 422, 'Chế độ in không hợp lệ.');
+        abort_if($proposal->status === 'PENDING' && $mode !== 'preview', 422, 'Phiếu chưa duyệt chỉ được in bản xem trước không chữ ký.');
+        abort_if(in_array($proposal->status, ['APPROVED', 'COMPLETED'], true) && $mode !== 'saved', 422, 'Phiếu đã duyệt phải in bản có chữ ký.');
+
+        $withSignature = $mode === 'saved';
+        $signatureImagePath = null;
+        if ($withSignature) {
+            abort_unless($proposal->signature_path, 422, 'Chưa có chữ ký cho bản in sau duyệt.');
+            $signatureImagePath = $this->proposalSignatureAbsolutePath($proposal->signature_path);
+            abort_unless($signatureImagePath && is_file($signatureImagePath), 422, 'Không tìm thấy file chữ ký đã lưu.');
+        }
+
+        $pdf = $this->buildProposalPdfFromTemplate(
+            $proposal->fresh()->load(['unit','items.asset','items.fromClassroom','decidedBy']),
+            $withSignature,
+            $signatureImagePath
+        );
+
+        $content = (string) file_get_contents($pdf);
+        @unlink($pdf);
+
+        return response($content, 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'inline; filename="phieu-de-xuat-'.$proposal->id.'.pdf"',
+            'Content-Length' => (string) strlen($content),
+            'Cache-Control' => 'no-store, no-cache, must-revalidate, max-age=0',
+        ]);
+    }
+
+    private function proposalSignatureAbsolutePath(string $signaturePath): ?string
+    {
+        if (str_starts_with($signaturePath, 'http://') || str_starts_with($signaturePath, 'https://')) {
+            return null;
+        }
+
+        $candidates = [
+            Storage::disk('public')->path($signaturePath),
+            public_path($signaturePath),
+            public_path('images/'.$signaturePath),
+            $signaturePath,
+        ];
+
+        foreach ($candidates as $path) {
+            if (is_string($path) && is_file($path)) {
+                return $path;
+            }
+        }
+
+        return null;
+    }
+
+    private function buildProposalPdfFromTemplate(InventoryProposal $proposal, bool $withSignature, ?string $signatureImagePath): string
+    {
+        $templatePath = $this->proposalTemplatePath();
+        Storage::disk('local')->makeDirectory('inventory-proposals');
+
+        $stamp = now()->format('YmdHis').'-'.bin2hex(random_bytes(4));
+        $docx = Storage::disk('local')->path('inventory-proposals/phieu-de-xuat-'.$proposal->id.'-'.$stamp.'.docx');
+        $pdf = preg_replace('/\.docx$/i', '.pdf', $docx) ?: ($docx.'.pdf');
+        \Log::info('Inventory proposal PDF build started', ['proposal_id' => $proposal->id, 'template' => $templatePath, 'docx' => $docx, 'pdf' => $pdf, 'with_signature' => $withSignature]);
+        $processor = new \PhpOffice\PhpWord\TemplateProcessor($templatePath);
+
+        $processor->setValues($this->proposalTemplateValues($proposal, $withSignature));
+        $rows = $proposal->items->values()->map(fn($item, $index) => $this->proposalTemplateRowValues($item, $index + 1))->all();
+        if (!$rows) {
+            $rows = [$this->emptyProposalTemplateRow()];
+        }
+        try {
+            $processor->cloneRowAndSetValues('stt', $rows);
+        } catch (\Throwable) {
+            foreach (($rows[0] ?? $this->emptyProposalTemplateRow()) as $key => $value) {
+                $processor->setValue($key, $value);
+            }
+        }
+
+        if ($withSignature && $signatureImagePath && is_file($signatureImagePath)) {
+            try {
+                $processor->setImageValue('chu_ky_nguoi_duyet', [
+                    'path' => $signatureImagePath,
+                    'width' => 150,
+                    'height' => 70,
+                    'ratio' => true,
+                ]);
+            } catch (\Throwable) {
+                $processor->setValue('chu_ky_nguoi_duyet', '');
+            }
+        } else {
+            $processor->setValue('chu_ky_nguoi_duyet', '');
+        }
+
+        $processor->saveAs($docx);
+
+        $converted = $this->convertProposalDocxToPdf($docx, $pdf, $proposal->id);
+        @unlink($docx);
+
+        abort_unless(is_file($converted), 500, 'LibreOffice không tạo được file PDF phiếu đề xuất.');
+        \Log::info('Inventory proposal PDF build finished', ['proposal_id' => $proposal->id, 'pdf' => $converted, 'bytes' => filesize($converted)]);
+
+        return $converted;
+    }
+
+    private function convertProposalDocxToPdf(string $docx, string $pdf, int $proposalId): string
+    {
+        try {
+            return app(DocumentConverterInterface::class)->convert($docx, 'pdf', $pdf);
+        } catch (\Throwable $exception) {
+            \Log::warning('Inventory proposal LibreOffice PDF conversion failed, falling back to Word COM', [
+                'proposal_id' => $proposalId,
+                'docx' => $docx,
+                'pdf' => $pdf,
+                'error' => $exception->getMessage(),
+            ]);
+        }
+
+        if (class_exists(\COM::class)) {
+            $word = null;
+            $document = null;
+            try {
+                @unlink($pdf);
+                $word = new \COM('Word.Application');
+                $word->Visible = false;
+                $word->DisplayAlerts = 0;
+                $document = $word->Documents->Open($docx, false, true);
+                $document->ExportAsFixedFormat($pdf, 17);
+                if (is_file($pdf)) {
+                    return $pdf;
+                }
+            } catch (\Throwable $exception) {
+                \Log::warning('Inventory proposal PHP COM PDF conversion failed, falling back to PowerShell COM', [
+                    'proposal_id' => $proposalId,
+                    'docx' => $docx,
+                    'pdf' => $pdf,
+                    'error' => $exception->getMessage(),
+                ]);
+            } finally {
+                try {
+                    if ($document) {
+                        $document->Close(false);
+                    }
+                } catch (\Throwable) {
+                }
+                try {
+                    if ($word) {
+                        $word->Quit();
+                    }
+                } catch (\Throwable) {
+                }
+            }
+        }
+
+        $script = storage_path('app/proposal-word-export-'.bin2hex(random_bytes(6)).'.ps1');
+        file_put_contents($script, <<<'PS1'
+param(
+    [Parameter(Mandatory=$true)][string]$Docx,
+    [Parameter(Mandatory=$true)][string]$Pdf
+)
+$ErrorActionPreference = 'Stop'
+$word = $null
+$doc = $null
+try {
+    $word = New-Object -ComObject Word.Application
+    $word.Visible = $false
+    $word.DisplayAlerts = 0
+    $doc = $word.Documents.Open($Docx, $false, $true)
+    $doc.ExportAsFixedFormat($Pdf, 17)
+} finally {
+    if ($doc) {
+        $doc.Close($false)
+        [System.Runtime.InteropServices.Marshal]::ReleaseComObject($doc) | Out-Null
+    }
+    if ($word) {
+        $word.Quit()
+        [System.Runtime.InteropServices.Marshal]::ReleaseComObject($word) | Out-Null
+    }
+    [GC]::Collect()
+    [GC]::WaitForPendingFinalizers()
+}
+PS1);
+
+        $process = new \Symfony\Component\Process\Process([
+            'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe',
+            '-NoProfile',
+            '-ExecutionPolicy',
+            'Bypass',
+            '-File',
+            $script,
+            '-Docx',
+            $docx,
+            '-Pdf',
+            $pdf,
+        ]);
+        $process->setWorkingDirectory(storage_path('app'));
+        $process->setTimeout(90);
+        try {
+            @unlink($pdf);
+            $process->run();
+        } catch (\Throwable $exception) {
+            \Log::error('Inventory proposal PowerShell Word PDF conversion crashed', [
+                'proposal_id' => $proposalId,
+                'error' => $exception->getMessage(),
+            ]);
+            @unlink($script);
+            abort(500, 'Không chuyển được phiếu đề xuất sang PDF để in: '.$exception->getMessage());
+        }
+
+        $error = trim($process->getErrorOutput());
+        if (! $process->isSuccessful() || ! is_file($pdf)) {
+            \Log::error('Inventory proposal PowerShell Word PDF conversion failed', [
+                'proposal_id' => $proposalId,
+                'exit_code' => $process->getExitCode(),
+                'stdout' => $process->getOutput(),
+                'stderr' => $error,
+                'pdf_exists' => is_file($pdf),
+            ]);
+        }
+        @unlink($script);
+
+        abort_unless($process->isSuccessful() && is_file($pdf), 500, 'Không chuyển được phiếu đề xuất sang PDF để in. '.$error);
+
+        return $pdf;
+    }
+
+    private function proposalTemplatePath(): string
+    {
+        $template = InventoryReportTemplate::where('report_type', 'proposal')->where('active', true)->latest()->first();
+        $path = $template?->absolutePath();
+        if ($path && is_file($path)) {
+            return $path;
+        }
+
+        $path = Storage::disk('local')->path('inventory-templates/mau-bien-giay-de-xuat.docx');
+        if (! is_file($path)) {
+            $this->createProposalVariableTemplate($path);
+        }
+
+        return $path;
+    }
+
+    private function proposalTemplateValues(InventoryProposal $proposal, bool $withSignature): array
+    {
+        $typeLabels = ['LIQUIDATION' => 'Thanh lý'];
+        $statusLabels = ['PENDING' => 'Chờ duyệt', 'APPROVED' => 'Đã duyệt', 'REJECTED' => 'Từ chối', 'COMPLETED' => 'Đã hoàn thành'];
+        $date = now();
+
+        return [
+            'so_phieu' => $proposal->proposal_code ?: str_pad((string) $proposal->id, 4, '0', STR_PAD_LEFT).'/DXVT',
+            'ma_phieu' => $proposal->proposal_code ?: '#'.$proposal->id,
+            'ngay' => $date->format('d'),
+            'thang' => $date->format('m'),
+            'nam' => $date->format('Y'),
+            'ngay_in' => $date->format('d/m/Y'),
+            'loai_de_xuat' => $typeLabels[$proposal->type] ?? $proposal->type,
+            'trang_thai' => $statusLabels[$proposal->status] ?? $proposal->status,
+            'don_vi_de_xuat' => $proposal->unit?->name ?: $proposal->proposed_by_display_name ?: '',
+            'nguoi_de_xuat' => $proposal->proposed_by_display_name ?: '',
+            'nganh_vat_tu' => $proposal->nganh_code ?: '',
+            'tieu_de' => $proposal->title ?: '',
+            'mo_ta' => $proposal->description ?: '',
+            'ly_do_tu_choi' => $proposal->decision_note ?: '',
+            'nguoi_duyet' => $withSignature ? ($proposal->decidedBy?->name ?: auth()->user()?->name ?: '') : '',
+            'ho_ten_nguoi_duyet' => $withSignature ? ($proposal->decidedBy?->name ?: auth()->user()?->name ?: '') : '',
+            'ngay_duyet' => $withSignature && $proposal->decided_at ? $proposal->decided_at->format('d/m/Y') : '',
+        ];
+    }
+
+    private function proposalTemplateRowValues($item, int $index): array
+    {
+        $actualQuantity = $item->asset?->quantity;
+        if ($actualQuantity === null && $item->material_id && $item->from_classroom_id) {
+            $actualQuantity = InventoryAsset::where('material_id', $item->material_id)
+                ->where('classroom_id', $item->from_classroom_id)
+                ->sum('quantity');
+        }
+
+        return [
+            'stt' => (string) $index,
+            'ma_vat_tu' => $item->material_code ?: $item->original_code ?: '',
+            'ten_vat_tu' => $item->material_name ?: $item->name ?: '',
+            'so_luong_thuc_te_phong' => $actualQuantity !== null ? number_format((float) $actualQuantity, 0, ',', '.') : '',
+            'so_luong_de_xuat' => number_format((float) $item->quantity, 0, ',', '.'),
+            'don_vi_tinh' => $item->unit ?: '',
+            'phong' => $item->fromClassroom?->name ?: $item->from_room_name ?: $item->location_note ?: '',
+            'ghi_chu' => $item->note ?: '',
+        ];
+    }
+
+    private function emptyProposalTemplateRow(): array
+    {
+        return [
+            'stt' => '',
+            'ma_vat_tu' => '',
+            'ten_vat_tu' => '',
+            'so_luong_thuc_te_phong' => '',
+            'so_luong_de_xuat' => '',
+            'don_vi_tinh' => '',
+            'phong' => '',
+            'ghi_chu' => '',
+        ];
+    }
+
+    private function createProposalVariableTemplate(string $path): void
+    {
+        if (! is_dir(dirname($path))) {
+            mkdir(dirname($path), 0775, true);
+        }
+
+        $word = new \PhpOffice\PhpWord\PhpWord();
+        $section = $word->addSection(['marginTop' => 1000, 'marginBottom' => 1000, 'marginLeft' => 900, 'marginRight' => 900]);
+        $center = ['alignment' => \PhpOffice\PhpWord\SimpleType\Jc::CENTER];
+        $bold = ['bold' => true];
+        $section->addText('TRUONG CAO DANG HAU CAN 2', $bold, $center);
+        $section->addText('PHIEU DE XUAT VAT TU', ['bold' => true, 'size' => 16], $center);
+        $section->addText('So: ${so_phieu}', [], $center);
+        $section->addText('Ngay ${ngay} thang ${thang} nam ${nam}', [], ['alignment' => \PhpOffice\PhpWord\SimpleType\Jc::RIGHT]);
+        $section->addText('Don vi de xuat: ${don_vi_de_xuat}');
+        $section->addText('Loai de xuat: ${loai_de_xuat}');
+        $section->addText('Tieu de: ${tieu_de}');
+        $section->addText('Mo ta: ${mo_ta}');
+        $table = $section->addTable(['borderSize' => 6, 'borderColor' => '111111', 'cellMargin' => 80]);
+        $table->addRow();
+        foreach (['STT','Ma VT','Ten vat tu','SL thuc te phong','SL de xuat','DVT','Phong','Ghi chu'] as $heading) {
+            $table->addCell(1200)->addText($heading, $bold, $center);
+        }
+        $table->addRow();
+        foreach (['${stt}','${ma_vat_tu}','${ten_vat_tu}','${so_luong_thuc_te_phong}','${so_luong_de_xuat}','${don_vi_tinh}','${phong}','${ghi_chu}'] as $variable) {
+            $table->addCell(1200)->addText($variable);
+        }
+        $section->addTextBreak(1);
+        $sign = $section->addTable();
+        $sign->addRow();
+        $sign->addCell(5000)->addText('NGUOI DE XUAT', $bold, $center);
+        $cell = $sign->addCell(5000);
+        $cell->addText('NGUOI DUYET', $bold, $center);
+        $cell->addText('${chu_ky_nguoi_duyet}', [], $center);
+        $cell->addText('${ho_ten_nguoi_duyet}', $bold, $center);
+        (new \PhpOffice\PhpWord\Writer\Word2007($word))->save($path);
+    }
+    public function proposalStore(Request $r){$d=$r->validate(['title'=>'required|string|max:255','description'=>'nullable|string','unit_id'=>'nullable|exists:units,id','asset_id'=>'nullable|exists:inventory_assets,id','material_id'=>'nullable|exists:inventory_materials,id','loai_id'=>'required|exists:inventory_categories,id','classroom_id'=>'nullable|exists:classrooms,id','quantity'=>'nullable|numeric|min:.01','item_note'=>'nullable|string','location_note'=>'nullable|string|max:255','nganh_code'=>'required|string|max:80']);$d['type']='LIQUIDATION';$industry=InventoryCategory::whereNull('parent_id')->where('code',$d['nganh_code'])->where('active',true)->first();$type=InventoryCategory::whereKey($d['loai_id'])->where('parent_id',$industry?->id)->where('active',true)->first();abort_unless($industry&&$type,422,'Loại vật tư không thuộc ngành đã chọn.');$materialId=$d['material_id']??null;$material=$materialId?InventoryMaterial::with('category')->findOrFail($materialId):null;abort_unless(!$material||((int)$material->category_id===(int)$type->id),422,'Vật tư không thuộc loại vật tư đã chọn.');$p=DB::transaction(function()use($d,$r,$materialId){$p=InventoryProposal::create(collect($d)->except(['asset_id','material_id','loai_id','classroom_id','quantity','item_note','location_note'])->merge(['created_by'=>$r->user()->id,'proposed_by_user_id'=>$r->user()->id,'proposed_by_username'=>$r->user()->email,'proposed_by_display_name'=>$r->user()->name])->all());$assetId=$d['asset_id']??null;if($materialId||$assetId){$m=$materialId?InventoryMaterial::find($materialId):null;$a=$assetId?InventoryAsset::find($assetId):null;$p->items()->create(['asset_id'=>$a?->id,'material_id'=>$m?->id,'material_code'=>$m?->code,'material_name'=>$m?->name??$a?->name,'name'=>$m?->name??$a?->name??$d['title'],'quantity'=>$d['quantity']??1,'unit'=>$m?->unit??$a?->unit,'from_classroom_id'=>$d['classroom_id']??$a?->classroom_id,'location_note'=>$d['location_note']??null,'note'=>$d['item_note']??null,'original_grade'=>$a?->grade,'original_code'=>$a?->asset_code]);}InventoryAuditLog::create(['user_id'=>$r->user()->id,'action'=>'CREATE','entity_type'=>'proposal','entity_id'=>$p->id,'details'=>$d]);return $p;});return back()->with('success','Đã tạo đề xuất thanh lý.');}
+    public function proposalUpdate(Request $r,InventoryProposal $proposal){abort_unless($proposal->type==='LIQUIDATION',404);$d=$r->validate(['title'=>'required|string|max:255','description'=>'nullable|string','unit_id'=>'nullable|exists:units,id','status'=>'required|in:PENDING,APPROVED,REJECTED,COMPLETED','decision_number'=>'nullable|string|max:100','decision_note'=>'nullable|string|max:2000']);$d['type']='LIQUIDATION';$proposal->update($d);InventoryAuditLog::create(['user_id'=>$r->user()->id,'action'=>'UPDATE','entity_type'=>'proposal','entity_id'=>$proposal->id,'details'=>$d]);return back()->with('success','Đã cập nhật đề xuất thanh lý.');}
     public function proposalDelete(InventoryProposal $proposal){DB::transaction(function()use($proposal):void{$id=$proposal->id;$details=['proposal_title'=>$proposal->title,'proposal_type'=>$proposal->type,'reason'=>'Xóa đề xuất vật tư'];$proposal->items()->delete();$proposal->delete();InventoryAuditLog::withoutEvents(fn()=>InventoryAuditLog::create(['user_id'=>auth()->id(),'action'=>'DELETE','entity_type'=>'proposal','entity_id'=>$id,'details'=>$details]));});return back()->with('success','Đã xóa đề xuất vật tư.');}
-    public function proposalDecide(Request $r,InventoryProposal $proposal){$d=$r->validate(['status'=>'required|in:APPROVED,REJECTED,COMPLETED','decision_note'=>'required_if:status,REJECTED|string|min:3','decision_number'=>'nullable|string|max:100','decision_issuing_level'=>'nullable|string|max:100','decision_signer'=>'nullable|string|max:255']);$wasPending=$proposal->status==='PENDING';DB::transaction(function()use($d,$proposal,$r,$wasPending){$proposal->load('items');$proposal->update($d+['decided_by'=>$r->user()->id,'decided_at'=>now(),'completed_at'=>$d['status']==='COMPLETED'?now():null]);if($wasPending&&in_array($d['status'],['APPROVED','COMPLETED'],true))foreach($proposal->items as $item){$quantity=(int)($item->quantity?:1);if($proposal->type==='LIQUIDATION'){if($item->material){$item->material->update(['quantity'=>max(0,(int)$item->material->quantity-$quantity)]);}if($item->asset){$item->asset->update(['quantity'=>max(0,(int)$item->asset->quantity-$quantity),'status'=>'LIQUIDATED']);}}if($proposal->type==='RECALL'&&$item->asset)$item->asset->update(['classroom_id'=>null]);if($proposal->type==='REPAIR'&&$item->asset)$item->asset->update(['status'=>'REPAIRING']);}InventoryAuditLog::create(['user_id'=>$r->user()->id,'action'=>$d['status'],'entity_type'=>'proposal','entity_id'=>$proposal->id,'details'=>$d+['quantity_processed'=>$wasPending&&$proposal->type==='LIQUIDATION'?($proposal->items->sum('quantity')):0]]);});return back()->with('success','Đã cập nhật quyết định.');}
+    public function proposalDecide(Request $r,InventoryProposal $proposal){abort_unless($proposal->type==='LIQUIDATION',404);$d=$r->validate(['status'=>'required|in:APPROVED,REJECTED,COMPLETED','decision_note'=>'required_if:status,REJECTED|string|min:3','decision_number'=>'nullable|string|max:100','decision_issuing_level'=>'nullable|string|max:100','decision_signer'=>'nullable|string|max:255']);abort_if(in_array($d['status'],['APPROVED','COMPLETED'],true)&&!$proposal->printed_at,422,'Phải in phiếu đề xuất trước khi duyệt.');$wasPending=$proposal->status==='PENDING';DB::transaction(function()use($d,$proposal,$r,$wasPending){$proposal->load('items');$payload=$d+['decided_by'=>$r->user()->id,'decided_at'=>now(),'completed_at'=>$d['status']==='COMPLETED'?now():null];if($wasPending&&$d['status']==='APPROVED')$payload+=['printed_at'=>null,'print_mode'=>null,'signature_method'=>null,'signature_path'=>null];$proposal->update($payload);if($wasPending&&in_array($d['status'],['APPROVED','COMPLETED'],true))foreach($proposal->items as $item){$quantity=(int)($item->quantity?:1);if($item->material){$item->material->update(['quantity'=>max(0,(int)$item->material->quantity-$quantity)]);}if($item->asset){$item->asset->update(['quantity'=>max(0,(int)$item->asset->quantity-$quantity),'status'=>'LIQUIDATED']);}}InventoryAuditLog::create(['user_id'=>$r->user()->id,'action'=>$d['status'],'entity_type'=>'proposal','entity_id'=>$proposal->id,'details'=>$d+['quantity_processed'=>$wasPending?$proposal->items->sum('quantity'):0]]);});return back()->with('success','Đã cập nhật quyết định.');}
 
-    public function repairs(){return view('inventory::feature',['section'=>'repairs','title'=>'Phân công sửa chữa','repairs'=>InventoryRepair::with(['asset','assignee'])->latest()->get(),'assets'=>InventoryAsset::whereIn('status',['BROKEN','REPAIRING'])->orderBy('name')->get(),'users'=>\App\Models\User::where('status',1)->orderBy('name')->get()]);}
-    public function repairStore(Request $r){$d=$r->validate(['asset_id'=>'required|exists:inventory_assets,id','content'=>'required|string','assigned_to'=>'nullable|exists:users,id','cost'=>'nullable|numeric|min:0','performer'=>'nullable|string|max:255','started_at'=>'nullable|date','result_note'=>'nullable|string']);$a=InventoryAsset::findOrFail($d['asset_id']);$existing=InventoryRepair::where('asset_id',$a->id)->whereIn('status',['OPEN','ASSIGNED'])->latest()->first();if($existing && $r->filled('performer')){$existing->update(['status'=>'ASSIGNED','performer'=>$d['performer'],'started_at'=>$d['started_at']??now(),'cost'=>$d['cost']??$existing->cost,'result_note'=>$d['result_note']??null]);$a->update(['status'=>'REPAIRING','repair_started_at'=>$d['started_at']??now(),'repair_performer'=>$d['performer']]);return back()->with('success','Đã phân công người sửa.');}$repair=InventoryRepair::create($d+['status'=>($d['assigned_to']??null)?'ASSIGNED':'OPEN','source_type'=>'REPAIR_REQUEST','requested_by'=>$r->user()->id,'opened_at'=>now(),'started_at'=>now()]);$a->update(['status'=>'REPAIRING','repair_started_at'=>now(),'repair_performer'=>$d['performer']??null]);InventoryBrokenLog::create(['event_type'=>'BROKEN','source_type'=>'REPAIR_REQUEST','source_id'=>$repair->id,'asset_id'=>$a->id,'asset_code'=>$a->asset_code,'asset_name'=>$a->name,'quantity'=>$a->quantity,'original_grade'=>$a->grade,'grade_after'=>5,'status_after'=>'REPAIRING','reason'=>$d['content'],'performer'=>$d['performer']??null,'event_at'=>now(),'actor_user_id'=>$r->user()->id]);return back()->with('success','Đã ghi nhận sửa chữa.');}
-    public function repairComplete(Request $r,InventoryRepair $repair){$d=$r->validate(['status'=>'required|in:COMPLETED,CANCELLED','result'=>'nullable|string','result_note'=>'nullable|string','performer'=>'nullable|string|max:255']);$repair->update($d+['completed_at'=>now(),'result_note'=>$d['result_note']??($d['result']??null)]);if($d['status']==='COMPLETED'){$a=$repair->asset;$a?->update(['status'=>'NORMAL','repair_completed_at'=>now(),'repair_performer'=>$d['performer']??$repair->performer]);if($a)InventoryBrokenLog::create(['event_type'=>'COMPLETED','source_type'=>'REPAIR_REQUEST','source_id'=>$repair->id,'asset_id'=>$a->id,'asset_code'=>$a->asset_code,'asset_name'=>$a->name,'quantity'=>$a->quantity,'original_grade'=>$a->grade,'grade_after'=>2,'status_after'=>'NORMAL','result_note'=>$d['result_note']??($d['result']??null),'performer'=>$d['performer']??$repair->performer,'event_at'=>now(),'actor_user_id'=>$r->user()->id]);}return back()->with('success','Đã cập nhật sửa chữa.');}
+    public function repairs(Request $r){$status=$r->input('status');$repairs=InventoryRepair::with(['asset.classroom.building','assignee','requestedBy'])->when($status,fn($q,$value)=>$q->where('status',$value),fn($q)=>$q->whereIn('status',['OPEN','ASSIGNED']))->latest()->get();$repairBreakReports=InventoryRoomBreakReport::whereIn('id',$repairs->where('source_type','ROOM_BREAK_REPORT')->pluck('source_id')->filter()->values())->get()->keyBy('id');return view('inventory::feature',['section'=>'repairs','title'=>'Phân công sửa chữa','repairs'=>$repairs,'repairBreakReports'=>$repairBreakReports,'assets'=>InventoryAsset::whereIn('status',['BROKEN','REPAIRING'])->orderBy('name')->get(),'users'=>\App\Models\User::where('status',1)->orderBy('name')->get(),'status'=>$status]);}
+    public function repairStore(Request $r){$d=$r->validate(['asset_id'=>'required|exists:inventory_assets,id','content'=>'required|string','assigned_to'=>'nullable|exists:users,id','performer'=>'nullable|string|max:255','started_at'=>'nullable|date']);$a=InventoryAsset::findOrFail($d['asset_id']);$existing=InventoryRepair::where('asset_id',$a->id)->whereIn('status',['OPEN','ASSIGNED'])->latest()->first();if($existing && $r->filled('performer')){$existing->update(['status'=>'ASSIGNED','assigned_to'=>$d['assigned_to']??$existing->assigned_to,'performer'=>$d['performer'],'started_at'=>$d['started_at']??now()]);$a->update(['status'=>'REPAIRING','repair_started_at'=>$d['started_at']??now(),'repair_performer'=>$d['performer']]);return back()->with('success','Đã phân công người sửa.');}$repair=InventoryRepair::create($d+['status'=>($d['assigned_to']??null)||($d['performer']??null)?'ASSIGNED':'OPEN','source_type'=>'REPAIR_REQUEST','requested_by'=>$r->user()->id,'opened_at'=>now(),'started_at'=>($d['assigned_to']??null)||($d['performer']??null)?($d['started_at']??now()):null]);$a->update(['status'=>($repair->status==='ASSIGNED'?'REPAIRING':'BROKEN'),'repair_started_at'=>$repair->started_at,'repair_performer'=>$d['performer']??null]);InventoryBrokenLog::create(['event_type'=>'BROKEN','source_type'=>'REPAIR_REQUEST','source_id'=>$repair->id,'asset_id'=>$a->id,'asset_code'=>$a->asset_code,'asset_name'=>$a->name,'quantity'=>$a->broken_quantity ?: $a->quantity,'original_grade'=>$a->grade,'grade_after'=>5,'status_after'=>$a->status,'reason'=>$d['content'],'performer'=>$d['performer']??null,'event_at'=>now(),'actor_user_id'=>$r->user()->id]);return back()->with('success','Đã ghi nhận sửa chữa.');}
+    public function repairComplete(Request $r,InventoryRepair $repair){$d=$r->validate(['status'=>'required|in:COMPLETED,CANCELLED','grade_after'=>'required_if:status,COMPLETED|nullable|integer|min:1|max:5','cost'=>'required_if:status,COMPLETED|nullable|numeric|min:0','completed_at'=>'required_if:status,COMPLETED|nullable|date','result'=>'nullable|string','result_note'=>'nullable|string','performer'=>'nullable|string|max:255']);DB::transaction(function()use($d,$repair,$r):void{$completedAt=$d['completed_at']??now()->toDateString();$repair->update(collect($d)->except('grade_after')->all()+['completed_at'=>$completedAt,'result_note'=>$d['result_note']??($d['result']??null)]);$a=$repair->asset;if($d['status']==='COMPLETED'&&$a){$report=$repair->source_type==='ROOM_BREAK_REPORT'&&$repair->source_id?InventoryRoomBreakReport::find($repair->source_id):null;$fixedQuantity=(float)($report?->quantity ?: $a->broken_quantity ?: $a->quantity);if($report)$report->update(['status'=>'COMPLETED','note'=>$d['result_note']??($d['result']??null)]);$remainingBroken=(float)InventoryRoomBreakReport::where('asset_id',$a->id)->where('status','PENDING')->sum('quantity');$a->update(['status'=>$remainingBroken>0?'BROKEN':'NORMAL','broken_quantity'=>min((float)$a->quantity,$remainingBroken),'grade'=>$d['grade_after'],'repair_completed_at'=>$completedAt,'repair_performer'=>$d['performer']??$repair->performer]);if($a->classroom_id)InventoryRoomRepair::create(['classroom_id'=>$a->classroom_id,'asset_id'=>$a->id,'repair_date'=>$repair->started_at?->toDateString() ?: $completedAt,'completed_at'=>$completedAt,'equipment_name'=>$a->name,'content'=>$repair->content,'cost'=>$repair->cost ?: 0,'repaired_by'=>$d['performer']??$repair->performer]);InventoryBrokenLog::create(['event_type'=>'COMPLETED','source_type'=>$repair->source_type ?: 'REPAIR_REQUEST','source_id'=>$repair->source_id ?: $repair->id,'asset_id'=>$a->id,'asset_code'=>$a->asset_code,'asset_name'=>$a->name,'quantity'=>$fixedQuantity,'original_grade'=>$a->getOriginal('grade'),'grade_after'=>$d['grade_after'],'status_after'=>$remainingBroken>0?'BROKEN':'NORMAL','result_note'=>$d['result_note']??($d['result']??null),'performer'=>$d['performer']??$repair->performer,'event_at'=>$completedAt,'actor_user_id'=>$r->user()->id]);}elseif($d['status']==='CANCELLED'&&$repair->source_type==='ROOM_BREAK_REPORT'&&$repair->source_id){InventoryRoomBreakReport::whereKey($repair->source_id)->update(['status'=>'CANCELLED','note'=>$d['result_note']??($d['result']??null)]);if($a){$remainingBroken=(float)InventoryRoomBreakReport::where('asset_id',$a->id)->where('status','PENDING')->sum('quantity');$a->update(['status'=>$remainingBroken>0?'BROKEN':'NORMAL','broken_quantity'=>min((float)$a->quantity,$remainingBroken)]);}}});return back()->with('success','Đã cập nhật sửa chữa.');}
 
-    public function transfers(){return view('inventory::feature',['section'=>'transfers','title'=>'Điều động và thu hồi','transfers'=>InventoryTransfer::with(['asset','material','fromClassroom','toClassroom','warehouse'])->latest()->get(),'assets'=>InventoryAsset::with('material')->orderBy('name')->get(),'materials'=>InventoryMaterial::with('category')->orderBy('name')->get(),'categories'=>InventoryCategory::where('active',true)->whereNotNull('parent_id')->orderBy('code')->get(),'industries'=>InventoryCategory::where('active',true)->whereNull('parent_id')->orderBy('code')->get(),'classrooms'=>Classroom::active()->with('managingUnit')->orderBy('name')->get(),'warehouses'=>InventoryWarehouse::where('active',true)->orderBy('name')->get(),'units'=>\Modules\Unit\Models\Unit::active()->orderBy('name')->get()]);}
+    public function transfers(){$roomIds=$this->assignedInventoryRoomIds();$materialIds=$this->scopedMaterialIds($roomIds);$categoryIds=$this->scopedCategoryIds($materialIds);return view('inventory::feature',['section'=>'transfers','title'=>'Điều động và thu hồi','transfers'=>InventoryTransfer::with(['asset','material','fromClassroom','toClassroom','warehouse'])->when($roomIds!==null,fn($q)=>$q->where(fn($x)=>$x->whereIn('from_classroom_id',$roomIds)->orWhereIn('to_classroom_id',$roomIds)->orWhereHas('asset',fn($a)=>$a->whereIn('classroom_id',$roomIds))))->latest()->get(),'assets'=>InventoryAsset::with('material')->when($roomIds!==null,fn($q)=>$q->whereIn('classroom_id',$roomIds))->orderBy('name')->get(),'materials'=>InventoryMaterial::with('category')->when($materialIds!==null,fn($q)=>$q->whereIn('id',$materialIds))->orderBy('name')->get(),'categories'=>InventoryCategory::where('active',true)->whereNotNull('parent_id')->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get(),'industries'=>InventoryCategory::where('active',true)->whereNull('parent_id')->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get(),'classrooms'=>Classroom::active()->with('managingUnit')->when($roomIds!==null,fn($q)=>$q->whereIn('id',$roomIds))->orderBy('name')->get(),'warehouses'=>InventoryWarehouse::where('active',true)->orderBy('name')->get(),'units'=>\Modules\Unit\Models\Unit::active()->orderBy('name')->get()]);}
     public function transferStore(Request $r)
     {
         $d = $r->validate([
@@ -279,42 +731,42 @@ class InventoryWorkflowController extends ModuleBaseController
         return back()->with('success', $transfer->type === 'RECALL' ? 'Đã thu hồi đúng số lượng về kho.' : 'Đã điều động đúng số lượng sang phòng đích.');
     }
 
-    public function search(Request $r){$term=$r->string('q')->toString();return view('inventory::feature',['section'=>'search','title'=>'Tìm kiếm vật tư','materials'=>InventoryMaterial::with(['building','classroom'])->when($term,fn($q)=>$q->where(fn($x)=>$x->where('code','like',"%$term%")->orWhere('name','like',"%$term%")))->get(),'assets'=>InventoryAsset::with('classroom')->when($term,fn($q)=>$q->where(fn($x)=>$x->where('asset_code','like',"%$term%")->orWhere('name','like',"%$term%")))->get()]);}
-    public function logs(Request $r){$logType=$r->input('log_type')?:'all';if(!in_array($logType,['all','update','movement','broken','transfer','proposal','repair'],true))$logType='all';$assetCode=trim((string)$r->input('asset_code',''));$normalizeDate=fn($value)=>blank($value)?null:(preg_match('/^\d{2}\/\d{2}\/\d{4}$/',(string)$value)?\Carbon\Carbon::createFromFormat('d/m/Y',(string)$value)->toDateString():\Carbon\Carbon::parse($value)->toDateString());$from=$normalizeDate($r->input('from'));$to=$normalizeDate($r->input('to'));$users=\App\Models\User::where('status',1)->orderBy('name')->get();$units=\Modules\Unit\Models\Unit::active()->orderBy('name')->get();$classrooms=Classroom::active()->orderBy('name')->get();$auditLogs=InventoryAuditLog::with('user')->when($assetCode!=='',fn($q)=>$q->where(fn($x)=>$x->where('details->asset_code','like',"%$assetCode%")->orWhere('details->code','like',"%$assetCode%")))->when($r->filled('update_action'),fn($q)=>$q->where('action',$r->update_action))->latest()->limit(100)->get()->each->resolveDetails();$logs=InventoryMovement::with(['material','user'])->when($assetCode!=='',fn($q)=>$q->whereHas('material',fn($m)=>$m->where('code','like',"%$assetCode%")))->when($r->filled('movement_type'),fn($q)=>$q->where('type',$r->movement_type))->when($r->filled('performed_by'),fn($q)=>$q->where('created_by',$r->performed_by))->latest()->paginate(30)->withQueryString();$transferLogs=InventoryTransfer::with(['asset','material','fromClassroom','toClassroom','warehouse','decidedBy'])->when($assetCode!=='',fn($q)=>$q->where(fn($x)=>$x->whereHas('asset',fn($a)=>$a->where('asset_code','like',"%$assetCode%"))->orWhereHas('material',fn($m)=>$m->where('code','like',"%$assetCode%"))))->when($r->filled('transfer_type'),fn($q)=>$q->where('type',$r->transfer_type))->when($from,fn($q)=>$q->whereDate('performed_at','>=',$from))->when($to,fn($q)=>$q->whereDate('performed_at','<=',$to))->when($r->filled('from_classroom_id'),fn($q)=>$q->where('from_classroom_id',$r->from_classroom_id))->when($r->filled('to_classroom_id'),fn($q)=>$q->where('to_classroom_id',$r->to_classroom_id))->when($r->filled('performing_unit'),fn($q)=>$q->where('performing_unit','like','%'.$r->performing_unit.'%'))->when($r->filled('status'),fn($q)=>$q->where('status',$r->status))->latest()->limit(50)->get();$repairLogs=InventoryRepair::with(['asset','assignee'])->when($assetCode!=='',fn($q)=>$q->whereHas('asset',fn($a)=>$a->where('asset_code','like',"%$assetCode%")))->when($r->filled('status'),fn($q)=>$q->where('status',$r->status))->when($r->filled('repairer'),fn($q)=>$q->where(fn($x)=>$x->where('performer','like','%'.$r->repairer.'%')->orWhereHas('assignee',fn($u)=>$u->where('name','like','%'.$r->repairer.'%'))))->when($r->filled('started_from'),fn($q)=>$q->whereDate('started_at','>=',$r->started_from))->latest()->limit(50)->get();$proposalLogs=InventoryProposal::with(['items.asset','items.material','unit','decidedBy'])->when($assetCode!=='',fn($q)=>$q->whereHas('items',fn($i)=>$i->where('material_code','like',"%$assetCode%")->orWhere('original_code','like',"%$assetCode%")->orWhereHas('asset',fn($a)=>$a->where('asset_code','like',"%$assetCode%"))->orWhereHas('material',fn($m)=>$m->where('code','like',"%$assetCode%"))))->latest()->limit(100)->get();$brokenLogs=InventoryBrokenLog::with(['asset','actor'])->when($assetCode!=='',fn($q)=>$q->where('asset_code','like',"%$assetCode%"))->when($from,fn($q)=>$q->whereDate('event_at','>=',$from))->when($to,fn($q)=>$q->whereDate('event_at','<=',$to))->when($r->filled('broken_event_type'),fn($q)=>$q->where('event_type',$r->broken_event_type))->when($r->filled('broken_status'),fn($q)=>$q->where('status_after',$r->broken_status))->latest()->limit(100)->get();return view('inventory::feature',['section'=>'logs','title'=>'Nhật ký vật tư','logs'=>$logs,'transferLogs'=>$transferLogs,'repairLogs'=>$repairLogs,'proposalLogs'=>$proposalLogs,'auditLogs'=>$auditLogs,'brokenLogs'=>$brokenLogs,'logType'=>$logType,'users'=>$users,'units'=>$units,'classrooms'=>$classrooms]);}
+    public function search(Request $r){$term=trim($r->string('q')->toString());$hasSearch=$term!=='';$roomIds=$this->assignedInventoryRoomIds($r->user());$materialIds=$this->scopedMaterialIds($roomIds);return view('inventory::feature',['section'=>'search','title'=>'Tìm kiếm vật tư','hasSearch'=>$hasSearch,'totalMaterials'=>InventoryMaterial::when($materialIds!==null,fn($q)=>$q->whereIn('id',$materialIds))->count(),'totalAssets'=>InventoryAsset::when($roomIds!==null,fn($q)=>$q->whereIn('classroom_id',$roomIds))->count(),'materials'=>InventoryMaterial::with(['category.parent','building','classroom'])->when($materialIds!==null,fn($q)=>$q->whereIn('id',$materialIds))->when($hasSearch,fn($q)=>$q->where(fn($x)=>$x->where('code','like',"%$term%")->orWhere('name','like',"%$term%")))->orderBy('code')->get(),'assets'=>InventoryAsset::with(['material.category.parent','classroom.building','holdingUnit'])->when($roomIds!==null,fn($q)=>$q->whereIn('classroom_id',$roomIds))->when($hasSearch,fn($q)=>$q->where(fn($x)=>$x->where('asset_code','like',"%$term%")->orWhere('name','like',"%$term%")->orWhereHas('material',fn($m)=>$m->where('code','like',"%$term%")->orWhere('name','like',"%$term%"))))->orderBy('asset_code')->get()]);}
+    public function logs(Request $r){$logType=$r->input('log_type')?:'all';if(!in_array($logType,['all','update','movement','broken','transfer','proposal','repair'],true))$logType='all';$assetCode=trim((string)$r->input('asset_code',''));$normalizeDate=fn($value)=>blank($value)?null:(preg_match('/^\d{2}\/\d{2}\/\d{4}$/',(string)$value)?\Carbon\Carbon::createFromFormat('d/m/Y',(string)$value)->toDateString():\Carbon\Carbon::parse($value)->toDateString());$from=$normalizeDate($r->input('from'));$to=$normalizeDate($r->input('to'));$users=\App\Models\User::where('status',1)->orderBy('name')->get();$units=\Modules\Unit\Models\Unit::active()->orderBy('name')->get();$classrooms=Classroom::active()->orderBy('name')->get();$auditLogs=InventoryAuditLog::with('user')->when($assetCode!=='',fn($q)=>$q->where(fn($x)=>$x->where('details->asset_code','like',"%$assetCode%")->orWhere('details->code','like',"%$assetCode%")))->when($r->filled('update_action'),fn($q)=>$q->where('action',$r->update_action))->latest()->limit(100)->get()->each->resolveDetails();$logs=InventoryMovement::with(['material','user'])->when($assetCode!=='',fn($q)=>$q->whereHas('material',fn($m)=>$m->where('code','like',"%$assetCode%")))->when($r->filled('movement_type'),fn($q)=>$q->where('type',$r->movement_type))->when($r->filled('performed_by'),fn($q)=>$q->where('created_by',$r->performed_by))->latest()->paginate(30)->withQueryString();$transferLogs=InventoryTransfer::with(['asset','material','fromClassroom','toClassroom','warehouse','decidedBy'])->when($assetCode!=='',fn($q)=>$q->where(fn($x)=>$x->whereHas('asset',fn($a)=>$a->where('asset_code','like',"%$assetCode%"))->orWhereHas('material',fn($m)=>$m->where('code','like',"%$assetCode%"))))->when($r->filled('transfer_type'),fn($q)=>$q->where('type',$r->transfer_type))->when($from,fn($q)=>$q->whereDate('performed_at','>=',$from))->when($to,fn($q)=>$q->whereDate('performed_at','<=',$to))->when($r->filled('from_classroom_id'),fn($q)=>$q->where('from_classroom_id',$r->from_classroom_id))->when($r->filled('to_classroom_id'),fn($q)=>$q->where('to_classroom_id',$r->to_classroom_id))->when($r->filled('performing_unit'),fn($q)=>$q->where('performing_unit','like','%'.$r->performing_unit.'%'))->when($r->filled('status'),fn($q)=>$q->where('status',$r->status))->latest()->limit(50)->get();$repairLogs=InventoryRepair::with(['asset','assignee'])->when($assetCode!=='',fn($q)=>$q->whereHas('asset',fn($a)=>$a->where('asset_code','like',"%$assetCode%")))->when($r->filled('status'),fn($q)=>$q->where('status',$r->status))->when($r->filled('repairer'),fn($q)=>$q->where(fn($x)=>$x->where('performer','like','%'.$r->repairer.'%')->orWhereHas('assignee',fn($u)=>$u->where('name','like','%'.$r->repairer.'%'))))->when($r->filled('started_from'),fn($q)=>$q->whereDate('started_at','>=',$r->started_from))->latest()->limit(50)->get();$proposalLogs=InventoryProposal::with(['items.asset','items.material','unit','decidedBy'])->where('type','LIQUIDATION')->when($assetCode!=='',fn($q)=>$q->whereHas('items',fn($i)=>$i->where('material_code','like',"%$assetCode%")->orWhere('original_code','like',"%$assetCode%")->orWhereHas('asset',fn($a)=>$a->where('asset_code','like',"%$assetCode%"))->orWhereHas('material',fn($m)=>$m->where('code','like',"%$assetCode%"))))->latest()->limit(100)->get();$brokenLogs=InventoryBrokenLog::with(['asset','actor'])->when($assetCode!=='',fn($q)=>$q->where('asset_code','like',"%$assetCode%"))->when($from,fn($q)=>$q->whereDate('event_at','>=',$from))->when($to,fn($q)=>$q->whereDate('event_at','<=',$to))->when($r->filled('broken_event_type'),fn($q)=>$q->where('event_type',$r->broken_event_type))->when($r->filled('broken_status'),fn($q)=>$q->where('status_after',$r->broken_status))->latest()->limit(100)->get();return view('inventory::feature',['section'=>'logs','title'=>'Nhật ký vật tư','logs'=>$logs,'transferLogs'=>$transferLogs,'repairLogs'=>$repairLogs,'proposalLogs'=>$proposalLogs,'auditLogs'=>$auditLogs,'brokenLogs'=>$brokenLogs,'logType'=>$logType,'users'=>$users,'units'=>$units,'classrooms'=>$classrooms]);}
     public function auditLogUpdate(Request $r,InventoryAuditLog $log){$d=$r->validate(['created_at'=>'nullable|date','action'=>'required|string|max:80','asset_code'=>'nullable|string|max:120','name'=>'nullable|string|max:255','quantity'=>'nullable|numeric|min:0','reason'=>'nullable|string|max:2000']);$details=(array)$log->details;$details['asset_code']=$d['asset_code']??data_get($details,'asset_code',data_get($details,'code'));$details['code']=$details['asset_code'];$details['name']=$d['name']??data_get($details,'name');$details['quantity']=$d['quantity']??data_get($details,'quantity',0);$details['reason']=$d['reason']??data_get($details,'reason');$log->update(['action'=>$d['action'],'details'=>$details,'created_at'=>$d['created_at']??$log->created_at]);return back()->with('success','Đã cập nhật nhật ký vật tư.');}
     public function auditLogDelete(InventoryAuditLog $log){$log->delete();return back()->with('success','Đã xóa nhật ký vật tư.');}
     public function movementUpdate(Request $r,InventoryMovement $movement){$movement->update($r->validate(['type'=>'required|string|max:50','quantity'=>'required|integer|min:0','reference'=>'nullable|string|max:255','note'=>'nullable|string|max:2000']));return back()->with('success','Đã cập nhật nhật ký nhập / xuất vật tư.');}
     public function movementDelete(InventoryMovement $movement){$movement->delete();return back()->with('success','Đã xóa nhật ký nhập / xuất vật tư.');}
     public function brokenLogUpdate(Request $r,InventoryBrokenLog $brokenLog){$brokenLog->update($r->validate(['event_at'=>'nullable|date','event_type'=>'required|string|max:80','asset_code'=>'nullable|string|max:120','asset_name'=>'required|string|max:255','quantity'=>'required|numeric|min:0','status_after'=>'nullable|string|max:80','reason'=>'nullable|string|max:2000','performer'=>'nullable|string|max:255']));return back()->with('success','Đã cập nhật nhật ký hỏng / sửa chữa.');}
     public function brokenLogDelete(InventoryBrokenLog $brokenLog){$brokenLog->delete();return back()->with('success','Đã xóa nhật ký hỏng / sửa chữa.');}
-    public function repairUpdate(Request $r,InventoryRepair $repair){$repair->update($r->validate(['status'=>'required|in:OPEN,ASSIGNED,COMPLETED,CANCELLED','content'=>'nullable|string|max:2000','performer'=>'nullable|string|max:255','started_at'=>'nullable|date','cost'=>'nullable|numeric|min:0','result_note'=>'nullable|string|max:2000']));return back()->with('success','Đã cập nhật phiếu sửa chữa.');}
+    public function repairUpdate(Request $r,InventoryRepair $repair){$repair->update($r->validate(['status'=>'required|in:OPEN,ASSIGNED,COMPLETED,CANCELLED','content'=>'nullable|string|max:2000','performer'=>'nullable|string|max:255','started_at'=>'nullable|date','completed_at'=>'nullable|date','cost'=>'nullable|numeric|min:0','result_note'=>'nullable|string|max:2000']));return back()->with('success','Đã cập nhật phiếu sửa chữa.');}
     public function repairDelete(InventoryRepair $repair){$repair->delete();return back()->with('success','Đã xóa phiếu sửa chữa.');}
     public function assignCategory(Request $r){$d=$r->validate(['user_id'=>'required|exists:users,id','category_id'=>'required|exists:inventory_categories,id']);InventoryUserCategory::firstOrCreate($d);InventoryAuditLog::create(['user_id'=>$r->user()->id,'action'=>'ASSIGN','entity_type'=>'user_category','entity_id'=>$d['category_id'],'details'=>$d]);return back()->with('success','Đã gán ngành vật tư.');}
-    public function myCatalog(Request $r){$categories=InventoryCategory::withCount('materials')->whereHas('userAssignments',fn($q)=>$q->where('user_id',$r->user()->id))->orderBy('name')->get();return view('inventory::feature',['section'=>'my-catalog','title'=>'Ngành vật tư của tôi','categories'=>$categories]);}
-    public function liquidation(){$liquidated=InventoryProposal::where('type','LIQUIDATION')->whereIn('status',['APPROVED','COMPLETED'])->with('items')->get()->sum(fn($p)=>$p->items->sum('quantity'));$recalled=InventoryProposal::where('type','RECALL')->whereIn('status',['APPROVED','COMPLETED'])->with('items')->get()->sum(fn($p)=>$p->items->sum('quantity'));$repaired=InventoryRepair::where('status','COMPLETED')->with('asset')->get()->sum(fn($r)=>(int)($r->asset?->quantity??0));return view('inventory::feature',['section'=>'liquidation','title'=>'Đề xuất / thanh lý','proposals'=>InventoryProposal::with(['unit','items'])->where('type','LIQUIDATION')->latest()->get(),'liquidatedQuantity'=>$liquidated,'recalledQuantity'=>$recalled,'repairedQuantity'=>$repaired,'units'=>\Modules\Unit\Models\Unit::active()->orderBy('name')->get(),'assets'=>InventoryAsset::with('classroom')->where('status','<>','LIQUIDATED')->orderBy('name')->get(),'materials'=>InventoryMaterial::with('category')->orderBy('name')->get(),'categories'=>InventoryCategory::where('active',true)->whereNull('parent_id')->orderBy('code')->get(),'types'=>InventoryCategory::where('active',true)->whereNotNull('parent_id')->orderBy('code')->get(),'classrooms'=>Classroom::active()->with('building')->orderBy('name')->get()]);}
+    public function liquidation(){$roomIds=$this->assignedInventoryRoomIds();$materialIds=$this->scopedMaterialIds($roomIds);$categoryIds=$this->scopedCategoryIds($materialIds);$proposalScope=fn($q)=>$roomIds===null?$q:$q->whereHas('items',fn($i)=>$i->whereIn('from_classroom_id',$roomIds)->orWhereIn('target_room_id',$roomIds)->orWhereHas('asset',fn($a)=>$a->whereIn('classroom_id',$roomIds)));$liquidated=$proposalScope(InventoryProposal::where('type','LIQUIDATION')->whereIn('status',['APPROVED','COMPLETED']))->with('items')->get()->sum(fn($p)=>$p->items->sum('quantity'));return view('inventory::feature',['section'=>'liquidation','title'=>'Đề xuất thanh lý','proposals'=>$proposalScope(InventoryProposal::with(['unit','items'])->where('type','LIQUIDATION'))->latest()->get(),'liquidatedQuantity'=>$liquidated,'recalledQuantity'=>0,'repairedQuantity'=>0,'units'=>\Modules\Unit\Models\Unit::active()->orderBy('name')->get(),'assets'=>InventoryAsset::with('classroom')->when($roomIds!==null,fn($q)=>$q->whereIn('classroom_id',$roomIds))->where('status','<>','LIQUIDATED')->orderBy('name')->get(),'materials'=>InventoryMaterial::with('category')->when($materialIds!==null,fn($q)=>$q->whereIn('id',$materialIds))->orderBy('name')->get(),'categories'=>InventoryCategory::where('active',true)->whereNull('parent_id')->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get(),'types'=>InventoryCategory::where('active',true)->whereNotNull('parent_id')->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get(),'classrooms'=>Classroom::active()->with('building')->when($roomIds!==null,fn($q)=>$q->whereIn('id',$roomIds))->orderBy('name')->get()]);}
 
-    public function buildings(Request $r){$buildings=Building::withCount('classrooms')->when($r->filled('search'),fn($q)=>$q->where(fn($x)=>$x->where('code','like','%'.$r->search.'%')->orWhere('name','like','%'.$r->search.'%')))->when($r->filled('status'),fn($q)=>$q->where('status',$r->status))->orderBy('name')->get();return view('inventory::feature',['section'=>'inventory-buildings','title'=>'Danh mục tòa nhà','buildings'=>$buildings]);}
-    public function classrooms(Request $r){$classrooms=Classroom::with(['building','managingUnit'])->withCount('inventoryAssets')->when($r->filled('search'),fn($q)=>$q->where(fn($x)=>$x->where('code','like','%'.$r->search.'%')->orWhere('name','like','%'.$r->search.'%')))->when($r->filled('building_id'),fn($q)=>$q->where('building_id',$r->building_id))->when($r->filled('floor'),fn($q)=>$q->where('floor',$r->floor))->when($r->filled('status'),fn($q)=>$q->where('status',$r->status))->orderBy('building_id')->orderBy('floor')->orderBy('name')->get();return view('inventory::feature',['section'=>'inventory-classrooms','title'=>'Danh mục phòng','classrooms'=>$classrooms,'buildings'=>Building::where('status',true)->orderBy('name')->get()]);}
-    public function building(Request $r,Building $building){$classrooms=Classroom::where('building_id',$building->id)->orderBy('floor')->orderBy('name')->get();$classrooms->each(fn($room)=>$room->inventory_count=InventoryAsset::where('classroom_id',$room->id)->sum('quantity'));$selectedRoom=null;$roomData=[];if($r->filled('room')){$selectedRoom=$classrooms->firstWhere('id',(int)$r->input('room'));if($selectedRoom){$selectedRoom->load(['building','managingUnit']);$roomData=['assets'=>InventoryAsset::where('classroom_id',$selectedRoom->id)->with(['material.category.parent','holdingUnit'])->orderBy('name')->get(),'materials'=>InventoryMaterial::with('category.parent')->where('quantity','>',0)->orderBy('name')->get(),'roomImages'=>InventoryRoomImage::where('classroom_id',$selectedRoom->id)->latest()->get(),'roomUsers'=>InventoryRoomUser::where('classroom_id',$selectedRoom->id)->with('user')->latest()->get(),'users'=>\App\Models\User::where('status',1)->orderBy('name')->get(),'breakReports'=>\Modules\Inventory\Models\InventoryRoomBreakReport::where('classroom_id',$selectedRoom->id)->with('reporter')->latest()->get(),'roomRepairs'=>\Modules\Inventory\Models\InventoryRoomRepair::where('classroom_id',$selectedRoom->id)->latest()->get(),'roomInventories'=>\Modules\Inventory\Models\InventoryRoomInventory::where('classroom_id',$selectedRoom->id)->latest()->get(),'roomReplacements'=>\Modules\Inventory\Models\InventoryRoomReplacement::where('classroom_id',$selectedRoom->id)->latest()->get(),'industries'=>InventoryCategory::whereNull('parent_id')->where('active',true)->orderBy('code')->get(),'categories'=>InventoryCategory::whereNotNull('parent_id')->where('active',true)->orderBy('code')->get(),'units'=>\Modules\Unit\Models\Unit::active()->orderBy('name')->get()];}}return view('inventory::feature',['section'=>'building','title'=>'Tòa nhà: '.$building->name,'building'=>$building,'classrooms'=>$classrooms,'selectedRoom'=>$selectedRoom]+$roomData);}
-    public function room(Classroom $classroom){return view('inventory::feature',['section'=>'room','title'=>'Phòng: '.$classroom->name,'classroom'=>$classroom->load(['building','managingUnit']),'assets'=>InventoryAsset::where('classroom_id',$classroom->id)->with(['material.category.parent','holdingUnit'])->orderBy('name')->get(),'materials'=>InventoryMaterial::with('category.parent')->where('quantity','>',0)->orderBy('name')->get(),'roomImages'=>InventoryRoomImage::where('classroom_id',$classroom->id)->latest()->get(),'roomUsers'=>InventoryRoomUser::where('classroom_id',$classroom->id)->with('user')->latest()->get(),'users'=>\App\Models\User::where('status',1)->orderBy('name')->get(),'breakReports'=>\Modules\Inventory\Models\InventoryRoomBreakReport::where('classroom_id',$classroom->id)->with('reporter')->latest()->get(),'roomRepairs'=>\Modules\Inventory\Models\InventoryRoomRepair::where('classroom_id',$classroom->id)->latest()->get(),'roomInventories'=>\Modules\Inventory\Models\InventoryRoomInventory::where('classroom_id',$classroom->id)->latest()->get(),'roomReplacements'=>\Modules\Inventory\Models\InventoryRoomReplacement::where('classroom_id',$classroom->id)->latest()->get(),'industries'=>InventoryCategory::whereNull('parent_id')->where('active',true)->orderBy('code')->get(),'categories'=>InventoryCategory::whereNotNull('parent_id')->where('active',true)->orderBy('code')->get(),'units'=>\Modules\Unit\Models\Unit::active()->orderBy('name')->get()]);}
-    public function roomAssetStore(Request $r,Classroom $classroom){$d=$r->validate(['material_id'=>'required|exists:inventory_materials,id','quantity'=>'required|numeric|min:.01','holding_unit_id'=>'nullable|exists:units,id']);$d['holding_unit_id']=$d['holding_unit_id']?:$classroom->managing_unit_id;abort_unless($d['holding_unit_id'],'Chưa chọn đơn vị quản lý / giữ vật tư.');$asset=null;DB::transaction(function()use($d,$classroom,$r,&$asset){$material=InventoryMaterial::with('category')->lockForUpdate()->findOrFail($d['material_id']);$quantity=(int)$d['quantity'];abort_if((int)$material->quantity<$quantity,422,'Số lượng vật tư trong bảng vật tư không đủ để thêm vào phòng.');$asset=InventoryAsset::where('material_id',$material->id)->where('classroom_id',$classroom->id)->lockForUpdate()->first();if($asset){$before=(int)$asset->quantity;$asset->update(['asset_code'=>$material->code,'name'=>$material->name,'quantity'=>$before+$quantity,'unit'=>$material->unit,'holding_unit_id'=>$d['holding_unit_id']]);}else{$asset=InventoryAsset::create(['material_id'=>$material->id,'classroom_id'=>$classroom->id,'asset_code'=>$material->code,'name'=>$material->name,'quantity'=>$quantity,'unit'=>$material->unit,'holding_unit_id'=>$d['holding_unit_id'],'grade'=>1,'status'=>'NORMAL']);}$material->decrement('quantity',$quantity);InventoryMovement::create(['material_id'=>$material->id,'type'=>'OUT','quantity'=>$quantity,'note'=>'Thêm vật tư vào phòng '.$classroom->name,'created_by'=>$r->user()->id]);InventoryAuditLog::create(['user_id'=>auth()->id(),'action'=>'CREATE','entity_type'=>'asset','entity_id'=>$asset->id,'details'=>['reason'=>'Thêm vật tư vào phòng','quantity'=>$quantity,'classroom_id'=>$classroom->id,'holding_unit_id'=>$d['holding_unit_id'],'asset_code'=>$material->code,'name'=>$material->name]]);});return back()->with('success','Đã thêm vật tư có sẵn vào phòng và trừ số lượng trong bảng vật tư.');}
-    public function roomAssetImport(Request $r,Classroom $classroom){$d=$r->validate(['file'=>'required|file|mimes:xlsx,xls,csv,txt|max:20480','holding_unit_id'=>'nullable|exists:units,id']);$d['holding_unit_id']=$d['holding_unit_id']?:$classroom->managing_unit_id;abort_unless($d['holding_unit_id'],'Chưa chọn đơn vị quản lý / giữ vật tư.');$rows=\PhpOffice\PhpSpreadsheet\IOFactory::load($r->file('file')->getRealPath())->getActiveSheet()->toArray(null,true,true,true);$headers=array_map(fn($v)=>strtolower(trim((string)$v)),array_shift($rows));$count=0;DB::transaction(function()use($rows,$headers,$d,$classroom,$r,&$count){foreach($rows as $row){$values=[];foreach($headers as $key=>$header)$values[$header]=trim((string)($row[$key]??''));if(empty($values['code']))continue;$material=InventoryMaterial::where('code',$values['code'])->lockForUpdate()->first();if(!$material)continue;$quantity=(int)($values['quantity']?:1);abort_if((int)$material->quantity<$quantity,422,'Số lượng vật tư '.$material->code.' trong bảng vật tư không đủ để import vào phòng.');$asset=InventoryAsset::where('material_id',$material->id)->where('classroom_id',$classroom->id)->lockForUpdate()->first();if($asset){$asset->update(['asset_code'=>$material->code,'name'=>$material->name,'quantity'=>(int)$asset->quantity+$quantity,'unit'=>$material->unit,'holding_unit_id'=>$d['holding_unit_id']]);}else{$asset=InventoryAsset::create(['material_id'=>$material->id,'classroom_id'=>$classroom->id,'asset_code'=>$material->code,'name'=>$material->name,'quantity'=>$quantity,'unit'=>$material->unit,'holding_unit_id'=>$d['holding_unit_id'],'grade'=>1,'status'=>'NORMAL']);}$material->decrement('quantity',$quantity);InventoryMovement::create(['material_id'=>$material->id,'type'=>'OUT','quantity'=>$quantity,'note'=>'Import vật tư vào phòng '.$classroom->name,'created_by'=>$r->user()->id]);InventoryAuditLog::create(['user_id'=>auth()->id(),'action'=>'CREATE','entity_type'=>'asset','entity_id'=>$asset->id,'details'=>['reason'=>'Import vật tư vào phòng','quantity'=>$quantity,'classroom_id'=>$classroom->id,'holding_unit_id'=>$d['holding_unit_id'],'asset_code'=>$material->code,'name'=>$material->name]]);$count++;}});return back()->with('success',"Đã import {$count} vật tư có sẵn vào phòng và trừ số lượng trong bảng vật tư.");}
-    public function roomAssetUpdate(Request $r,Classroom $classroom,InventoryAsset $asset){abort_unless((int)$asset->classroom_id===(int)$classroom->id,404);$d=$r->validate(['quantity'=>'required|numeric|min:.01','holding_unit_id'=>'nullable|exists:units,id','grade'=>'required|integer|min:1|max:5','status'=>'required|in:NORMAL,BROKEN,REPAIRING,LIQUIDATED']);$d['holding_unit_id']=$d['holding_unit_id']?:$classroom->managing_unit_id;abort_unless($d['holding_unit_id'],'Chưa chọn đơn vị quản lý / giữ vật tư.');$before=(int)$asset->quantity;DB::transaction(function()use($d,$asset,$classroom,$r,$before){$asset->lockForUpdate();$after=(int)$d['quantity'];$change=$after-$before;if($change!==0&&$asset->material_id){$material=InventoryMaterial::lockForUpdate()->find($asset->material_id);if($material){abort_if($change>0&&(int)$material->quantity<$change,422,'Số lượng vật tư trong bảng vật tư không đủ để tăng trong phòng.');$change>0?$material->decrement('quantity',$change):$material->increment('quantity',abs($change));InventoryMovement::create(['material_id'=>$material->id,'type'=>$change>0?'OUT':'IN','quantity'=>abs($change),'note'=>'Sửa số lượng vật tư trong phòng '.$classroom->name,'created_by'=>$r->user()->id]);}}$asset->update($d);InventoryAuditLog::create(['user_id'=>auth()->id(),'action'=>'UPDATE','entity_type'=>'asset','entity_id'=>$asset->id,'details'=>$d+['reason'=>$r->input('reason')?:'Sửa thông tin vật tư trong phòng','before'=>$before,'after'=>$after,'quantity'=>abs($change),'classroom_id'=>$classroom->id]]);});return back()->with('success','Đã sửa vật tư trong phòng và đồng bộ số lượng bảng vật tư.');}
-    public function roomAssetDelete(Request $r,Classroom $classroom,InventoryAsset $asset){abort_unless((int)$asset->classroom_id===(int)$classroom->id,404);abort_if($asset->repairs()->exists()||$asset->proposals()->exists(),422,'Không thể xóa vật tư đã có lịch sử.');$details=['reason'=>$r->input('reason')?:'Xóa vật tư khỏi phòng','quantity'=>(int)$asset->quantity,'classroom_id'=>$classroom->id,'asset_code'=>$asset->asset_code,'name'=>$asset->name];$id=$asset->id;DB::transaction(function()use($asset,$classroom,$details,$id,$r){$quantity=(int)$asset->quantity;if($asset->material_id&&$quantity>0){$material=InventoryMaterial::lockForUpdate()->find($asset->material_id);if($material){$material->increment('quantity',$quantity);InventoryMovement::create(['material_id'=>$material->id,'type'=>'IN','quantity'=>$quantity,'note'=>'Xóa vật tư khỏi phòng '.$classroom->name,'created_by'=>$r->user()->id]);}}$asset->delete();InventoryAuditLog::create(['user_id'=>auth()->id(),'action'=>'DELETE','entity_type'=>'asset','entity_id'=>$id,'details'=>$details]);});return back()->with('success','Đã xóa vật tư khỏi phòng và hoàn lại số lượng vào bảng vật tư.');}
-    public function roomImageStore(Request $r,Classroom $classroom){$d=$r->validate(['image'=>'required|image|max:10240','caption'=>'nullable|string|max:255']);InventoryRoomImage::create(['classroom_id'=>$classroom->id,'path'=>$r->file('image')->store('inventory-room-images'),'caption'=>$d['caption']??null,'uploaded_by'=>$r->user()->id]);return back()->with('success','Đã thêm ảnh phòng.');}
-    public function roomImageDelete(InventoryRoomImage $image){abort_unless(\App\Support\PermissionCheck::can(auth()->user(),'inventory.locations.delete'),403);Storage::delete($image->path);$image->delete();return back()->with('success','Đã xóa ảnh phòng.');}
-    public function roomUserStore(Request $r,Classroom $classroom){$d=$r->validate(['user_id'=>'required|exists:users,id','role'=>'nullable|string|max:100']);InventoryRoomUser::updateOrCreate(['classroom_id'=>$classroom->id,'user_id'=>$d['user_id']],['role'=>$d['role']??null]);return back()->with('success','Đã gán người phụ trách phòng.');}
-    public function roomUserDelete(InventoryRoomUser $roomUser){$roomUser->delete();return back()->with('success','Đã bỏ người phụ trách phòng.');}
+    public function buildings(Request $r){$roomIds=$this->assignedInventoryRoomIds($r->user());$buildingIds=$this->scopedBuildingIds($roomIds);$buildings=Building::withCount(['classrooms'=>fn($q)=>$q->when($roomIds!==null,fn($x)=>$x->whereIn('id',$roomIds))])->when($buildingIds!==null,fn($q)=>$q->whereIn('id',$buildingIds))->when($r->filled('search'),fn($q)=>$q->where(fn($x)=>$x->where('code','like','%'.$r->search.'%')->orWhere('name','like','%'.$r->search.'%')))->when($r->filled('status'),fn($q)=>$q->where('status',$r->status))->orderBy('name')->get();return view('inventory::feature',['section'=>'inventory-buildings','title'=>'Danh mục tòa nhà','buildings'=>$buildings]);}
+    public function classrooms(Request $r){$roomIds=$this->assignedInventoryRoomIds($r->user());$buildingIds=$this->scopedBuildingIds($roomIds);$classrooms=Classroom::with(['building','managingUnit'])->withCount('inventoryAssets')->when($roomIds!==null,fn($q)=>$q->whereIn('id',$roomIds))->when($r->filled('search'),fn($q)=>$q->where(fn($x)=>$x->where('code','like','%'.$r->search.'%')->orWhere('name','like','%'.$r->search.'%')))->when($r->filled('building_id'),fn($q)=>$q->where('building_id',$r->building_id))->when($r->filled('floor'),fn($q)=>$q->where('floor',$r->floor))->when($r->filled('status'),fn($q)=>$q->where('status',$r->status))->orderBy('building_id')->orderBy('floor')->orderBy('name')->get();return view('inventory::feature',['section'=>'inventory-classrooms','title'=>'Danh mục phòng','classrooms'=>$classrooms,'buildings'=>Building::where('status',true)->when($buildingIds!==null,fn($q)=>$q->whereIn('id',$buildingIds))->orderBy('name')->get()]);}
+    public function building(Request $r,Building $building){$roomIds=$this->assignedInventoryRoomIds($r->user());$materialIds=$this->scopedMaterialIds($roomIds);$categoryIds=$this->scopedCategoryIds($materialIds);$classrooms=Classroom::where('building_id',$building->id)->when($roomIds!==null,fn($q)=>$q->whereIn('id',$roomIds))->orderBy('floor')->orderBy('name')->get();abort_if($roomIds!==null&&$classrooms->isEmpty(),403,'Tài khoản này không được gán phòng trong tòa nhà này.');$classrooms->each(fn($room)=>$room->inventory_count=InventoryAsset::where('classroom_id',$room->id)->sum('quantity'));$selectedRoom=null;$roomData=[];if($r->filled('room')){$selectedRoom=$classrooms->firstWhere('id',(int)$r->input('room'));if($selectedRoom){$selectedRoom->load(['building','managingUnit']);$roomData=['assets'=>InventoryAsset::where('classroom_id',$selectedRoom->id)->with(['material.category.parent','holdingUnit'])->orderBy('name')->get(),'materials'=>InventoryMaterial::with('category.parent')->when($materialIds!==null,fn($q)=>$q->whereIn('id',$materialIds))->where('quantity','>',0)->orderBy('name')->get(),'roomImages'=>InventoryRoomImage::where('classroom_id',$selectedRoom->id)->latest()->get(),'roomUsers'=>InventoryRoomUser::where('classroom_id',$selectedRoom->id)->with('user')->latest()->get(),'users'=>\App\Models\User::where('status',1)->orderBy('name')->get(),'breakReports'=>\Modules\Inventory\Models\InventoryRoomBreakReport::where('classroom_id',$selectedRoom->id)->with('reporter')->latest()->get(),'roomRepairs'=>\Modules\Inventory\Models\InventoryRoomRepair::where('classroom_id',$selectedRoom->id)->latest()->get(),'roomInventories'=>\Modules\Inventory\Models\InventoryRoomInventory::where('classroom_id',$selectedRoom->id)->latest()->get(),'roomReplacements'=>\Modules\Inventory\Models\InventoryRoomReplacement::where('classroom_id',$selectedRoom->id)->latest()->get(),'industries'=>InventoryCategory::whereNull('parent_id')->where('active',true)->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get(),'categories'=>InventoryCategory::whereNotNull('parent_id')->where('active',true)->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get(),'units'=>\Modules\Unit\Models\Unit::active()->orderBy('name')->get()];}}return view('inventory::feature',['section'=>'building','title'=>'Tòa nhà: '.$building->name,'building'=>$building,'classrooms'=>$classrooms,'selectedRoom'=>$selectedRoom]+$roomData);}
+    public function room(Classroom $classroom){$this->ensureInventoryRoomAllowed($classroom);$roomIds=$this->assignedInventoryRoomIds();$materialIds=$this->scopedMaterialIds($roomIds);$categoryIds=$this->scopedCategoryIds($materialIds);return view('inventory::feature',['section'=>'room','title'=>'Phòng: '.$classroom->name,'classroom'=>$classroom->load(['building','managingUnit']),'assets'=>InventoryAsset::where('classroom_id',$classroom->id)->with(['material.category.parent','holdingUnit'])->orderBy('name')->get(),'materials'=>InventoryMaterial::with('category.parent')->when($materialIds!==null,fn($q)=>$q->whereIn('id',$materialIds))->where('quantity','>',0)->orderBy('name')->get(),'roomImages'=>InventoryRoomImage::where('classroom_id',$classroom->id)->latest()->get(),'roomUsers'=>InventoryRoomUser::where('classroom_id',$classroom->id)->with('user')->latest()->get(),'users'=>\App\Models\User::where('status',1)->orderBy('name')->get(),'breakReports'=>\Modules\Inventory\Models\InventoryRoomBreakReport::where('classroom_id',$classroom->id)->with('reporter')->latest()->get(),'roomRepairs'=>\Modules\Inventory\Models\InventoryRoomRepair::where('classroom_id',$classroom->id)->latest()->get(),'roomInventories'=>\Modules\Inventory\Models\InventoryRoomInventory::where('classroom_id',$classroom->id)->latest()->get(),'roomReplacements'=>\Modules\Inventory\Models\InventoryRoomReplacement::where('classroom_id',$classroom->id)->latest()->get(),'industries'=>InventoryCategory::whereNull('parent_id')->where('active',true)->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get(),'categories'=>InventoryCategory::whereNotNull('parent_id')->where('active',true)->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get(),'units'=>\Modules\Unit\Models\Unit::active()->orderBy('name')->get()]);}
+    public function roomBreakReportStore(Request $r,Classroom $classroom){$this->ensureInventoryRoomAllowed($classroom);$d=$r->validate(['asset_id'=>'required|exists:inventory_assets,id','source_category_id'=>'required|string|max:100','equipment_source'=>'required|string|max:255','quantity'=>'required|numeric|min:.01','broken_at'=>'required|date','condition_description'=>'required|string|max:3000']);$asset=InventoryAsset::where('classroom_id',$classroom->id)->findOrFail($d['asset_id']);abort_unless($asset->status==='NORMAL',422,'Chỉ báo hỏng từ vật tư đang ổn định.');$assetSourceKey=(string)($asset->material?->category_id ?: ('asset-category-'.md5((string)($asset->category ?: 'khac'))));abort_unless(hash_equals($assetSourceKey,(string)$d['source_category_id']),422,'Thiết bị hỏng không thuộc nguồn thiết bị đã chọn.');abort_if((float)$d['quantity']>(float)$asset->quantity,422,'Số lượng hỏng không được lớn hơn số lượng trong phòng.');DB::transaction(function()use($d,$asset,$classroom,$r):void{$brokenAsset=$asset;$brokenQty=(float)$d['quantity'];$originalGrade=$asset->grade;if($brokenQty<(float)$asset->quantity){$asset->decrement('quantity',$brokenQty);$brokenAsset=InventoryAsset::create(['material_id'=>$asset->material_id,'category_id'=>$asset->category_id,'classroom_id'=>$asset->classroom_id,'asset_code'=>$asset->asset_code,'name'=>$asset->name,'category'=>$asset->category,'quantity'=>$brokenQty,'broken_quantity'=>$brokenQty,'unit'=>$asset->unit,'holding_unit_id'=>$asset->holding_unit_id,'grade'=>5,'manufacture_year'=>$asset->manufacture_year,'usage_year'=>$asset->usage_year,'install_address'=>$asset->install_address,'status'=>'BROKEN','purchase_date'=>$asset->purchase_date,'expiry_date'=>$asset->expiry_date,'broken_at'=>$d['broken_at'],'note'=>$asset->note,'description'=>$asset->description]);}else{$brokenAsset->update(['status'=>'BROKEN','broken_quantity'=>$brokenQty,'grade'=>5,'broken_at'=>$d['broken_at']]);}$report=InventoryRoomBreakReport::create(['classroom_id'=>$classroom->id,'asset_id'=>$brokenAsset->id,'equipment_source'=>$d['equipment_source'],'equipment_name'=>$brokenAsset->name,'quantity'=>$brokenQty,'broken_at'=>$d['broken_at'],'condition_description'=>$d['condition_description'],'reported_by'=>$r->user()->id,'status'=>'PENDING']);InventoryBrokenLog::create(['event_type'=>'BROKEN','source_type'=>'ROOM_BREAK_REPORT','source_id'=>$report->id,'asset_id'=>$brokenAsset->id,'asset_code'=>$brokenAsset->asset_code,'asset_name'=>$brokenAsset->name,'quantity'=>$brokenQty,'original_grade'=>$originalGrade,'grade_after'=>5,'status_after'=>'BROKEN','reason'=>$d['condition_description'],'event_at'=>$d['broken_at'],'actor_user_id'=>$r->user()->id]);InventoryRepair::firstOrCreate(['source_type'=>'ROOM_BREAK_REPORT','source_id'=>$report->id],['asset_id'=>$brokenAsset->id,'status'=>'OPEN','content'=>$d['condition_description'],'requested_by'=>$r->user()->id,'opened_at'=>$d['broken_at']]);});return back()->with('success','Đã gửi báo cáo hỏng và chuyển sang phân công sửa chữa.');}
+    public function roomAssetStore(Request $r,Classroom $classroom){$this->ensureInventoryRoomAllowed($classroom);$d=$r->validate(['material_id'=>'required|exists:inventory_materials,id','quantity'=>'required|numeric|min:.01','holding_unit_id'=>'nullable|exists:units,id']);$d['holding_unit_id']=$d['holding_unit_id']?:$classroom->managing_unit_id;abort_unless($d['holding_unit_id'],'Chưa chọn đơn vị quản lý / giữ vật tư.');$asset=null;DB::transaction(function()use($d,$classroom,$r,&$asset){$material=InventoryMaterial::with('category')->lockForUpdate()->findOrFail($d['material_id']);$quantity=(int)$d['quantity'];abort_if((int)$material->quantity<$quantity,422,'Số lượng vật tư trong bảng vật tư không đủ để thêm vào phòng.');$asset=InventoryAsset::where('material_id',$material->id)->where('classroom_id',$classroom->id)->where('grade',1)->where('status','NORMAL')->where('broken_quantity',0)->lockForUpdate()->first();if($asset){$before=(int)$asset->quantity;$asset->update(['asset_code'=>$material->code,'name'=>$material->name,'quantity'=>$before+$quantity,'unit'=>$material->unit,'holding_unit_id'=>$d['holding_unit_id']]);}else{$asset=InventoryAsset::create(['material_id'=>$material->id,'classroom_id'=>$classroom->id,'asset_code'=>$material->code,'name'=>$material->name,'quantity'=>$quantity,'unit'=>$material->unit,'holding_unit_id'=>$d['holding_unit_id'],'grade'=>1,'status'=>'NORMAL']);}$material->decrement('quantity',$quantity);InventoryMovement::create(['material_id'=>$material->id,'type'=>'OUT','quantity'=>$quantity,'note'=>'Thêm vật tư vào phòng '.$classroom->name,'created_by'=>$r->user()->id]);InventoryAuditLog::create(['user_id'=>auth()->id(),'action'=>'CREATE','entity_type'=>'asset','entity_id'=>$asset->id,'details'=>['reason'=>'Thêm vật tư vào phòng','quantity'=>$quantity,'classroom_id'=>$classroom->id,'holding_unit_id'=>$d['holding_unit_id'],'asset_code'=>$material->code,'name'=>$material->name,'grade'=>1]]);});return back()->with('success','Đã thêm vật tư có sẵn vào phòng và trừ số lượng trong bảng vật tư.');}
+    public function roomAssetImport(Request $r,Classroom $classroom){$this->ensureInventoryRoomAllowed($classroom);$d=$r->validate(['file'=>'required|file|mimes:xlsx,xls,csv,txt|max:20480','holding_unit_id'=>'nullable|exists:units,id']);$d['holding_unit_id']=$d['holding_unit_id']?:$classroom->managing_unit_id;abort_unless($d['holding_unit_id'],'Chưa chọn đơn vị quản lý / giữ vật tư.');$rows=\PhpOffice\PhpSpreadsheet\IOFactory::load($r->file('file')->getRealPath())->getActiveSheet()->toArray(null,true,true,true);$headers=array_map(fn($v)=>strtolower(trim((string)$v)),array_shift($rows));$count=0;DB::transaction(function()use($rows,$headers,$d,$classroom,$r,&$count){foreach($rows as $row){$values=[];foreach($headers as $key=>$header)$values[$header]=trim((string)($row[$key]??''));if(empty($values['code']))continue;$material=InventoryMaterial::where('code',$values['code'])->lockForUpdate()->first();if(!$material)continue;$quantity=(int)($values['quantity']?:1);abort_if((int)$material->quantity<$quantity,422,'Số lượng vật tư '.$material->code.' trong bảng vật tư không đủ để import vào phòng.');$asset=InventoryAsset::where('material_id',$material->id)->where('classroom_id',$classroom->id)->where('grade',1)->where('status','NORMAL')->where('broken_quantity',0)->lockForUpdate()->first();if($asset){$asset->update(['asset_code'=>$material->code,'name'=>$material->name,'quantity'=>(int)$asset->quantity+$quantity,'unit'=>$material->unit,'holding_unit_id'=>$d['holding_unit_id']]);}else{$asset=InventoryAsset::create(['material_id'=>$material->id,'classroom_id'=>$classroom->id,'asset_code'=>$material->code,'name'=>$material->name,'quantity'=>$quantity,'unit'=>$material->unit,'holding_unit_id'=>$d['holding_unit_id'],'grade'=>1,'status'=>'NORMAL']);}$material->decrement('quantity',$quantity);InventoryMovement::create(['material_id'=>$material->id,'type'=>'OUT','quantity'=>$quantity,'note'=>'Import vật tư vào phòng '.$classroom->name,'created_by'=>$r->user()->id]);InventoryAuditLog::create(['user_id'=>auth()->id(),'action'=>'CREATE','entity_type'=>'asset','entity_id'=>$asset->id,'details'=>['reason'=>'Import vật tư vào phòng','quantity'=>$quantity,'classroom_id'=>$classroom->id,'holding_unit_id'=>$d['holding_unit_id'],'asset_code'=>$material->code,'name'=>$material->name,'grade'=>1]]);$count++;}});return back()->with('success',"Đã import {$count} vật tư có sẵn vào phòng và trừ số lượng trong bảng vật tư.");}
+    public function roomAssetUpdate(Request $r,Classroom $classroom,InventoryAsset $asset){$this->ensureInventoryRoomAllowed($classroom);abort_unless((int)$asset->classroom_id===(int)$classroom->id,404);$d=$r->validate(['quantity'=>'required|numeric|min:.01','holding_unit_id'=>'nullable|exists:units,id','grade'=>'required|integer|min:1|max:5','status'=>'required|in:NORMAL,BROKEN,REPAIRING,LIQUIDATED']);$d['holding_unit_id']=$d['holding_unit_id']?:$classroom->managing_unit_id;abort_unless($d['holding_unit_id'],'Chưa chọn đơn vị quản lý / giữ vật tư.');if(in_array($d['status'],['BROKEN','REPAIRING'],true)){$d['grade']=5;$d['broken_quantity']=$d['quantity'];}elseif($d['status']==='NORMAL'){$d['broken_quantity']=0;}$before=(int)$asset->quantity;DB::transaction(function()use($d,$asset,$classroom,$r,$before){$asset->lockForUpdate();$after=(int)$d['quantity'];$change=$after-$before;if($change!==0&&$asset->material_id){$material=InventoryMaterial::lockForUpdate()->find($asset->material_id);if($material){abort_if($change>0&&(int)$material->quantity<$change,422,'Số lượng vật tư trong bảng vật tư không đủ để tăng trong phòng.');$change>0?$material->decrement('quantity',$change):$material->increment('quantity',abs($change));InventoryMovement::create(['material_id'=>$material->id,'type'=>$change>0?'OUT':'IN','quantity'=>abs($change),'note'=>'Sửa số lượng vật tư trong phòng '.$classroom->name,'created_by'=>$r->user()->id]);}}$asset->update($d);InventoryAuditLog::create(['user_id'=>auth()->id(),'action'=>'UPDATE','entity_type'=>'asset','entity_id'=>$asset->id,'details'=>$d+['reason'=>$r->input('reason')?:'Sửa thông tin vật tư trong phòng','before'=>$before,'after'=>$after,'quantity'=>abs($change),'classroom_id'=>$classroom->id]]);});return back()->with('success','Đã sửa vật tư trong phòng và đồng bộ số lượng bảng vật tư.');}
+    public function roomAssetDelete(Request $r,Classroom $classroom,InventoryAsset $asset){$this->ensureInventoryRoomAllowed($classroom);abort_unless((int)$asset->classroom_id===(int)$classroom->id,404);abort_if($asset->repairs()->exists()||$asset->proposals()->exists(),422,'Không thể xóa vật tư đã có lịch sử.');$details=['reason'=>$r->input('reason')?:'Xóa vật tư khỏi phòng','quantity'=>(int)$asset->quantity,'classroom_id'=>$classroom->id,'asset_code'=>$asset->asset_code,'name'=>$asset->name];$id=$asset->id;DB::transaction(function()use($asset,$classroom,$details,$id,$r){$quantity=(int)$asset->quantity;if($asset->material_id&&$quantity>0){$material=InventoryMaterial::lockForUpdate()->find($asset->material_id);if($material){$material->increment('quantity',$quantity);InventoryMovement::create(['material_id'=>$material->id,'type'=>'IN','quantity'=>$quantity,'note'=>'Xóa vật tư khỏi phòng '.$classroom->name,'created_by'=>$r->user()->id]);}}$asset->delete();InventoryAuditLog::create(['user_id'=>auth()->id(),'action'=>'DELETE','entity_type'=>'asset','entity_id'=>$id,'details'=>$details]);});return back()->with('success','Đã xóa vật tư khỏi phòng và hoàn lại số lượng vào bảng vật tư.');}
+    public function roomImageStore(Request $r,Classroom $classroom){$this->ensureInventoryRoomAllowed($classroom);$d=$r->validate(['image'=>'required|image|max:10240','caption'=>'nullable|string|max:255']);InventoryRoomImage::create(['classroom_id'=>$classroom->id,'path'=>$r->file('image')->store('inventory-room-images'),'caption'=>$d['caption']??null,'uploaded_by'=>$r->user()->id]);return back()->with('success','Đã thêm ảnh phòng.');}
+    public function roomImageDelete(InventoryRoomImage $image){$image->loadMissing('classroom');if($image->classroom)$this->ensureInventoryRoomAllowed($image->classroom);abort_unless(\App\Support\PermissionCheck::can(auth()->user(),'inventory.locations.delete'),403);Storage::delete($image->path);$image->delete();return back()->with('success','Đã xóa ảnh phòng.');}
+    public function roomUserStore(Request $r,Classroom $classroom){$this->ensureInventoryRoomAllowed($classroom);$d=$r->validate(['user_id'=>'required|exists:users,id','role'=>'nullable|string|max:100']);InventoryRoomUser::updateOrCreate(['classroom_id'=>$classroom->id,'user_id'=>$d['user_id']],['role'=>$d['role']??null]);return back()->with('success','Đã gán người phụ trách phòng.');}
+    public function roomUserDelete(InventoryRoomUser $roomUser){$roomUser->loadMissing('classroom');if($roomUser->classroom)$this->ensureInventoryRoomAllowed($roomUser->classroom);$roomUser->delete();return back()->with('success','Đã bỏ người phụ trách phòng.');}
 
-    public function reports(Request $r){$months=max(1,min(60,(int)$r->input('months',3)));$from=$r->input('from');$to=$r->input('to');$materials=InventoryMaterial::with(['category','building','classroom'])->when($r->filled('category_id'),fn($q)=>$q->where('category_id',$r->category_id))->when($r->filled('building_id'),fn($q)=>$q->where('building_id',$r->building_id))->when($r->filled('classroom_id'),fn($q)=>$q->where('classroom_id',$r->classroom_id))->when($r->filled('search'),fn($q,$s)=>$q->where(fn($x)=>$x->where('code','like',"%$s%")->orWhere('name','like',"%$s%")))->orderBy('name')->get();$assets=InventoryAsset::with(['classroom.building','holdingUnit'])->orderBy('name')->get();$auditLogs=InventoryAuditLog::with('user')->when($from,fn($q)=>$q->whereDate('created_at','>=',$from))->when($to,fn($q)=>$q->whereDate('created_at','<=',$to))->latest()->limit(300)->get()->each->resolveDetails();$repairs=InventoryRepair::with(['asset','assignee'])->when($from,fn($q)=>$q->whereDate('opened_at','>=',$from))->when($to,fn($q)=>$q->whereDate('opened_at','<=',$to))->latest()->get();$brokenLogs=InventoryBrokenLog::with(['asset','actor'])->when($from,fn($q)=>$q->whereDate('event_at','>=',$from))->when($to,fn($q)=>$q->whereDate('event_at','<=',$to))->latest()->get();$transfers=InventoryTransfer::with(['asset','fromClassroom','toClassroom'])->latest()->limit(100)->get();$stats=['records'=>InventoryMaterial::count(),'quantity'=>InventoryMaterial::sum('quantity'),'groups'=>InventoryCategory::where('active',true)->count(),'buildings'=>InventoryMaterial::whereNotNull('building_id')->distinct()->count('building_id'),'normal'=>InventoryAsset::where('status','NORMAL')->count(),'broken'=>InventoryAsset::whereIn('status',['BROKEN','REPAIRING'])->count()];$expiringAssets=InventoryMaterial::with(['building','classroom'])->whereNotNull('expiry_date')->whereBetween('expiry_date',[now()->toDateString(),now()->addMonths($months)->toDateString()])->orderBy('expiry_date')->get();return view('inventory::feature',['section'=>'reports','title'=>'Báo cáo vật tư','materials'=>$materials,'assets'=>$assets,'auditLogs'=>$auditLogs,'repairs'=>$repairs,'brokenLogs'=>$brokenLogs,'transfers'=>$transfers,'expiringAssets'=>$expiringAssets,'stats'=>$stats,'categories'=>InventoryCategory::where('active',true)->orderBy('name')->get(),'buildings'=>Building::orderBy('name')->get(),'classrooms'=>Classroom::active()->orderBy('name')->get(),'reportTemplates'=>InventoryReportTemplate::where('active',true)->whereNotNull('report_type')->whereNotNull('file_path')->orderBy('report_type')->orderBy('name')->get(),'defaultTemplates'=>$this->defaultReportTemplates(),'months'=>$months,'from'=>$from,'to'=>$to,'repairCount'=>$repairs->whereIn('status',['OPEN','ASSIGNED'])->count()]);}
+    public function reports(Request $r){$months=max(1,min(60,(int)$r->input('months',3)));$from=$r->input('from');$to=$r->input('to');$roomIds=$this->assignedInventoryRoomIds($r->user());$materialIds=$this->scopedMaterialIds($roomIds);$categoryIds=$this->scopedCategoryIds($materialIds);$buildingIds=$this->scopedBuildingIds($roomIds);$materials=InventoryMaterial::with(['category','building','classroom'])->when($materialIds!==null,fn($q)=>$q->whereIn('id',$materialIds))->when($r->filled('category_id'),fn($q)=>$q->where('category_id',$r->category_id))->when($r->filled('building_id'),fn($q)=>$q->where('building_id',$r->building_id))->when($r->filled('classroom_id'),fn($q)=>$q->where('classroom_id',$r->classroom_id))->when($r->filled('search'),fn($q,$s)=>$q->where(fn($x)=>$x->where('code','like',"%$s%")->orWhere('name','like',"%$s%")))->orderBy('name')->get();$assets=InventoryAsset::with(['classroom.building','holdingUnit'])->when($roomIds!==null,fn($q)=>$q->whereIn('classroom_id',$roomIds))->orderBy('name')->get();$auditLogs=InventoryAuditLog::with('user')->when($from,fn($q)=>$q->whereDate('created_at','>=',$from))->when($to,fn($q)=>$q->whereDate('created_at','<=',$to))->latest()->limit(300)->get()->each->resolveDetails();$repairs=InventoryRepair::with(['asset','assignee'])->when($roomIds!==null,fn($q)=>$q->whereHas('asset',fn($a)=>$a->whereIn('classroom_id',$roomIds)))->when($from,fn($q)=>$q->whereDate('opened_at','>=',$from))->when($to,fn($q)=>$q->whereDate('opened_at','<=',$to))->latest()->get();$brokenLogs=InventoryBrokenLog::with(['asset','actor'])->when($roomIds!==null,fn($q)=>$q->whereHas('asset',fn($a)=>$a->whereIn('classroom_id',$roomIds)))->when($from,fn($q)=>$q->whereDate('event_at','>=',$from))->when($to,fn($q)=>$q->whereDate('event_at','<=',$to))->latest()->get();$transfers=InventoryTransfer::with(['asset','fromClassroom','toClassroom'])->when($roomIds!==null,fn($q)=>$q->where(fn($x)=>$x->whereIn('from_classroom_id',$roomIds)->orWhereIn('to_classroom_id',$roomIds)->orWhereHas('asset',fn($a)=>$a->whereIn('classroom_id',$roomIds))))->latest()->limit(100)->get();$stats=['records'=>InventoryMaterial::when($materialIds!==null,fn($q)=>$q->whereIn('id',$materialIds))->count(),'quantity'=>InventoryMaterial::when($materialIds!==null,fn($q)=>$q->whereIn('id',$materialIds))->sum('quantity'),'groups'=>InventoryCategory::where('active',true)->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->count(),'buildings'=>InventoryMaterial::when($materialIds!==null,fn($q)=>$q->whereIn('id',$materialIds))->whereNotNull('building_id')->distinct()->count('building_id'),'normal'=>InventoryAsset::when($roomIds!==null,fn($q)=>$q->whereIn('classroom_id',$roomIds))->where('status','NORMAL')->count(),'broken'=>InventoryAsset::when($roomIds!==null,fn($q)=>$q->whereIn('classroom_id',$roomIds))->whereIn('status',['BROKEN','REPAIRING'])->count()];$expiringAssets=InventoryMaterial::with(['building','classroom'])->when($materialIds!==null,fn($q)=>$q->whereIn('id',$materialIds))->whereNotNull('expiry_date')->whereBetween('expiry_date',[now()->toDateString(),now()->addMonths($months)->toDateString()])->orderBy('expiry_date')->get();return view('inventory::feature',['section'=>'reports','title'=>'Báo cáo vật tư','materials'=>$materials,'assets'=>$assets,'auditLogs'=>$auditLogs,'repairs'=>$repairs,'brokenLogs'=>$brokenLogs,'transfers'=>$transfers,'expiringAssets'=>$expiringAssets,'stats'=>$stats,'categories'=>InventoryCategory::where('active',true)->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('name')->get(),'buildings'=>Building::when($buildingIds!==null,fn($q)=>$q->whereIn('id',$buildingIds))->orderBy('name')->get(),'classrooms'=>Classroom::active()->when($roomIds!==null,fn($q)=>$q->whereIn('id',$roomIds))->orderBy('name')->get(),'reportTemplates'=>InventoryReportTemplate::where('active',true)->whereNotNull('report_type')->whereNotNull('file_path')->orderBy('report_type')->orderBy('name')->get(),'defaultTemplates'=>$this->defaultReportTemplates(),'months'=>$months,'from'=>$from,'to'=>$to,'repairCount'=>$repairs->whereIn('status',['OPEN','ASSIGNED'])->count()]);}
     public function reportWord(Request $r){return app(InventoryReportTemplateController::class)->download($r);}
-    public function reportCsv(){$rows=InventoryMaterial::orderBy('name')->get();$callback=function()use($rows){$out=fopen('php://output','w');fputcsv($out,['No','Code','Name','Unit','Quantity','Location']);foreach($rows as $i=>$m)fputcsv($out,[$i+1,$m->code,$m->name,$m->unit,$m->quantity,$m->location]);fclose($out);};return response()->streamDownload($callback,'inventory-report.csv',['Content-Type'=>'text/csv; charset=UTF-8']);}
+    public function reportCsv(){$materialIds=$this->scopedMaterialIds($this->assignedInventoryRoomIds());$rows=InventoryMaterial::when($materialIds!==null,fn($q)=>$q->whereIn('id',$materialIds))->orderBy('name')->get();$callback=function()use($rows){$out=fopen('php://output','w');fputcsv($out,['No','Code','Name','Unit','Quantity','Location']);foreach($rows as $i=>$m)fputcsv($out,[$i+1,$m->code,$m->name,$m->unit,$m->quantity,$m->location]);fclose($out);};return response()->streamDownload($callback,'inventory-report.csv',['Content-Type'=>'text/csv; charset=UTF-8']);}
     public function templates(){$templates=InventoryReportTemplate::latest()->get();$deletedTypes=$templates->whereNotNull('report_type')->where('active',false)->whereNull('file_path')->pluck('report_type')->all();$customTemplates=$templates->whereNotNull('report_type')->filter(fn($template)=>$template->active&&$template->file_path)->groupBy('report_type')->map(fn($items)=>$items->first());$defaultTemplates=collect($this->defaultReportTemplates())->reject(fn($template,$type)=>in_array($type,$deletedTypes,true))->all();foreach($defaultTemplates as $type=>$template){if($custom=$customTemplates->get($type)){$defaultTemplates[$type]['name']=$custom->name?:$template['name'];$defaultTemplates[$type]['report']=$custom->description?:($template['report']??$template['name']);}}return view('inventory::feature',['section'=>'templates','title'=>'Mẫu báo cáo Word','templates'=>$templates,'uploadTemplates'=>$templates->whereNull('report_type'),'customTemplates'=>$customTemplates,'defaultTemplates'=>$defaultTemplates]);}
     public function templateStore(Request $r){$d=$r->validate(['code'=>'required|string|max:80|unique:inventory_report_templates,code','report_type'=>'nullable|string|max:80','name'=>'required|string|max:255','description'=>'nullable|string','file'=>'required|file|mimes:docx|max:10240','active'=>'nullable|boolean']);$type=$d['report_type']??$this->inferVariableTemplateType($d['code'],$d['name'],$d['description']??'');$file=$r->file('file');$d['report_type']=$type;$d['file_path']=$this->storeVariableTemplateFile($file->getRealPath(),$type,$d['code'],$file->getClientOriginalName());$d['original_name']=$file->getClientOriginalName();$d['active']=$r->boolean('active',true);unset($d['file']);InventoryReportTemplate::updateOrCreate(['report_type'=>$type],$d);return back()->with('success','Đã lưu mẫu Word báo cáo vật tư. Khi xuất đúng loại báo cáo này sẽ dùng mẫu vừa import.');}
     public function templateUpdate(Request $r,InventoryReportTemplate $template){$d=$r->validate(['code'=>['required','string','max:80',Rule::unique('inventory_report_templates','code')->ignore($template->id)],'report_type'=>'nullable|string|max:80','name'=>'required|string|max:255','description'=>'nullable|string','file'=>'nullable|file|mimes:docx|max:10240','active'=>'nullable|boolean']);$oldPath=$template->file_path;$type=$d['report_type']??$template->report_type??$this->inferVariableTemplateType($d['code'],$d['name'],$d['description']??'');$d['report_type']=$type;if($r->hasFile('file')){$file=$r->file('file');$d['file_path']=$this->storeVariableTemplateFile($file->getRealPath(),$type,$d['code'],$file->getClientOriginalName());$d['original_name']=$file->getClientOriginalName();}$d['active']=$r->boolean('active');unset($d['file']);$template->update($d);if(isset($d['file_path'])&&$oldPath)Storage::disk('local')->delete($oldPath);return back()->with('success','Đã cập nhật mẫu báo cáo vật tư.');}
     public function templateReplaceDefault(Request $r,string $type){$defaults=$this->defaultReportTemplates();abort_unless(isset($defaults[$type]),404,'Không tìm thấy loại mẫu báo cáo.');$d=$r->validate(['name'=>'required|string|max:255','report_type'=>'required|string|max:80','file'=>'nullable|file|mimes:docx|max:10240','active'=>'nullable|boolean']);$selectedType=$d['report_type'];abort_unless(isset($defaults[$selectedType]),404,'Không tìm thấy loại báo cáo đã chọn.');$default=$defaults[$selectedType];$code='DEFAULT_'.strtoupper(str_replace('-','_',$selectedType));$old=InventoryReportTemplate::where('report_type',$selectedType)->first();$oldPath=$old?->file_path;$description=($default['report']??$default['name']).(isset($default['scope'])?' - '.$default['scope']:'');$payload=['code'=>$old?->code?:$code,'report_type'=>$selectedType,'name'=>$d['name'],'description'=>$description,'active'=>$r->boolean('active',true)];if($r->hasFile('file')){$file=$r->file('file');$payload['file_path']=$this->storeVariableTemplateFile($file->getRealPath(),$selectedType,$payload['code'],$file->getClientOriginalName());$payload['original_name']=$file->getClientOriginalName();}elseif($old?->file_path){$payload['file_path']=$old->file_path;$payload['original_name']=$old->original_name;}InventoryReportTemplate::updateOrCreate(['report_type'=>$selectedType],$payload);if(isset($payload['file_path'])&&$r->hasFile('file')&&$oldPath&&$oldPath!==$payload['file_path'])Storage::disk('local')->delete($oldPath);return back()->with('success','Đã cập nhật mẫu '.$description.'. Lần xuất báo cáo tương ứng sẽ dùng cấu hình vừa lưu.');}
     public function templateDeleteDefault(string $type){$defaults=$this->defaultReportTemplates();abort_unless(isset($defaults[$type]),404,'Không tìm thấy loại mẫu báo cáo.');$templates=InventoryReportTemplate::where('report_type',$type)->get();foreach($templates as $template){if($template->file_path)Storage::disk('local')->delete($template->file_path);$template->delete();}$this->deleteGeneratedVariableTemplates($type);InventoryReportTemplate::create(['code'=>'DELETED_'.strtoupper(str_replace('-','_',$type)),'report_type'=>$type,'name'=>$defaults[$type]['name'],'description'=>'Đã xóa mẫu, không dùng mẫu mặc định.','file_path'=>null,'active'=>false]);return back()->with('success','Đã xóa hoàn toàn mẫu báo cáo này. Hệ thống sẽ không tự quay về file mặc định.');}
-    public function templateDownload(InventoryReportTemplate $template){$source=$template->absolutePath();abort_unless($source&&is_file($source),404,'Không tìm thấy file mẫu.');return response()->download($source,$template->downloadName(),['Cache-Control'=>'no-store, no-cache, must-revalidate, max-age=0','Pragma'=>'no-cache','Expires'=>'0']);}
+    public function templateDownload(InventoryReportTemplate $template){$source=$template->absolutePath();abort_unless($source&&is_file($source),404,'Không tìm thấy file mẫu.');clearstatcache(true,$source);return response()->download($source,$template->versionedDownloadName(),['Cache-Control'=>'no-store, no-cache, must-revalidate, max-age=0','Pragma'=>'no-cache','Expires'=>'0']);}
     public function defaultTemplateDownload(string $type)
     {
         $templates = $this->defaultReportTemplates();
@@ -325,13 +777,16 @@ class InventoryWorkflowController extends ModuleBaseController
         if ($configured && $configured->active && $configured->file_path) {
             $source = $configured->absolutePath();
             abort_unless($source && is_file($source), 404, 'File mẫu đang dùng không tồn tại.');
-            return response()->download($source, $configured->downloadName(), ['Cache-Control'=>'no-store, no-cache, must-revalidate, max-age=0','Pragma'=>'no-cache','Expires'=>'0']);
+            clearstatcache(true,$source);
+            return response()->download($source, $configured->versionedDownloadName(), ['Cache-Control'=>'no-store, no-cache, must-revalidate, max-age=0','Pragma'=>'no-cache','Expires'=>'0']);
         }
 
         $template = $templates[$type];
         $filename = $template['variable_file'] ?? ('mau-bien-'.$type.'.docx');
         $path = storage_path('app/'.$filename);
-        if (in_array($type, ['position', 'total-position', 'unit', 'using-position', 'using-total'], true)) {
+        if ($type === 'proposal') {
+            $this->createProposalVariableTemplate($path);
+        } elseif (in_array($type, ['position', 'total-position', 'unit', 'using-position', 'using-total'], true)) {
             $this->createInventoryStatusVariableTemplate($path);
         } else {
             $this->writeVariableTemplateZip(resource_path('inventory-report-templates/'.$template['file']),$path,$type);
@@ -363,12 +818,10 @@ class InventoryWorkflowController extends ModuleBaseController
         $filename=$originalName?:((trim($code)?:'mau-bao-cao-vat-tu').'.docx');
         $filename=preg_replace('/[\\\\\/:*?"<>|]+/','-',trim($filename));
         if(strtolower(pathinfo($filename,PATHINFO_EXTENSION))!=='docx')$filename=pathinfo($filename,PATHINFO_FILENAME).'.docx';
-        $relative='inventory-templates/'.$filename;
-        if(Storage::disk('local')->exists($relative)){
-            $relative='inventory-templates/'.pathinfo($filename,PATHINFO_FILENAME).'-'.now()->format('YmdHis').'.docx';
-        }
+        $base=pathinfo($filename,PATHINFO_FILENAME) ?: (trim($code) ?: 'mau-bao-cao-vat-tu');
+        $relative='inventory-templates/'.$base.'-'.now()->format('YmdHis').'-'.bin2hex(random_bytes(3)).'.docx';
         $target=Storage::disk('local')->path($relative);
-        copy($source,$target);
+        abort_unless(copy($source,$target),500,'Không lưu được file mẫu báo cáo vật tư.');
         return $relative;
     }
     private function wordFileHasVariables(string $path): bool
@@ -637,6 +1090,7 @@ class InventoryWorkflowController extends ModuleBaseController
             str_contains($text,'ky')||str_contains($text,'kỳ')||str_contains($text,'tong hop')||str_contains($text,'tổng hợp')=>'period',
             str_contains($text,'dieu dong')||str_contains($text,'điều động')||str_contains($text,'transfer')=>'transfer',
             str_contains($text,'thu hoi')||str_contains($text,'thu hồi')||str_contains($text,'recall')=>'recall',
+            str_contains($text,'de xuat')||str_contains($text,'đề xuất')||str_contains($text,'proposal')=>'proposal',
             str_contains($text,'sua chua')||str_contains($text,'sửa chữa')||str_contains($text,'hu hai')||str_contains($text,'hư hại')||str_contains($text,'repair')=>'repair',
             str_contains($text,'cap nhat')||str_contains($text,'cập nhật')||str_contains($text,'update')=>'update-log',
             str_contains($text,'don vi')||str_contains($text,'đơn vị')||str_contains($text,'unit')=>'unit',
@@ -662,6 +1116,7 @@ class InventoryWorkflowController extends ModuleBaseController
             'recall' => ['name' => 'Quyết định thu hồi', 'report' => 'Quyết định thu hồi', 'file' => 'bao-cao-quyet-dinh-thu-hoi-tra-ve.docx', 'variable_file' => 'Mau_bien_Phieu_thu_hoi.docx'],
             'repair' => ['name' => 'Vật tư hư hại và sửa chữa', 'report' => 'Vật tư đang hư hại và sửa chữa', 'file' => 'bao-cao-vat-tu-dang-hu-hai-va-sua-chua.docx', 'variable_file' => 'Mau_bien_Vat_tu_hu_hai.docx'],
             'update-log' => ['name' => 'Cập nhật vật tư', 'report' => 'Cập nhật vật tư', 'file' => 'bao-cao-cap-nhat-vat-tu.docx', 'variable_file' => 'Mau_bien_Nhat_ki_cap_nhat.docx'],
+            'proposal' => ['name' => 'Giấy đề xuất vật tư', 'report' => 'Phiếu đề xuất / thanh lý', 'variable_file' => 'Mau_bien_Giay_de_xuat.docx'],
         ];
     }
 
@@ -719,5 +1174,5 @@ class InventoryWorkflowController extends ModuleBaseController
 
         return $common;
     }
-    public function repairAssign(Request $r,InventoryRepair $repair){$d=$r->validate(['performer'=>'required|string|max:255','started_at'=>'nullable|date','cost'=>'nullable|numeric|min:0','result_note'=>'nullable|string']);$repair->update($d+['status'=>'ASSIGNED','started_at'=>$d['started_at']??now()]);$repair->asset?->update(['status'=>'REPAIRING','repair_started_at'=>$d['started_at']??now(),'repair_performer'=>$d['performer']]);return back()->with('success','Đã phân công người sửa.');}
+    public function repairAssign(Request $r,InventoryRepair $repair){$d=$r->validate(['performer'=>'required|string|max:255','started_at'=>'nullable|date']);$repair->update($d+['status'=>'ASSIGNED','started_at'=>$d['started_at']??now()]);$repair->asset?->update(['status'=>'REPAIRING','repair_started_at'=>$d['started_at']??now(),'repair_performer'=>$d['performer']]);return back()->with('success','Đã phân công người sửa.');}
 }

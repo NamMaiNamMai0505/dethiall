@@ -126,6 +126,9 @@ Route::middleware(['web', 'auth', 'permission:inventory.access.index'])
         Route::get('/duyet-de-xuat/{proposal}', [InventoryWorkflowController::class, 'proposalDetail'])
             ->middleware('permission:inventory.proposals.approve')
             ->name('proposals.detail');
+        Route::get('/duyet-de-xuat/{proposal}/in-pdf', [InventoryWorkflowController::class, 'proposalPrintPdf'])
+            ->middleware('permission:inventory.proposals.export')
+            ->name('proposals.print.pdf');
         Route::post('/duyet-de-xuat/{proposal}/in', [InventoryWorkflowController::class, 'proposalPrint'])
             ->middleware('permission:inventory.proposals.export')
             ->name('proposals.print');
@@ -177,9 +180,6 @@ Route::middleware(['web', 'auth', 'permission:inventory.access.index'])
         Route::get('/thanh-ly', [InventoryWorkflowController::class, 'liquidation'])
             ->middleware('permission:inventory.liquidations.index')
             ->name('liquidation');
-        Route::get('/nganh-cua-toi', [InventoryWorkflowController::class, 'myCatalog'])
-            ->middleware('permission:inventory.categories.index')
-            ->name('my-catalog');
         Route::get('/tim-kiem', [InventoryWorkflowController::class, 'search'])
             ->middleware('permission:inventory.search.index')
             ->name('search');
@@ -268,6 +268,9 @@ Route::middleware(['web', 'auth', 'permission:inventory.access.index'])
         Route::get('/phong/{classroom}', [InventoryWorkflowController::class, 'room'])
             ->middleware('permission:inventory.locations.show')
             ->name('room');
+        Route::post('/phong/{classroom}/bao-hong', [InventoryWorkflowController::class, 'roomBreakReportStore'])
+            ->middleware('permission:inventory.locations.show')
+            ->name('room.break-reports.store');
         Route::post('/phong/{classroom}/vat-tu', [InventoryWorkflowController::class, 'roomAssetStore'])
             ->middleware('permission:inventory.assets.create')
             ->name('room.assets.store');

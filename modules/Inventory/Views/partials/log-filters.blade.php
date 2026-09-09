@@ -12,7 +12,7 @@
                 <option value="movement" @selected($selectedLogType === 'movement')>Nhập xuất</option>
                 <option value="broken" @selected($selectedLogType === 'broken')>Hỏng / sửa chữa</option>
                 <option value="transfer" @selected($selectedLogType === 'transfer')>Điều động / thu hồi</option>
-                <option value="proposal" @selected($selectedLogType === 'proposal')>Đề xuất / thanh lý</option>
+                <option value="proposal" @selected($selectedLogType === 'proposal')>Đề xuất thanh lý</option>
                 <option value="repair" @selected($selectedLogType === 'repair')>Lịch sử sửa chữa</option>
             </select>
         </label>
@@ -99,14 +99,7 @@
         <label class="log-filter-field text-sm font-semibold" data-log-filter="transfer">Đơn vị thực hiện
             <input name="performing_unit" value="{{ request('performing_unit') }}" class="mt-1 w-full rounded border p-2">
         </label>
-        <label class="log-filter-field text-sm font-semibold" data-log-filter="proposal">Loại đề xuất
-            <select name="proposal_type" class="mt-1 w-full rounded border p-2">
-                <option value="">Tất cả</option>
-                <option value="LIQUIDATION" @selected(request('proposal_type') === 'LIQUIDATION')>Thanh lý</option>
-                <option value="RECALL" @selected(request('proposal_type') === 'RECALL')>Thu hồi</option>
-                <option value="REPAIR" @selected(request('proposal_type') === 'REPAIR')>Sửa chữa</option>
-            </select>
-        </label>
+        <input type="hidden" name="proposal_type" value="LIQUIDATION">
         <label class="log-filter-field text-sm font-semibold" data-log-filter="proposal">Đơn vị đề xuất
             <select name="unit_id" class="mt-1 w-full rounded border p-2">
                 <option value="">Tất cả</option>
