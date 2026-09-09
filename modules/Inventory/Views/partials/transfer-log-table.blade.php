@@ -21,7 +21,7 @@
         </thead>
         <tbody>
             @forelse($transferLogs as $item)
-                <tr class="border-t">
+                <tr class="border-t" data-filter-text="{{ $item->type === 'RECALL' ? 'thu hồi recall' : 'điều động transfer' }} {{ ($item->performed_at ?: $item->created_at)?->format('Y-m-d d/m/Y') }}" data-from-room="{{ $item->fromClassroom?->name }}" data-from-room-id="{{ $item->from_classroom_id }}" data-to-room="{{ $item->type === 'RECALL' ? ($item->warehouse?->name ?: 'Kho vật tư') : $item->toClassroom?->name }}" data-to-room-id="{{ $item->to_classroom_id }}">
                     <td class="p-3">{{ ($item->performed_at ?: $item->created_at)?->format('d/m/Y H:i') }}</td>
                     <td class="p-3">{{ $item->asset?->asset_code ?: $item->material?->code ?: '-' }} - {{ $item->asset?->name ?: $item->material?->name ?: '-' }}</td>
                     <td class="p-3">{{ (int)($item->quantity ?: $item->asset?->quantity ?: $item->material?->quantity ?: 0) }}</td>

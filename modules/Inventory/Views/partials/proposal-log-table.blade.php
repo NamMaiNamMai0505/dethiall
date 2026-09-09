@@ -1,15 +1,17 @@
 @php
     $proposalStatusLabels = ['PENDING'=>'Chờ duyệt','APPROVED'=>'Đã duyệt','REJECTED'=>'Từ chối','COMPLETED'=>'Đã hoàn thành'];
+    $proposalTypeLabels = ['PURCHASE'=>'Đề xuất','LIQUIDATION'=>'Thanh lý','RECALL'=>'Thu hồi','REPAIR'=>'Sửa chữa'];
     $canEditProposal = auth()->user()?->isSuperAdmin() || \App\Support\PermissionCheck::can(auth()->user(), 'inventory.proposals.edit');
     $canDeleteProposal = auth()->user()?->isSuperAdmin() || \App\Support\PermissionCheck::can(auth()->user(), 'inventory.proposals.delete');
 @endphp
 
 <div id="inventory-log-proposals" class="mt-4 overflow-x-auto rounded border bg-white p-4">
     <h2 class="mb-3 font-semibold">Đề xuất / thanh lý</h2>
-    <table class="w-full min-w-[1200px] text-left text-sm">
+    <table class="w-full min-w-[1300px] text-left text-sm">
         <thead class="bg-slate-100">
             <tr>
                 <th class="p-3">Thời gian</th>
+                <th class="p-3">Loại</th>
                 <th class="p-3">Vật tư</th>
                 <th class="p-3">Số lượng</th>
                 <th class="p-3">Lý do</th>
@@ -23,8 +25,11 @@
         <tbody>
             @forelse($proposalLogs as $proposal)
                 @php($item = $proposal->items->first())
-                <tr class="border-t">
+                @php($proposalTypeLabel = $proposalTypeLabels[$proposal->type] ?? $proposal->type)
+                @php($proposalFilterText = \Illuminate\Support\Str::lower($proposal->type.' '.$proposalTypeLabel.' '.($proposal->created_at?->format('Y-m-d d/m/Y') ?? '')))
+                <tr class="border-t" data-filter-text="{{ $proposalFilterText }}" data-proposal-type="{{ \Illuminate\Support\Str::lower($proposal->type) }}" data-status="{{ \Illuminate\Support\Str::lower($proposal->status) }}" data-unit-id="{{ $proposal->unit_id }}">
                     <td class="p-3">{{ $proposal->created_at?->format('d/m/Y H:i') }}</td>
+                    <td class="p-3">{{ $proposalTypeLabel }}</td>
                     <td class="p-3">{{ $item?->material_code ?: $item?->original_code ?: '-' }} - {{ $item?->material_name ?: $item?->name ?: $proposal->title }}</td>
                     <td class="p-3">{{ (int)($item?->quantity ?: 0) }}</td>
                     <td class="p-3">{{ $proposal->description ?: $item?->note ?: '-' }}</td>
@@ -49,7 +54,7 @@
                 </tr>
                 @if($canEditProposal)
                     <tr id="proposal-log-edit-{{ $proposal->id }}" class="hidden bg-blue-50/60">
-                        <td colspan="9" class="p-4">
+                        <td colspan="10" class="p-4">
                             <form method="POST" action="{{ route('inventory.proposals.update', $proposal) }}" class="grid gap-3 rounded border bg-white p-4 md:grid-cols-3">
                                 @csrf
                                 @method('PATCH')
@@ -66,7 +71,7 @@
                     </tr>
                 @endif
             @empty
-                <tr><td colspan="9" class="p-5 text-center text-slate-500">Chưa có đề xuất / thanh lý.</td></tr>
+                <tr><td colspan="10" class="p-5 text-center text-slate-500">Chưa có đề xuất / thanh lý.</td></tr>
             @endforelse
         </tbody>
     </table>
