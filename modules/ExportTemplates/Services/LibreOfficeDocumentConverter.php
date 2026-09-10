@@ -25,9 +25,8 @@ class LibreOfficeDocumentConverter implements DocumentConverterInterface
         $destinationIsFile = $destinationPath
             && ! is_dir($destinationPath)
             && pathinfo($destinationPath, PATHINFO_EXTENSION) !== '';
-        $temporaryOutputDirectory = null;
-        $outputDirectory = match (true) {
-            $destinationIsFile => $temporaryOutputDirectory = sys_get_temp_dir().DIRECTORY_SEPARATOR.'lms-convert-'.bin2hex(random_bytes(8)),
+        $temporaryOutputDirectory = $destinationIsFile ? $this->temporaryOutputDirectory() : null;
+        $outputDirectory = $temporaryOutputDirectory ?: match (true) {
             (bool) $destinationPath => $destinationPath,
             default => sys_get_temp_dir(),
         };
@@ -35,52 +34,62 @@ class LibreOfficeDocumentConverter implements DocumentConverterInterface
             throw new \RuntimeException('Không thể tạo thư mục output cho PDF.');
         }
 
-        $generated = $outputDirectory.DIRECTORY_SEPARATOR.pathinfo($sourcePath, PATHINFO_FILENAME).'.pdf';
-        $process = null;
-        // LibreOffice trên Windows đôi lúc trả “source file could not be loaded”
-        // trong lần khởi động headless đầu tiên. Thử lại đúng một lần bằng
-        // profile sạch khác; source và dữ liệu không bị render lại.
-        foreach (range(1, 2) as $attempt) {
-            $process = $this->runConversion($sourcePath, $outputDirectory);
-            if (is_file($generated)) {
-                break;
+        try {
+            $generated = $outputDirectory.DIRECTORY_SEPARATOR.pathinfo($sourcePath, PATHINFO_FILENAME).'.pdf';
+            $process = null;
+            // LibreOffice trên Windows đôi lúc trả “source file could not be loaded”
+            // trong lần khởi động headless đầu tiên. Thử lại đúng một lần bằng
+            // profile sạch khác; source và dữ liệu không bị render lại.
+            foreach (range(1, 2) as $attempt) {
+                $process = $this->runConversion($sourcePath, $outputDirectory);
+                if (is_file($generated)) {
+                    break;
+                }
+                if ($attempt === 1) {
+                    usleep(300_000);
+                }
             }
-            if ($attempt === 1) {
-                usleep(300_000);
+            if (! is_file($generated) && PHP_OS_FAMILY === 'Windows') {
+                $process = $this->runShellConversion($sourcePath, $outputDirectory);
             }
-        }
+            if (! is_file($generated) && $destinationIsFile && getenv('LIBREOFFICE_CHILD_CONVERSION') !== '1') {
+                $process = $this->runPhpCliConversion($sourcePath, $destinationPath);
+                if (is_file($destinationPath)) {
+                    return $destinationPath;
+                }
+            }
 
-        if (! $process->isSuccessful() && ! is_file($generated)) {
-            $detail = trim(implode("\n", array_filter([
-                'Mã thoát: '.($process->getExitCode() ?? 'không xác định'),
-                trim($process->getErrorOutput()),
-                trim($process->getOutput()),
-            ])));
+            if (! $process->isSuccessful() && ! is_file($generated)) {
+                $detail = trim(implode("\n", array_filter([
+                    'Mã thoát: '.($process->getExitCode() ?? 'không xác định'),
+                    trim($process->getErrorOutput()),
+                    trim($process->getOutput()),
+                ])));
 
-            $this->removeTemporaryOutputDirectory($temporaryOutputDirectory);
-            throw new \RuntimeException('LibreOffice không thể chuyển file sang PDF: '.$detail);
-        }
-        if (! is_file($generated)) {
-            $this->removeTemporaryOutputDirectory($temporaryOutputDirectory);
-            throw new \RuntimeException('LibreOffice không tạo được file PDF output.');
-        }
-        if ($destinationIsFile && $destinationPath !== $generated) {
-            $destinationDirectory = dirname($destinationPath);
-            if (! is_dir($destinationDirectory) && ! mkdir($destinationDirectory, 0700, true) && ! is_dir($destinationDirectory)) {
+                throw new \RuntimeException('LibreOffice không thể chuyển file sang PDF: '.$detail);
+            }
+            if (! is_file($generated)) {
+                throw new \RuntimeException('LibreOffice không tạo được file PDF output.');
+            }
+            if ($destinationIsFile) {
+                $destinationDirectory = dirname($destinationPath);
+                if (! is_dir($destinationDirectory) && ! mkdir($destinationDirectory, 0700, true) && ! is_dir($destinationDirectory)) {
+                    throw new \RuntimeException('Không thể tạo thư mục lưu PDF output.');
+                }
+                @unlink($destinationPath);
+                if (! @copy($generated, $destinationPath)) {
+                    throw new \RuntimeException('Không thể lưu file PDF output.');
+                }
+
+                return $destinationPath;
+            }
+
+            return $generated;
+        } finally {
+            if ($temporaryOutputDirectory) {
                 $this->removeTemporaryOutputDirectory($temporaryOutputDirectory);
-                throw new \RuntimeException('Không thể tạo thư mục lưu PDF output.');
             }
-            @unlink($destinationPath);
-            if (! @rename($generated, $destinationPath)) {
-                $this->removeTemporaryOutputDirectory($temporaryOutputDirectory);
-                throw new \RuntimeException('Không thể di chuyển file PDF output.');
-            }
-
-            $this->removeTemporaryOutputDirectory($temporaryOutputDirectory);
-            return $destinationPath;
         }
-
-        return $generated;
     }
 
     private function runConversion(string $sourcePath, string $outputDirectory): Process
@@ -103,6 +112,61 @@ class LibreOfficeDocumentConverter implements DocumentConverterInterface
         }
     }
 
+    private function runShellConversion(string $sourcePath, string $outputDirectory): Process
+    {
+        $profileDirectory = $this->temporaryProfileDirectory();
+        try {
+            $command = implode(' ', [
+                'call',
+                $this->windowsQuote($this->resolveBinary()),
+                $this->windowsQuote('-env:UserInstallation='.$this->fileUri($profileDirectory)),
+                '--headless',
+                '--nologo',
+                '--nodefault',
+                '--nofirststartwizard',
+                '--convert-to',
+                'pdf',
+                '--outdir',
+                $this->windowsQuote($outputDirectory),
+                $this->windowsQuote($sourcePath),
+            ]);
+            $process = new Process(['cmd.exe', '/d', '/c', $command]);
+            $process->setWorkingDirectory(dirname($sourcePath));
+            $process->setTimeout((float) config('export_templates.converter.timeout', 120));
+            $process->run();
+
+            return $process;
+        } finally {
+            $this->removeTemporaryProfile($profileDirectory);
+        }
+    }
+
+    private function runPhpCliConversion(string $sourcePath, string $destinationPath): Process
+    {
+        $processTemp = storage_path('app/private/process-temp');
+        if (! is_dir($processTemp) && ! mkdir($processTemp, 0700, true) && ! is_dir($processTemp)) {
+            throw new \RuntimeException('Không thể tạo thư mục tạm cho tiến trình chuyển PDF.');
+        }
+
+        $process = new Process([
+            PHP_BINARY,
+            base_path('artisan'),
+            'documents:convert-pdf',
+            $sourcePath,
+            $destinationPath,
+        ]);
+        $process->setWorkingDirectory(base_path());
+        $process->setTimeout((float) config('export_templates.converter.timeout', 120));
+        $environment = is_array(getenv()) ? getenv() : [];
+        $environment['LIBREOFFICE_CHILD_CONVERSION'] = '1';
+        $environment['TEMP'] = $processTemp;
+        $environment['TMP'] = $processTemp;
+        $process->setEnv($environment);
+        $process->run();
+
+        return $process;
+    }
+
     /**
      * Trên Windows soffice.exe là GUI launcher và có thể trả mã thoát trước
      * khi chuyển xong. soffice.com là console launcher đồng bộ dành cho CLI.
@@ -122,9 +186,29 @@ class LibreOfficeDocumentConverter implements DocumentConverterInterface
 
     private function temporaryProfileDirectory(): string
     {
-        $directory = sys_get_temp_dir().DIRECTORY_SEPARATOR.'lms-soffice-'.bin2hex(random_bytes(8));
+        $root = storage_path('app/private/libreoffice-profiles');
+        if (! is_dir($root) && ! mkdir($root, 0700, true) && ! is_dir($root)) {
+            throw new \RuntimeException('Không thể tạo thư mục profile tạm cho LibreOffice.');
+        }
+
+        $directory = $root.DIRECTORY_SEPARATOR.'lms-soffice-'.bin2hex(random_bytes(8));
         if (! mkdir($directory, 0700, true) && ! is_dir($directory)) {
             throw new \RuntimeException('Không thể tạo profile tạm cho LibreOffice.');
+        }
+
+        return $directory;
+    }
+
+    private function temporaryOutputDirectory(): string
+    {
+        $root = storage_path('app/private/libreoffice-conversions');
+        if (! is_dir($root) && ! mkdir($root, 0700, true) && ! is_dir($root)) {
+            throw new \RuntimeException('Không thể tạo thư mục tạm cho LibreOffice.');
+        }
+
+        $directory = $root.DIRECTORY_SEPARATOR.'lms-convert-'.bin2hex(random_bytes(8));
+        if (! mkdir($directory, 0700, true) && ! is_dir($directory)) {
+            throw new \RuntimeException('Không thể tạo thư mục output tạm cho LibreOffice.');
         }
 
         return $directory;
@@ -138,9 +222,14 @@ class LibreOfficeDocumentConverter implements DocumentConverterInterface
         return $prefix.str_replace(' ', '%20', $normalized);
     }
 
+    private function windowsQuote(string $value): string
+    {
+        return '"'.str_replace('"', '""', $value).'"';
+    }
+
     private function removeTemporaryProfile(string $directory): void
     {
-        $tempRoot = realpath(sys_get_temp_dir());
+        $tempRoot = realpath(storage_path('app/private/libreoffice-profiles'));
         $target = realpath($directory);
         if ($tempRoot === false || $target === false
             || ! str_starts_with($target, $tempRoot.DIRECTORY_SEPARATOR)
@@ -158,16 +247,12 @@ class LibreOfficeDocumentConverter implements DocumentConverterInterface
         @rmdir($target);
     }
 
-    private function removeTemporaryOutputDirectory(?string $directory): void
+    private function removeTemporaryOutputDirectory(string $directory): void
     {
-        if (! $directory || ! is_dir($directory)) {
-            return;
-        }
-
-        $tempRoot = realpath(sys_get_temp_dir());
+        $root = realpath(storage_path('app/private/libreoffice-conversions'));
         $target = realpath($directory);
-        if ($tempRoot === false || $target === false
-            || ! str_starts_with($target, $tempRoot.DIRECTORY_SEPARATOR)
+        if ($root === false || $target === false
+            || ! str_starts_with($target, $root.DIRECTORY_SEPARATOR)
             || ! str_starts_with(basename($target), 'lms-convert-')) {
             return;
         }

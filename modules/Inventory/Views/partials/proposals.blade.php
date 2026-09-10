@@ -1,13 +1,13 @@
 @php
-    $proposalTypeLabels = ['LIQUIDATION' => 'Thanh lý'];
+    $proposalTypeLabels = $proposalTypeLabels ?? ['LIQUIDATION' => 'Thanh lý', 'REPAIR' => 'Sửa chữa'];
     $proposalStatusLabels = ['PENDING' => 'Chờ duyệt', 'APPROVED' => 'Đã duyệt', 'REJECTED' => 'Từ chối', 'COMPLETED' => 'Đã hoàn thành'];
     $canEditProposal = auth()->user()?->isSuperAdmin() || \App\Support\PermissionCheck::can(auth()->user(), 'inventory.proposals.edit');
     $canDeleteProposal = auth()->user()?->isSuperAdmin() || \App\Support\PermissionCheck::can(auth()->user(), 'inventory.proposals.delete');
 @endphp
 <div class="overflow-x-auto rounded border bg-white p-4">
     <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <h2 class="font-semibold">Danh sách đề xuất thanh lý</h2>
-        <a href="#create-proposal" class="rounded bg-blue-600 px-3 py-2 text-sm font-semibold text-white">Tạo đề xuất thanh lý</a>
+        <h2 class="font-semibold">Danh sách đề xuất thanh lý / sửa chữa</h2>
+        <a href="#create-proposal" class="rounded bg-blue-600 px-3 py-2 text-sm font-semibold text-white">Tạo đề xuất</a>
     </div>
     <table class="w-full min-w-[950px] table-fixed text-sm">
         <colgroup>
@@ -50,8 +50,7 @@
                             <form method="POST" action="{{ route('inventory.proposals.update', $proposal) }}" class="grid gap-3 rounded border bg-white p-4 md:grid-cols-3">
                                 @csrf
                                 @method('PATCH')
-                                <input type="hidden" name="type" value="LIQUIDATION">
-                                <div class="text-sm font-semibold">Loại đề xuất<div class="mt-1 rounded border bg-slate-50 p-2">Thanh lý</div></div>
+                                <label class="text-sm font-semibold">Loại đề xuất<select name="type" class="mt-1 w-full rounded border p-2">@foreach($proposalTypeLabels as $key => $label)<option value="{{ $key }}" @selected($proposal->type === $key)>{{ $label }}</option>@endforeach</select></label>
                                 <label class="text-sm font-semibold md:col-span-2">Tiêu đề<input name="title" value="{{ $proposal->title }}" required class="mt-1 w-full rounded border p-2"></label>
                                 <label class="text-sm font-semibold">Đơn vị đề xuất<select name="unit_id" class="mt-1 w-full rounded border p-2"><option value="">Chưa chọn</option>@foreach(($units ?? collect()) as $unit)<option value="{{ $unit->id }}" @selected($proposal->unit_id == $unit->id)>{{ $unit->name }}</option>@endforeach</select></label>
                                 <label class="text-sm font-semibold">Trạng thái<select name="status" class="mt-1 w-full rounded border p-2">@foreach($proposalStatusLabels as $key => $label)<option value="{{ $key }}" @selected($proposal->status === $key)>{{ $label }}</option>@endforeach</select></label>

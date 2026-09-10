@@ -6,3 +6,12 @@ use Illuminate\Support\Facades\Artisan;
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
+
+Artisan::command('documents:convert-pdf {source} {destination}', function (string $source, string $destination) {
+    putenv('LIBREOFFICE_CHILD_CONVERSION=1');
+
+    app(\Modules\ExportTemplates\Contracts\DocumentConverterInterface::class)
+        ->convert($source, 'pdf', $destination);
+
+    $this->info($destination);
+})->purpose('Convert a supported document to PDF with LibreOffice');

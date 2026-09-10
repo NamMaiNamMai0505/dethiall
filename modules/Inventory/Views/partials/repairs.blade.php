@@ -2,7 +2,7 @@
     <div class="mb-4 flex items-center justify-between">
         <div>
             <h2 class="text-lg font-bold">Phân công sửa chữa</h2>
-            <p class="text-sm text-slate-500">Chọn phiếu báo hỏng để phân công kỹ thuật viên/người đi sửa.</p>
+            <p class="text-sm text-slate-500">Chọn phiếu báo hỏng hoặc đề xuất sửa chữa đã duyệt để phân công kỹ thuật viên/người đi sửa.</p>
         </div>
         <a href="{{ route('inventory.reports') }}" class="rounded-lg border px-3 py-2 text-sm">Danh mục</a>
     </div>
@@ -26,7 +26,7 @@
                     <th class="p-3">SL hỏng</th>
                     <th class="p-3">Phòng / Tầng / Tòa</th>
                     <th class="p-3">Ngày hư</th>
-                    <th class="p-3">Người báo</th>
+                    <th class="p-3">Nguồn / người đề nghị</th>
                     <th class="p-3">Người sửa</th>
                     <th class="p-3">Bắt đầu sửa</th>
                     <th class="p-3">Thao tác</th>
@@ -44,7 +44,10 @@
                         <td class="p-3">{{ (float) ($repairBreakReport?->quantity ?: $repair->asset?->broken_quantity ?: $repair->asset?->quantity ?: 0) }}</td>
                         <td class="p-3">{{ $repair->asset?->classroom?->name ?: '—' }}</td>
                         <td class="p-3">{{ $repair->opened_at?->format('d/m/Y') ?: '—' }}</td>
-                        <td class="p-3">{{ $repair->requestedBy?->name ?: '—' }}</td>
+                        <td class="p-3">
+                            <div>{{ $repair->source_type === 'PROPOSAL_REPAIR' ? 'Đề xuất sửa chữa' : 'Báo hỏng' }}</div>
+                            <div class="text-xs text-slate-500">{{ $repair->requestedBy?->name ?: '—' }}</div>
+                        </td>
                         <td class="p-3">{{ $repair->performer ?: $repair->assignee?->name ?: '—' }}</td>
                         <td class="p-3">{{ $repair->started_at?->format('d/m/Y') ?: '—' }}</td>
                         <td class="p-3">
@@ -58,12 +61,19 @@
                     </tr>
                     <tr id="repair-modal-{{ $repair->id }}" class="hidden">
                         <td colspan="9" class="p-4">
-                            <form method="POST" action="{{ route('inventory.repairs.store') }}" class="grid gap-3 rounded-xl border bg-slate-50 p-4 md:grid-cols-3">
+                            <form method="POST" action="{{ route('inventory.repairs.assign', $repair) }}" class="grid gap-3 rounded-xl border bg-slate-50 p-4 md:grid-cols-3">
                                 @csrf
-                                <input type="hidden" name="asset_id" value="{{ $repair->asset_id }}">
-                                <input type="hidden" name="content" value="{{ $repair->content }}">
+                                @method('PATCH')
+                                <label class="text-sm font-semibold">Tài khoản người sửa
+                                    <select name="assigned_to" class="mt-1 w-full rounded-lg border p-2" data-repair-assignee-select="{{ $repair->id }}">
+                                        <option value="">Chọn tài khoản</option>
+                                        @foreach(($users ?? collect()) as $user)
+                                            <option value="{{ $user->id }}" data-name="{{ $user->name }}" @selected((int) $repair->assigned_to === (int) $user->id)>{{ $user->name }} — {{ $user->email }}</option>
+                                        @endforeach
+                                    </select>
+                                </label>
                                 <label class="text-sm font-semibold">Người đi sửa
-                                    <input name="performer" required value="{{ $repair->performer }}" placeholder="Nhập người đi sửa" class="mt-1 w-full rounded-lg border p-2">
+                                    <input name="performer" value="{{ $repair->performer }}" placeholder="Nhập người đi sửa" class="mt-1 w-full rounded-lg border p-2" data-repair-performer-input="{{ $repair->id }}">
                                 </label>
                                 <label class="text-sm font-semibold">Ngày bắt đầu sửa
                                     <input name="started_at" type="date" value="{{ optional($repair->started_at)->toDateString() ?: now()->toDateString() }}" class="mt-1 w-full rounded-lg border p-2">
@@ -118,5 +128,12 @@ document.querySelectorAll('[data-repair-open]').forEach((button) => {
 });
 document.querySelectorAll('[data-repair-complete-open]').forEach((button) => {
     button.addEventListener('click', () => document.getElementById('repair-complete-' + button.dataset.repairCompleteOpen)?.classList.toggle('hidden'));
+});
+document.querySelectorAll('[data-repair-assignee-select]').forEach((select) => {
+    select.addEventListener('change', () => {
+        const input = document.querySelector('[data-repair-performer-input="' + select.dataset.repairAssigneeSelect + '"]');
+        const name = select.selectedOptions[0]?.dataset.name || '';
+        if (input && !input.value.trim()) input.value = name;
+    });
 });
 </script>

@@ -1,12 +1,12 @@
 @php
     $proposalStatusLabels = ['PENDING'=>'Chờ duyệt','APPROVED'=>'Đã duyệt','REJECTED'=>'Từ chối','COMPLETED'=>'Đã hoàn thành'];
-    $proposalTypeLabels = ['LIQUIDATION'=>'Thanh lý'];
+    $proposalTypeLabels = ['LIQUIDATION'=>'Thanh lý', 'REPAIR'=>'Sửa chữa'];
     $canEditProposal = auth()->user()?->isSuperAdmin() || \App\Support\PermissionCheck::can(auth()->user(), 'inventory.proposals.edit');
     $canDeleteProposal = auth()->user()?->isSuperAdmin() || \App\Support\PermissionCheck::can(auth()->user(), 'inventory.proposals.delete');
 @endphp
 
 <div id="inventory-log-proposals" class="mt-4 overflow-x-auto rounded border bg-white p-4">
-    <h2 class="mb-3 font-semibold">Đề xuất thanh lý</h2>
+    <h2 class="mb-3 font-semibold">Đề xuất thanh lý / sửa chữa</h2>
     <table class="w-full min-w-[1300px] text-left text-sm">
         <thead class="bg-slate-100">
             <tr>
@@ -58,7 +58,7 @@
                             <form method="POST" action="{{ route('inventory.proposals.update', $proposal) }}" class="grid gap-3 rounded border bg-white p-4 md:grid-cols-3">
                                 @csrf
                                 @method('PATCH')
-                                <input type="hidden" name="type" value="LIQUIDATION">
+                                <label class="text-sm font-semibold">Loại đề xuất<select name="type" class="mt-1 w-full rounded border p-2">@foreach($proposalTypeLabels as $key=>$label)<option value="{{ $key }}" @selected($proposal->type === $key)>{{ $label }}</option>@endforeach</select></label>
                                 <label class="text-sm font-semibold md:col-span-2">Tiêu đề<input name="title" value="{{ $proposal->title }}" required class="mt-1 w-full rounded border p-2"></label>
                                 <label class="text-sm font-semibold">Trạng thái<select name="status" class="mt-1 w-full rounded border p-2">@foreach($proposalStatusLabels as $key=>$label)<option value="{{ $key }}" @selected($proposal->status === $key)>{{ $label }}</option>@endforeach</select></label>
                                 <input type="hidden" name="unit_id" value="{{ $proposal->unit_id }}">
@@ -71,7 +71,7 @@
                     </tr>
                 @endif
             @empty
-                <tr><td colspan="10" class="p-5 text-center text-slate-500">Chưa có đề xuất thanh lý.</td></tr>
+                <tr><td colspan="10" class="p-5 text-center text-slate-500">Chưa có đề xuất.</td></tr>
             @endforelse
         </tbody>
     </table>

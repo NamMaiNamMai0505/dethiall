@@ -1,5 +1,6 @@
 @php
     $canPrintProposals = \App\Support\PermissionCheck::userCan('inventory.proposals.export');
+    $proposalTypeLabels = $proposalTypeLabels ?? ['LIQUIDATION' => 'Thanh lý', 'REPAIR' => 'Sửa chữa'];
     $digitalSignature = auth()->id()
         ? \App\Models\DigitalSignature::query()
             ->active()
@@ -14,8 +15,8 @@
 
 <div class="space-y-4">
     <div class="rounded-xl border border-indigo-100 bg-indigo-50 p-5">
-        <h2 class="text-xl font-bold text-slate-900">Duyệt đề xuất thanh lý</h2>
-        <p class="mt-1 text-sm text-slate-600">Danh sách các đề xuất thanh lý đang chờ duyệt và đã được duyệt.</p>
+        <h2 class="text-xl font-bold text-slate-900">Duyệt đề xuất thanh lý / sửa chữa</h2>
+        <p class="mt-1 text-sm text-slate-600">Danh sách các đề xuất thanh lý và sửa chữa đang chờ duyệt.</p>
     </div>
     <div class="overflow-x-auto rounded-xl border bg-white shadow-sm">
         <table class="w-full min-w-[1100px] text-left text-sm">
@@ -25,7 +26,7 @@
                 @php($item = $proposal->items->first())
                 <tr class="border-t align-top">
                     <td class="p-3">{{ $i + 1 }}</td>
-                    <td class="p-3">Thanh lý</td>
+                    <td class="p-3">{{ $proposalTypeLabels[$proposal->type] ?? $proposal->type }}</td>
                     <td class="p-3 font-semibold">{{ $proposal->title }}<div class="mt-1 text-xs text-slate-500">{{ $proposal->description ?: '—' }}</div></td>
                     <td class="p-3">{{ $proposal->nganh_code ?: '—' }}</td>
                     <td class="p-3">{{ $item?->material_code ?: $item?->original_code ?: '—' }} — {{ $item?->material_name ?: $item?->name ?: '—' }}<div class="text-xs text-slate-500">Số lượng: {{ (int)($item?->quantity ?? 0) }}</div></td>
@@ -72,17 +73,111 @@
                                 @else
                                     <span class="text-sm text-amber-700">Chờ in phiếu</span>
                                 @endif
+                                @if($proposal->type !== 'REPAIR' && $proposal->printed_at)
+                                    <form method="POST" action="{{ route('inventory.proposals.decide', $proposal) }}">@csrf @method('PATCH')<button name="status" value="COMPLETED" class="rounded bg-indigo-600 px-3 py-2 font-semibold text-white">Hoàn thành</button></form>
+                                @endif
                             </div>
                         @else <span class="text-slate-500">Đã xử lý</span> @endif
                     </td>
                 </tr>
             @empty
-                <tr><td colspan="8" class="p-8 text-center text-slate-500">Không có đề xuất thanh lý cần duyệt.</td></tr>
+                <tr><td colspan="8" class="p-8 text-center text-slate-500">Không có đề xuất cần duyệt.</td></tr>
             @endforelse
             </tbody>
         </table>
     </div>
+
+    <div class="rounded-xl border border-emerald-100 bg-emerald-50 p-5">
+        <h2 class="text-xl font-bold text-slate-900">Đề xuất đã xử lý</h2>
+        <p class="mt-1 text-sm text-slate-600">Các phiếu đã duyệt, từ chối hoặc hoàn thành được lưu lại tại đây.</p>
+    </div>
+    <div class="rounded-xl border bg-white p-4 shadow-sm">
+        <div class="grid gap-3 md:grid-cols-3">
+            <label class="text-sm font-semibold text-slate-700">Loại đề xuất
+                <select id="decided-proposal-type-filter" class="mt-1 w-full rounded-lg border-slate-300 px-3 py-2 text-sm">
+                    <option value="">Tất cả</option>
+                    @foreach($proposalTypeLabels as $typeKey => $typeLabel)
+                        <option value="{{ $typeKey }}">{{ $typeLabel }}</option>
+                    @endforeach
+                </select>
+            </label>
+            <label class="text-sm font-semibold text-slate-700">Trạng thái
+                <select id="decided-proposal-status-filter" class="mt-1 w-full rounded-lg border-slate-300 px-3 py-2 text-sm">
+                    <option value="">Tất cả</option>
+                    <option value="APPROVED">Đã duyệt</option>
+                    <option value="REJECTED">Từ chối</option>
+                    <option value="COMPLETED">Đã hoàn thành</option>
+                </select>
+            </label>
+            <label class="text-sm font-semibold text-slate-700">Phân công
+                <select id="decided-proposal-assignment-filter" class="mt-1 w-full rounded-lg border-slate-300 px-3 py-2 text-sm">
+                    <option value="">Tất cả</option>
+                    <option value="Đã phân công">Đã phân công</option>
+                    <option value="Chưa được phân công">Chưa được phân công</option>
+                    <option value="Đã hoàn thành">Đã hoàn thành</option>
+                    <option value="—">Không áp dụng</option>
+                </select>
+            </label>
+        </div>
+    </div>
+    <div class="overflow-x-auto rounded-xl border bg-white shadow-sm">
+        <table class="w-full min-w-[1100px] text-left text-sm">
+            <thead class="bg-slate-100"><tr><th class="p-3">STT</th><th class="p-3">Loại đề xuất</th><th class="p-3">Tiêu đề</th><th class="p-3">Vật tư</th><th class="p-3">Đơn vị đề xuất</th><th class="p-3">Người duyệt</th><th class="p-3">Trạng thái</th><th class="p-3">Phân công</th></tr></thead>
+            <tbody>
+            @forelse($decidedProposals ?? [] as $i => $proposal)
+                <?php
+                    $repair = ($repairByProposalId ?? collect())->get($proposal->id);
+                    $assignmentLabel = $proposal->type === 'REPAIR'
+                        ? (['COMPLETED' => 'Đã hoàn thành', 'ASSIGNED' => 'Đã phân công', 'CANCELLED' => 'Đã hủy'][$repair?->status] ?? 'Chưa được phân công')
+                        : '—';
+                ?>
+                <tr class="border-t align-top" data-decided-proposal-row data-type="{{ $proposal->type }}" data-status="{{ $proposal->status }}" data-assignment="{{ $assignmentLabel }}">
+                    <td class="p-3">{{ $i + 1 }}</td>
+                    <td class="p-3">{{ $proposalTypeLabels[$proposal->type] ?? $proposal->type }}</td>
+                    <td class="p-3 font-semibold">{{ $proposal->title }}<div class="mt-1 text-xs text-slate-500">{{ $proposal->description ?: '—' }}</div></td>
+                    <td class="p-3">{{ $proposal->items->first()?->material_code ?: $proposal->items->first()?->original_code ?: '—' }} — {{ $proposal->items->first()?->material_name ?: $proposal->items->first()?->name ?: '—' }}<div class="text-xs text-slate-500">Số lượng: {{ (int)($proposal->items->first()?->quantity ?? 0) }}</div></td>
+                    <td class="p-3">{{ $proposal->unit?->name ?: $proposal->proposed_by_display_name ?: '—' }}</td>
+                    <td class="p-3">{{ $proposal->decidedBy?->name ?: '—' }}</td>
+                    <td class="p-3">{{ ['PENDING'=>'Chờ duyệt','APPROVED'=>'Đã duyệt','REJECTED'=>'Từ chối','COMPLETED'=>'Đã hoàn thành'][$proposal->status] ?? $proposal->status }}</td>
+                    <td class="p-3">
+                        <span class="rounded-full px-2.5 py-1 text-xs font-semibold {{ $assignmentLabel === 'Đã hoàn thành' ? 'bg-emerald-100 text-emerald-700' : ($assignmentLabel === 'Đã phân công' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700') }}">{{ $assignmentLabel }}</span>
+                        @if($repair?->assignee || $repair?->performer)
+                            <div class="mt-1 text-xs text-slate-500">{{ $repair->performer ?: $repair->assignee?->name }}</div>
+                        @endif
+                    </td>
+                </tr>
+            @empty
+                <tr><td colspan="8" class="p-8 text-center text-slate-500">Chưa có đề xuất đã xử lý.</td></tr>
+            @endforelse
+                <tr id="decided-proposal-empty-filter-row" class="hidden"><td colspan="8" class="p-8 text-center text-slate-500">Không có đề xuất phù hợp bộ lọc.</td></tr>
+            </tbody>
+        </table>
+    </div>
 </div>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const type = document.getElementById('decided-proposal-type-filter');
+    const status = document.getElementById('decided-proposal-status-filter');
+    const assignment = document.getElementById('decided-proposal-assignment-filter');
+    const rows = Array.from(document.querySelectorAll('[data-decided-proposal-row]'));
+    const emptyRow = document.getElementById('decided-proposal-empty-filter-row');
+    if (!type || !status || !assignment || !emptyRow) return;
+
+    const applyFilter = () => {
+        let shown = 0;
+        rows.forEach(row => {
+            const visible = (!type.value || row.dataset.type === type.value)
+                && (!status.value || row.dataset.status === status.value)
+                && (!assignment.value || row.dataset.assignment === assignment.value);
+            row.classList.toggle('hidden', !visible);
+            if (visible) shown += 1;
+        });
+        emptyRow.classList.toggle('hidden', shown > 0);
+    };
+
+    [type, status, assignment].forEach(control => control.addEventListener('change', applyFilter));
+});
+</script>
 <div class="space-y-4">
     <div class="rounded-xl border border-amber-100 bg-amber-50 p-5">
         <h2 class="text-xl font-bold text-slate-900">Điều động / thu hồi</h2>

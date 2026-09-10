@@ -1,5 +1,5 @@
 @php
-    $types = ['LIQUIDATION' => 'Thanh lý'];
+    $types = $proposalTypeLabels ?? ['LIQUIDATION' => 'Thanh lý', 'REPAIR' => 'Sửa chữa'];
     $statuses = ['PENDING' => 'Chờ duyệt', 'APPROVED' => 'Đã duyệt', 'REJECTED' => 'Từ chối', 'COMPLETED' => 'Đã hoàn thành'];
     $canPrintProposal = in_array($proposal->status, ['PENDING', 'APPROVED', 'COMPLETED'], true)
         && \App\Support\PermissionCheck::userCan('inventory.proposals.export');
@@ -18,7 +18,7 @@
 <div class="space-y-5">
     <div class="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-white p-5">
         <div>
-            <h2 class="text-xl font-bold text-slate-900">Chi tiết đề xuất thanh lý #{{ $proposal->id }}</h2>
+            <h2 class="text-xl font-bold text-slate-900">Chi tiết đề xuất {{ mb_strtolower($types[$proposal->type] ?? $proposal->type, 'UTF-8') }} #{{ $proposal->id }}</h2>
             <p class="mt-1 text-sm text-slate-500">{{ $proposal->title }}</p>
         </div>
         <a href="{{ route('inventory.proposals.approval') }}" class="rounded border px-4 py-2 text-sm font-semibold text-slate-700">
@@ -34,13 +34,22 @@
             <div><b>Trạng thái</b><p>{{ $statuses[$proposal->status] ?? $proposal->status }}</p></div>
         </div>
         <div class="mt-4">
-            <b>Lý do thanh lý</b>
+            <b>Lý do / tình trạng</b>
             <p class="mt-1 whitespace-pre-line">{{ $proposal->description ?: '—' }}</p>
         </div>
         @if($proposal->status === 'REJECTED')
             <div class="mt-4 rounded-lg border border-rose-200 bg-rose-50 p-3">
                 <b class="text-rose-700">Lý do từ chối</b>
                 <p class="mt-1 whitespace-pre-line text-rose-800">{{ $proposal->decision_note ?: 'Chưa có lý do' }}</p>
+            </div>
+        @endif
+        @if($proposal->type === 'REPAIR' && $proposal->status !== 'PENDING')
+            <?php $assignmentLabel = ['COMPLETED' => 'Đã hoàn thành', 'ASSIGNED' => 'Đã phân công', 'CANCELLED' => 'Đã hủy'][$repair?->status] ?? 'Chưa được phân công'; ?>
+            <div class="mt-4 rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-800">
+                <b>Phân công sửa chữa:</b> {{ $assignmentLabel }}
+                @if($repair?->performer || $repair?->assignee)
+                    <span class="ml-2">Người sửa: {{ $repair->performer ?: $repair->assignee?->name }}</span>
+                @endif
             </div>
         @endif
     </div>
@@ -118,7 +127,7 @@
                     <h3 class="font-bold text-slate-900">In phiếu đề xuất</h3>
                     <p class="mt-1 text-sm text-slate-600">Bản trước duyệt dùng để xem nội dung, không có chữ ký.</p>
                     @if($proposal->status === 'PENDING')
-                        <form method="POST" action="{{ route('inventory.proposals.print', $proposal) }}" target="_blank" class="mt-4">
+                        <form method="POST" action="{{ route('inventory.proposals.print', $proposal) }}" target="_blank" class="mt-4" data-proposal-preview-print-form>
                             @csrf
                             <input type="hidden" name="print_mode" value="preview">
                             <button class="w-full rounded bg-slate-900 px-4 py-2.5 font-semibold text-white">In xem trước</button>
@@ -240,6 +249,11 @@
         };
 
         if (directButton) directButton.addEventListener('click', () => print('direct'));
+        document.querySelectorAll('[data-proposal-preview-print-form]').forEach(form => {
+            form.addEventListener('submit', () => {
+                setTimeout(() => window.location.reload(), 1200);
+            });
+        });
     })();
     </script>
 @endif

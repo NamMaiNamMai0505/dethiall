@@ -1,11 +1,12 @@
 @php
     $currentUserUnitId = auth()->user()?->unit_id;
+    $proposalTypeLabels = $proposalTypeLabels ?? ['LIQUIDATION' => 'Thanh lý', 'REPAIR' => 'Sửa chữa'];
 @endphp
 <div id="create-proposal" class="rounded-xl border bg-white p-5 shadow-sm">
     <div class="mb-5 flex items-start justify-between gap-4">
         <div>
-            <h2 class="text-xl font-bold text-slate-900">Tạo đề xuất thanh lý</h2>
-            <p class="mt-1 text-sm text-slate-500">Lập phiếu đề xuất thanh lý vật tư theo phòng và ngành phụ trách.</p>
+            <h2 class="text-xl font-bold text-slate-900">Tạo đề xuất thanh lý / sửa chữa</h2>
+            <p class="mt-1 text-sm text-slate-500">Lập phiếu đề xuất xử lý vật tư theo phòng và ngành phụ trách.</p>
         </div>
         <span class="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">Phiếu đề xuất</span>
     </div>
@@ -15,11 +16,12 @@
         @if($currentUserUnitId)
             <input type="hidden" name="unit_id" value="{{ $currentUserUnitId }}">
         @endif
-        <input type="hidden" name="type" value="LIQUIDATION">
         <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <div class="text-sm font-semibold text-slate-700">Loại đề xuất
-                <div class="mt-1 rounded-lg border bg-slate-50 p-2.5 text-slate-900">Thanh lý</div>
-            </div>
+            <label class="text-sm font-semibold text-slate-700">Loại đề xuất <span class="text-red-600">*</span>
+                <select name="type" id="proposal-action-type" required class="mt-1 w-full rounded-lg border p-2.5">
+                    @foreach($proposalTypeLabels as $key => $label)<option value="{{ $key }}" @selected(old('type', 'LIQUIDATION') === $key)>{{ $label }}</option>@endforeach
+                </select>
+            </label>
             <label class="text-sm font-semibold text-slate-700">Đơn vị đề xuất
                 <select name="unit_id" @disabled($currentUserUnitId) class="mt-1 w-full rounded-lg border p-2.5">
                     <option value="">Chọn đơn vị đề xuất</option>
@@ -60,13 +62,24 @@
                     </select>
                 </label>
                 <label class="text-sm font-semibold text-slate-700 md:col-span-2">Vật tư (theo ngành + phòng) <span class="text-red-600">*</span>
-                    <select name="material_id" id="proposal-material" required class="mt-1 w-full rounded-lg border bg-white p-2.5">
+                    <select name="material_picker" id="proposal-material" required class="mt-1 w-full rounded-lg border bg-white p-2.5">
                         <option value="">Chọn vật tư</option>
-                        @foreach($materials as $material)<option value="{{ $material->id }}" data-type-id="{{ $material->category_id }}">{{ $material->code }} — {{ $material->name }}</option>@endforeach
+                        @foreach($assets as $asset)
+                            @php
+                                $assetTypeId = $asset->material?->category_id ?: $asset->category_id;
+                                $assetCode = $asset->material?->code ?: $asset->asset_code;
+                                $assetName = $asset->material?->name ?: $asset->name;
+                                $assetGrade = $asset->grade ? 'Cấp '.$asset->grade : 'Chưa phân cấp';
+                            @endphp
+                            @if($assetTypeId && $asset->classroom_id)
+                                <option value="asset:{{ $asset->id }}" data-type-id="{{ $assetTypeId }}" data-room-id="{{ $asset->classroom_id }}">{{ $assetCode }} — {{ $assetName }} — {{ $assetGrade }}</option>
+                            @endif
+                        @endforeach
                     </select>
+                    <input type="hidden" name="material_id" id="proposal-material-id" value="">
                 </label>
                 <label class="text-sm font-semibold text-slate-700">Số lượng thực tế phòng
-                    <input id="proposal-room-quantity" type="number" value="0" readonly class="mt-1 w-full rounded-lg border bg-slate-100 p-2.5 text-slate-700">
+                    <input id="proposal-room-quantity" type="number" value="" placeholder="Chọn phòng và vật tư" readonly class="mt-1 w-full rounded-lg border bg-slate-100 p-2.5 text-slate-700">
                 </label>
                 <label class="text-sm font-semibold text-slate-700 md:col-span-3">Vị trí chi tiết
                     <input name="location_note" value="{{ old('location_note') }}" class="mt-1 w-full rounded-lg border p-2.5" placeholder="Ví dụ: Tủ số 02, dãy A, tầng 1">
@@ -80,74 +93,34 @@
                 <table class="w-full text-left text-sm"><thead class="bg-slate-100"><tr><th class="p-3">Phòng / vị trí</th><th class="p-3">Vật tư</th><th class="p-3">Số lượng thực tế phòng</th><th class="p-3">Số lượng đề xuất</th><th class="p-3">Vị trí chi tiết</th></tr></thead><tbody id="proposal-item-preview-body"></tbody></table>
             </div>
         </div>
-        <div class="flex justify-end gap-3"><a href="{{ route('inventory.proposals') }}" class="rounded-lg border px-5 py-2.5">Hủy</a><button class="rounded-lg bg-blue-600 px-5 py-2.5 font-semibold text-white hover:bg-blue-700">Gửi đề xuất thanh lý</button></div>
+        <div class="flex justify-end gap-3"><a href="{{ route('inventory.proposals') }}" class="rounded-lg border px-5 py-2.5">Hủy</a><button class="rounded-lg bg-blue-600 px-5 py-2.5 font-semibold text-white hover:bg-blue-700">Gửi đề xuất</button></div>
     </form>
 </div>
-<script>
-document.addEventListener('DOMContentLoaded', function () {
-    const industry = document.getElementById('proposal-category');
-    const type = document.getElementById('proposal-type');
-    const material = document.getElementById('proposal-material');
-    const classroom = document.getElementById('proposal-classroom');
-    const roomQuantity = document.getElementById('proposal-room-quantity');
-    const add = document.getElementById('add-proposal-item');
-    const preview = document.getElementById('proposal-item-preview');
-    const body = document.getElementById('proposal-item-preview-body');
-    const roomQuantityMap = @json(($assets ?? collect())->groupBy(fn ($asset) => ($asset->material_id ?: 0).'|'.($asset->classroom_id ?: 0))->map(fn ($items) => (float) $items->sum('quantity')));
-    const syncRoomQuantity = () => {
-        if (!roomQuantity) return;
-        const value = roomQuantityMap[(material?.value || '0') + '|' + (classroom?.value || '0')] || 0;
-        roomQuantity.value = Number.isInteger(value) ? value : Number(value).toFixed(2);
-    };
-    if (industry && type && material) {
-        const typeOptions = [...type.options].slice(1).map(option => option.cloneNode(true));
-        const materialOptions = [...material.options].slice(1).map(option => option.cloneNode(true));
-        const rebuildMaterials = () => {
-            const selectedType = type.value;
-            material.innerHTML = '<option value="">Chọn vật tư</option>';
-            materialOptions.filter(option => selectedType && option.dataset.typeId === selectedType)
-                .forEach(option => material.append(option.cloneNode(true)));
-            material.value = '';
-            syncRoomQuantity();
-        };
-        const rebuildTypes = () => {
-            type.innerHTML = '<option value="">Chọn loại vật tư</option>';
-            const industryId = industry.selectedOptions[0]?.dataset.industryId || '';
-            typeOptions.filter(option => industryId && option.dataset.industryId === industryId)
-                .forEach(option => type.append(option.cloneNode(true)));
-            type.value = '';
-            rebuildMaterials();
-        };
-        industry.addEventListener('change', rebuildTypes);
-        type.addEventListener('change', rebuildMaterials);
-        material.addEventListener('change', syncRoomQuantity);
-        classroom?.addEventListener('change', syncRoomQuantity);
-        rebuildTypes();
-    }
-    if (add) add.addEventListener('click', function () { const room = document.getElementById('proposal-classroom'), quantity = document.querySelector('[name="quantity"]'), note = document.querySelector('[name="location_note"]'); if (!room.value || !material.value) return; const roomText = room.options[room.selectedIndex].text, materialText = material.options[material.selectedIndex].text; body.innerHTML = `<tr><td class="p-3">${roomText}</td><td class="p-3">${materialText}</td><td class="p-3">${roomQuantity?.value || 0}</td><td class="p-3">${quantity.value || 1}</td><td class="p-3">${note.value || '—'}</td></tr>`; preview.classList.remove('hidden'); });
-    syncRoomQuantity();
-});
-</script>
 @php
     $proposalTypesJson = ($types ?? collect())->map(fn ($item) => [
         'value' => (string) $item->id,
         'text' => $item->code.' — '.$item->name,
         'parent' => (string) $item->parent_id,
     ])->values();
-    $proposalMaterialRooms = ($assets ?? collect())
-        ->groupBy('material_id')
-        ->map(fn ($items) => $items->pluck('classroom_id')->filter()->unique()->values())
-        ->all();
-    $proposalRoomQuantitiesJson = ($assets ?? collect())
-        ->groupBy(fn ($asset) => ($asset->material_id ?: 0).'|'.($asset->classroom_id ?: 0))
-        ->map(fn ($items) => (float) $items->sum('quantity'));
-    $proposalMaterialsJson = ($materials ?? collect())->map(fn ($item) => [
-        'value' => (string) $item->id,
-        'text' => $item->code.' — '.$item->name,
-        'type' => (string) $item->category_id,
-        'rooms' => ($proposalMaterialRooms[$item->id] ?? collect())
-            ->map(fn ($id) => (string) $id)->values()->all(),
-    ])->values();
+    $proposalAssetOptions = ($assets ?? collect())->map(function ($asset) {
+        $type = $asset->material?->category ?: $asset->categoryRelation;
+        $code = $asset->material?->code ?: $asset->asset_code;
+        $name = $asset->material?->name ?: $asset->name;
+        $grade = $asset->grade ? 'Cấp '.$asset->grade : 'Chưa phân cấp';
+
+        return [
+            'value' => 'asset:'.$asset->id,
+            'asset' => (string) $asset->id,
+            'material' => $asset->material_id ? (string) $asset->material_id : '',
+            'text' => trim($code.' — '.$name.' — '.$grade),
+            'type' => (string) ($asset->material?->category_id ?: $asset->category_id),
+            'rooms' => [$asset->classroom_id ? (string) $asset->classroom_id : ''],
+        ];
+    })->filter(fn ($item) => $item['type'] !== '' && $item['rooms'][0] !== '')->values();
+    $proposalAssetRoomQuantities = ($assets ?? collect())
+        ->mapWithKeys(fn ($asset) => ['asset:'.$asset->id.'|'.$asset->classroom_id => (float) $asset->quantity]);
+    $proposalRoomQuantitiesJson = $proposalAssetRoomQuantities;
+    $proposalMaterialsJson = $proposalAssetOptions;
 @endphp
 <script>
 (()=>{
@@ -159,14 +132,50 @@ document.addEventListener('DOMContentLoaded', function () {
         const classroom=document.getElementById('proposal-classroom');
         const roomQuantity=document.getElementById('proposal-room-quantity');
         const roomQuantities=@json($proposalRoomQuantitiesJson);
-        const materialRooms=@json(($assets ?? collect())->groupBy('material_id')->map(fn($items)=>$items->pluck('classroom_id')->filter()->unique()->values())->all());
         const materials=@json($proposalMaterialsJson);
+        const addButton=document.getElementById('add-proposal-item');
+        const preview=document.getElementById('proposal-item-preview');
+        const previewBody=document.getElementById('proposal-item-preview-body');
+        const hiddenAsset=document.createElement('input');
+        hiddenAsset.type='hidden';hiddenAsset.name='asset_id';hiddenAsset.id='proposal-asset-id';
+        material.closest('form')?.appendChild(hiddenAsset);
+        const hiddenMaterial=document.getElementById('proposal-material-id');
+        const escapeHtml=(value)=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char]));
+        const fieldValue=(field)=>field?.tomselect?field.tomselect.getValue():(field?.value||'');
+        const selectedOptionText=(field,items)=>{
+            const value=String(fieldValue(field)||'');
+            if(!value)return '';
+            return field?.tomselect?.options?.[value]?.text||items?.find(item=>String(item.value)===value)?.text||field.selectedOptions?.[0]?.text||'';
+        };
         const syncRoomQuantity=()=>{
             if(!roomQuantity)return;
-            const key=String(material.tomselect?material.tomselect.getValue():material.value||0)+'|'+String(classroom?.value||0);
+            const selectedValue=String(fieldValue(material)||'');
+            const roomId=String(classroom?.value||'');
+            const selected=materials.find(item=>String(item.value)===selectedValue);
+            if(!selectedValue||!roomId){
+                roomQuantity.value='';
+                hiddenAsset.value=selected?.asset||'';
+                if(hiddenMaterial)hiddenMaterial.value=selected?.material||'';
+                return;
+            }
+            const key=selectedValue+'|'+roomId;
             const value=roomQuantities[key]||0;
             roomQuantity.value=Number.isInteger(value)?value:Number(value).toFixed(2);
+            hiddenAsset.value=selected?.asset||'';
+            if(hiddenMaterial)hiddenMaterial.value=selected?.material||'';
         };
+        addButton?.addEventListener('click',()=>{
+            syncRoomQuantity();
+            const roomId=String(classroom?.value||'');
+            const selectedValue=String(fieldValue(material)||'');
+            if(!roomId||!selectedValue||!preview||!previewBody)return;
+            const quantity=document.querySelector('[name="quantity"]')?.value||1;
+            const note=document.querySelector('[name="location_note"]')?.value||'—';
+            const roomText=classroom?.selectedOptions?.[0]?.text||'';
+            const materialText=selectedOptionText(material,materials);
+            previewBody.innerHTML=`<tr><td class="p-3">${escapeHtml(roomText)}</td><td class="p-3">${escapeHtml(materialText)}</td><td class="p-3">${escapeHtml(roomQuantity?.value||0)}</td><td class="p-3">${escapeHtml(quantity)}</td><td class="p-3">${escapeHtml(note)}</td></tr>`;
+            preview.classList.remove('hidden');
+        });
         const setOptions=(select,items,empty)=>{
             const current=select.value;
             if(select.tomselect){
