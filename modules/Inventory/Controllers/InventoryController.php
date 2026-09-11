@@ -50,7 +50,56 @@ class InventoryController extends ModuleBaseController
     }
 
     public function portal(){ return view('portals.inventory'); }
-    public function materials(Request $request){$roomIds=$this->assignedInventoryRoomIds($request->user());$materialIds=$this->scopedMaterialIds($roomIds);$categoryIds=$this->scopedCategoryIds($materialIds);$industryId=$request->input('industry_id');$typeId=$request->input('category_id');if($industryId&&$typeId&&!InventoryCategory::whereKey($typeId)->where('parent_id',$industryId)->exists())$typeId=null;$materials=InventoryMaterial::with('category')->withCount(['assets','warehouseItems','proposalItems','transfers','movements'])->when($materialIds!==null,fn($q)=>$q->whereIn('id',$materialIds))->when($industryId,fn($q,$id)=>$q->whereHas('category',fn($c)=>$c->where('parent_id',$id)))->when($typeId,fn($q,$id)=>$q->where('category_id',$id))->when($request->filled('search'),fn($q)=>$q->where(fn($x)=>$x->where('code','like','%'.$request->search.'%')->orWhere('name','like','%'.$request->search.'%')))->latest()->get();$industries=InventoryCategory::whereNull('parent_id')->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get();$allCategories=InventoryCategory::whereNotNull('parent_id')->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get();$categories=$allCategories->when($industryId,fn($items,$id)=>$items->where('parent_id',$id))->values();return view('inventory::feature',['section'=>'materials','title'=>'Danh sách vật tư','materials'=>$materials,'categories'=>$categories,'allCategories'=>$allCategories,'industries'=>$industries,'industryId'=>$industryId,'typeId'=>$typeId]);}
+    public function materials(Request $request)
+    {
+        $roomIds = $this->assignedInventoryRoomIds($request->user());
+        $materialIds = $this->scopedMaterialIds($roomIds);
+        $categoryIds = $this->scopedCategoryIds($materialIds);
+        $industryId = $request->input('industry_id');
+        $typeId = $request->input('category_id');
+        if ($industryId && $typeId && ! InventoryCategory::whereKey($typeId)->where('parent_id', $industryId)->exists()) {
+            $typeId = null;
+        }
+
+        $materials = InventoryMaterial::with('category')->withCount(['assets','warehouseItems','proposalItems','transfers','movements'])
+            ->when($materialIds !== null, fn($q) => $q->whereIn('id', $materialIds))
+            ->when($industryId, fn($q, $id) => $q->whereHas('category', fn($c) => $c->where('parent_id', $id)))
+            ->when($typeId, fn($q, $id) => $q->where('category_id', $id))
+            ->when($request->filled('search'), fn($q) => $q->where(fn($x) => $x->where('code', 'like', '%'.$request->search.'%')->orWhere('name', 'like', '%'.$request->search.'%')))
+            ->latest()
+            ->get();
+
+        $assetGrades = InventoryAsset::query()
+            ->select('material_id', 'grade', DB::raw('SUM(quantity) as quantity'))
+            ->whereIn('material_id', $materials->pluck('id')->filter()->values())
+            ->when($roomIds !== null, fn($q) => $q->whereIn('classroom_id', $roomIds))
+            ->groupBy('material_id', 'grade')
+            ->get()
+            ->groupBy('material_id');
+
+        $materialRows = $materials->flatMap(function (InventoryMaterial $material) use ($assetGrades) {
+            $grades = $assetGrades->get($material->id, collect());
+            if ($grades->isEmpty()) {
+                return collect([(object) [
+                    'material' => $material,
+                    'quantity' => $material->quantity,
+                    'classification' => $material->classification,
+                ]]);
+            }
+
+            return $grades->sortBy('grade')->values()->map(fn($grade) => (object) [
+                'material' => $material,
+                'quantity' => (float) $grade->quantity,
+                'classification' => $grade->grade ? 'Phân cấp '.$grade->grade : ($material->classification ?: null),
+            ]);
+        })->values();
+
+        $industries = InventoryCategory::whereNull('parent_id')->when($categoryIds !== null, fn($q) => $q->whereIn('id', $categoryIds))->orderBy('code')->get();
+        $allCategories = InventoryCategory::whereNotNull('parent_id')->when($categoryIds !== null, fn($q) => $q->whereIn('id', $categoryIds))->orderBy('code')->get();
+        $categories = $allCategories->when($industryId, fn($items, $id) => $items->where('parent_id', $id))->values();
+
+        return view('inventory::feature', ['section'=>'materials','title'=>'Danh sách vật tư','materials'=>$materials,'materialRows'=>$materialRows,'categories'=>$categories,'allCategories'=>$allCategories,'industries'=>$industries,'industryId'=>$industryId,'typeId'=>$typeId]);
+    }
     public function importTemplate(){
         $spreadsheet=new \PhpOffice\PhpSpreadsheet\Spreadsheet();
         $spreadsheet->getActiveSheet()->fromArray([
