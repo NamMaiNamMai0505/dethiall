@@ -13,9 +13,7 @@
                 ['label' => 'Danh mục & kho', 'items' => [
                     ['label' => 'Tòa nhà', 'route' => 'inventory.buildings', 'icon' => 'bi-building'],
                     ['label' => 'Phòng', 'route' => 'inventory.classrooms', 'icon' => 'bi-door-open'],
-                    ['label' => 'Ngành vật tư', 'route' => 'inventory.category', 'icon' => 'bi-diagram-3'],
-                    ['label' => 'Loại vật tư', 'route' => 'inventory.types', 'icon' => 'bi-tags'],
-                    ['label' => 'Vật tư', 'route' => 'inventory.materials', 'icon' => 'bi-box-seam'],
+                    ['label' => 'Danh mục vật tư', 'route' => 'inventory.category', 'icon' => 'bi-diagram-3'],
                     ['label' => 'Kho vật tư', 'route' => 'inventory.warehouse', 'icon' => 'bi-boxes'],
                 ]],
                 ['label' => 'Nghiệp vụ', 'items' => [

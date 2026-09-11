@@ -104,13 +104,13 @@ class InventoryWorkflowController extends ModuleBaseController
         abort_unless($allowed, 403, 'Tài khoản này không được xem hoặc xử lý đề xuất ngoài phòng được gán.');
     }
 
-    public function category(Request $r){$isTypes=$r->routeIs('inventory.types');$roomIds=$this->assignedInventoryRoomIds($r->user());$materialIds=$this->scopedMaterialIds($roomIds);$categoryIds=$this->scopedCategoryIds($materialIds);$categories=InventoryCategory::with('parent')->withCount(['materials'=>fn($q)=>$q->when($materialIds!==null,fn($x)=>$x->whereIn('id',$materialIds))])->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->when($isTypes,fn($q)=>$q->whereNotNull('parent_id'),fn($q)=>$q->whereNull('parent_id'))->orderBy('code')->get();return view('inventory::feature',['section'=>'category','title'=>$isTypes?'Danh mục loại vật tư':'Danh mục ngành vật tư','categories'=>$categories,'parents'=>InventoryCategory::whereNull('parent_id')->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get(),'isTypes'=>$isTypes,'users'=>\App\Models\User::where('status',1)->orderBy('name')->get()]);}
+    public function category(Request $r){$roomIds=$this->assignedInventoryRoomIds($r->user());$materialIds=$this->scopedMaterialIds($roomIds);$categoryIds=$this->scopedCategoryIds($materialIds);$categories=InventoryCategory::with(['children'=>fn($q)=>$q->when($categoryIds!==null,fn($x)=>$x->whereIn('id',$categoryIds))->with(['materials'=>fn($m)=>$m->when($materialIds!==null,fn($x)=>$x->whereIn('id',$materialIds))->orderBy('code')])->withCount(['materials'=>fn($m)=>$m->when($materialIds!==null,fn($x)=>$x->whereIn('id',$materialIds))])->orderBy('code')])->withCount(['children','materials'=>fn($q)=>$q->when($materialIds!==null,fn($x)=>$x->whereIn('id',$materialIds))])->whereNull('parent_id')->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get();return view('inventory::feature',['section'=>'category','title'=>'Danh mục vật tư','categories'=>$categories,'parents'=>$categories,'isTypes'=>false,'users'=>\App\Models\User::where('status',1)->orderBy('name')->get()]);}
     public function categoryShow(InventoryCategory $category){$roomIds=$this->assignedInventoryRoomIds();$materialIds=$this->scopedMaterialIds($roomIds);$categoryIds=$this->scopedCategoryIds($materialIds);abort_if($categoryIds!==null&&!in_array((int)$category->id,$categoryIds,true),403,'Tài khoản này không được gán ngành / loại vật tư này.');$category->load(['parent','children'=>fn($q)=>$q->when($categoryIds!==null,fn($x)=>$x->whereIn('id',$categoryIds))->withCount(['materials'=>fn($m)=>$m->when($materialIds!==null,fn($x)=>$x->whereIn('id',$materialIds))])->orderBy('code'),'materials'=>fn($q)=>$q->when($materialIds!==null,fn($x)=>$x->whereIn('id',$materialIds))->with('category')->withCount(['assets','warehouseItems','proposalItems','transfers','movements'])]);return view('inventory::feature',['section'=>'category-detail','title'=>'Chi tiết '.$category->name,'category'=>$category,'isRoot'=>$category->parent_id===null]);}
     public function categoryStore(Request $r){$d=$r->validate(['parent_id'=>'nullable|exists:inventory_categories,id','code'=>'nullable|string|max:50|unique:inventory_categories,code','name'=>'required|string|max:255','description'=>'nullable|string']);if(!empty($d['parent_id'])){$parent=InventoryCategory::findOrFail($d['parent_id']);$prefix=$parent->code;$next=InventoryCategory::where('parent_id',$parent->id)->get()->map(fn($x)=>(int) substr($x->code,strlen($prefix)))->max()+1;$d['code']=$prefix.str_pad((string)$next,2,'0',STR_PAD_LEFT);}else{abort_if(empty($d['code']),422,'Ngành gốc phải có mã ngành.');}InventoryCategory::create($d);return back()->with('success','Đã thêm ngành/loại vật tư.');}
     public function categoryUpdate(Request $r,InventoryCategory $category){$rules=['name'=>'required|string|max:255','description'=>'nullable|string'];if($category->parent_id===null)$rules['code']='required|string|max:50|unique:inventory_categories,code,'.$category->id;$category->update($r->validate($rules));return back()->with('success','Đã cập nhật danh mục.');}
     public function categoryDelete(InventoryCategory $category){if($category->materials()->exists()||$category->children()->exists())return back()->withErrors(['category'=>'Không thể xóa danh mục đang có dữ liệu con.']);$category->delete();return back()->with('success','Đã xóa danh mục.');}
 
-    public function assets(Request $r){$roomIds=$this->assignedInventoryRoomIds($r->user());$materialIds=$this->scopedMaterialIds($roomIds);$categoryIds=$this->scopedCategoryIds($materialIds);$buildingIds=$this->scopedBuildingIds($roomIds);$assets=InventoryAsset::with(['material','classroom'])->when($roomIds!==null,fn($q)=>$q->whereIn('classroom_id',$roomIds))->when($r->search,fn($q,$s)=>$q->where(fn($x)=>$x->where('asset_code','like',"%$s%")->orWhere('name','like',"%$s%")))->latest()->paginate(20)->withQueryString();$allAssets=InventoryAsset::with(['material','classroom'])->when($roomIds!==null,fn($q)=>$q->whereIn('classroom_id',$roomIds))->latest()->get();$auditLogs=InventoryAuditLog::with('user')->latest()->limit(100)->get()->each->resolveDetails();return view('inventory::feature',['section'=>'assets','title'=>'Cập nhật vật tư','assets'=>$assets,'allAssets'=>$allAssets,'auditLogs'=>$auditLogs,'materials'=>InventoryMaterial::with('category')->when($materialIds!==null,fn($q)=>$q->whereIn('id',$materialIds))->orderBy('name')->get(),'classrooms'=>Classroom::active()->when($roomIds!==null,fn($q)=>$q->whereIn('id',$roomIds))->orderBy('name')->get(),'categories'=>InventoryCategory::whereNotNull('parent_id')->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get(),'industries'=>InventoryCategory::whereNull('parent_id')->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get(),'buildings'=>Building::when($buildingIds!==null,fn($q)=>$q->whereIn('id',$buildingIds))->orderBy('name')->get(),'units'=>\Modules\Unit\Models\Unit::active()->orderBy('name')->get()]);}
+    public function assets(Request $r){$roomIds=$this->assignedInventoryRoomIds($r->user());$materialIds=$this->scopedMaterialIds($roomIds);$categoryIds=$this->scopedCategoryIds($materialIds);$buildingIds=$this->scopedBuildingIds($roomIds);$assets=InventoryAsset::with(['material.category.parent','categoryRelation.parent','classroom'])->when($roomIds!==null,fn($q)=>$q->whereIn('classroom_id',$roomIds))->when($r->search,fn($q,$s)=>$q->where(fn($x)=>$x->where('asset_code','like',"%$s%")->orWhere('name','like',"%$s%")))->latest()->paginate(20)->withQueryString();$allAssets=InventoryAsset::with(['material.category.parent','categoryRelation.parent','classroom'])->when($roomIds!==null,fn($q)=>$q->whereIn('classroom_id',$roomIds))->latest()->get();$auditLogs=InventoryAuditLog::with('user')->latest()->limit(100)->get()->each->resolveDetails();return view('inventory::feature',['section'=>'assets','title'=>'Cập nhật vật tư','assets'=>$assets,'allAssets'=>$allAssets,'auditLogs'=>$auditLogs,'materials'=>InventoryMaterial::with('category.parent')->when($materialIds!==null,fn($q)=>$q->whereIn('id',$materialIds))->orderBy('name')->get(),'classrooms'=>Classroom::active()->when($roomIds!==null,fn($q)=>$q->whereIn('id',$roomIds))->orderBy('name')->get(),'categories'=>InventoryCategory::whereNotNull('parent_id')->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get(),'industries'=>InventoryCategory::whereNull('parent_id')->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get(),'buildings'=>Building::when($buildingIds!==null,fn($q)=>$q->whereIn('id',$buildingIds))->orderBy('name')->get(),'units'=>\Modules\Unit\Models\Unit::active()->orderBy('name')->get()]);}
     public function assetBulkStoreDelta(Request $r)
     {
         $data = $r->validate([
@@ -1224,6 +1224,39 @@ class InventoryWorkflowController extends ModuleBaseController
         }
     }
 
+    private function canAssignRepairs($user): bool
+    {
+        return \App\Support\PermissionCheck::can($user, 'inventory.repairs.assign')
+            || \App\Support\PermissionCheck::can($user, 'inventory.repairs.edit');
+    }
+
+    private function canCompleteRepairs($user): bool
+    {
+        return \App\Support\PermissionCheck::can($user, 'inventory.repairs.complete')
+            || \App\Support\PermissionCheck::can($user, 'inventory.repairs.edit');
+    }
+
+    private function notifyRepairAssignee(InventoryRepair $repair): void
+    {
+        if (! Schema::hasTable('system_notifications') || ! $repair->assigned_to || ! auth()->id()) {
+            return;
+        }
+
+        $assetName = $repair->asset?->name ?: 'vật tư';
+        \App\Models\SystemNotification::create([
+            'user_id' => $repair->assigned_to,
+            'actor_id' => auth()->id(),
+            'module' => 'inventory',
+            'action' => 'repair_assigned',
+            'type' => 'inventory',
+            'title' => 'Bạn được phân công sửa chữa',
+            'message' => 'Bạn được phân công sửa chữa '.$assetName.'.',
+            'url' => route('inventory.repairs'),
+            'meta' => ['repair_id' => $repair->id, 'asset_id' => $repair->asset_id],
+            'read_at' => null,
+        ]);
+    }
+
     public function proposalDecide(Request $r,InventoryProposal $proposal)
     {
         abort_unless(isset(self::PROPOSAL_TYPE_LABELS[$proposal->type]), 404);
@@ -1297,11 +1330,101 @@ class InventoryWorkflowController extends ModuleBaseController
         return back()->with('success', 'Đã cập nhật quyết định.');
     }
 
-    public function repairs(Request $r){$status=$r->input('status');$repairs=InventoryRepair::with(['asset.classroom.building','assignee','requestedBy'])->when($status,fn($q,$value)=>$q->where('status',$value),fn($q)=>$q->whereIn('status',['OPEN','ASSIGNED']))->latest()->get();$repairBreakReports=InventoryRoomBreakReport::whereIn('id',$repairs->where('source_type','ROOM_BREAK_REPORT')->pluck('source_id')->filter()->values())->get()->keyBy('id');return view('inventory::feature',['section'=>'repairs','title'=>'Phân công sửa chữa','repairs'=>$repairs,'repairBreakReports'=>$repairBreakReports,'assets'=>InventoryAsset::whereIn('status',['BROKEN','REPAIRING'])->orderBy('name')->get(),'users'=>\App\Models\User::where('status',1)->orderBy('name')->get(),'status'=>$status]);}
-    public function repairStore(Request $r){$d=$r->validate(['asset_id'=>'required|exists:inventory_assets,id','content'=>'required|string','assigned_to'=>'nullable|exists:users,id','performer'=>'nullable|string|max:255','started_at'=>'nullable|date']);$a=InventoryAsset::findOrFail($d['asset_id']);$existing=InventoryRepair::where('asset_id',$a->id)->whereIn('status',['OPEN','ASSIGNED'])->latest()->first();if($existing && ($r->filled('performer')||$r->filled('assigned_to'))){$performer=$d['performer']??($d['assigned_to']?\App\Models\User::find($d['assigned_to'])?->name:$existing->performer);$existing->update(['status'=>'ASSIGNED','assigned_to'=>$d['assigned_to']??$existing->assigned_to,'performer'=>$performer,'started_at'=>$d['started_at']??now()]);$a->update(['status'=>'REPAIRING','repair_started_at'=>$d['started_at']??now(),'repair_performer'=>$performer]);$this->notifyRepairProposalRequester($existing,'assigned','Đề xuất sửa chữa đã được phân công','Đề xuất sửa chữa đã được phân công cho '.($performer ?: 'người sửa').'.');return back()->with('success','Đã phân công người sửa.');}$repair=InventoryRepair::create($d+['status'=>($d['assigned_to']??null)||($d['performer']??null)?'ASSIGNED':'OPEN','source_type'=>'REPAIR_REQUEST','requested_by'=>$r->user()->id,'opened_at'=>now(),'started_at'=>($d['assigned_to']??null)||($d['performer']??null)?($d['started_at']??now()):null]);$a->update(['status'=>($repair->status==='ASSIGNED'?'REPAIRING':'BROKEN'),'repair_started_at'=>$repair->started_at,'repair_performer'=>$d['performer']??null]);InventoryBrokenLog::create(['event_type'=>'BROKEN','source_type'=>'REPAIR_REQUEST','source_id'=>$repair->id,'asset_id'=>$a->id,'asset_code'=>$a->asset_code,'asset_name'=>$a->name,'quantity'=>$a->broken_quantity ?: $a->quantity,'original_grade'=>$a->grade,'grade_after'=>5,'status_after'=>$a->status,'reason'=>$d['content'],'performer'=>$d['performer']??null,'event_at'=>now(),'actor_user_id'=>$r->user()->id]);return back()->with('success','Đã ghi nhận sửa chữa.');}
-    public function repairComplete(Request $r,InventoryRepair $repair){$d=$r->validate(['status'=>'required|in:COMPLETED,CANCELLED','grade_after'=>'required_if:status,COMPLETED|nullable|integer|min:1|max:5','cost'=>'required_if:status,COMPLETED|nullable|numeric|min:0','completed_at'=>'required_if:status,COMPLETED|nullable|date','result'=>'nullable|string','result_note'=>'nullable|string','performer'=>'nullable|string|max:255']);DB::transaction(function()use($d,$repair,$r):void{$completedAt=$d['completed_at']??now()->toDateString();$repair->update(collect($d)->except('grade_after')->all()+['completed_at'=>$completedAt,'result_note'=>$d['result_note']??($d['result']??null)]);$a=$repair->asset;if($d['status']==='COMPLETED'&&$a){$report=$repair->source_type==='ROOM_BREAK_REPORT'&&$repair->source_id?InventoryRoomBreakReport::find($repair->source_id):null;$fixedQuantity=(float)($report?->quantity ?: $a->broken_quantity ?: $a->quantity);if($report)$report->update(['status'=>'COMPLETED','note'=>$d['result_note']??($d['result']??null)]);$remainingBroken=(float)InventoryRoomBreakReport::where('asset_id',$a->id)->where('status','PENDING')->sum('quantity');$a->update(['status'=>$remainingBroken>0?'BROKEN':'NORMAL','broken_quantity'=>min((float)$a->quantity,$remainingBroken),'grade'=>$d['grade_after'],'repair_completed_at'=>$completedAt,'repair_performer'=>$d['performer']??$repair->performer]);if($a->classroom_id)InventoryRoomRepair::create(['classroom_id'=>$a->classroom_id,'asset_id'=>$a->id,'repair_date'=>$repair->started_at?->toDateString() ?: $completedAt,'completed_at'=>$completedAt,'equipment_name'=>$a->name,'content'=>$repair->content,'cost'=>$repair->cost ?: 0,'repaired_by'=>$d['performer']??$repair->performer]);InventoryBrokenLog::create(['event_type'=>'COMPLETED','source_type'=>$repair->source_type ?: 'REPAIR_REQUEST','source_id'=>$repair->source_id ?: $repair->id,'asset_id'=>$a->id,'asset_code'=>$a->asset_code,'asset_name'=>$a->name,'quantity'=>$fixedQuantity,'original_grade'=>$a->getOriginal('grade'),'grade_after'=>$d['grade_after'],'status_after'=>$remainingBroken>0?'BROKEN':'NORMAL','result_note'=>$d['result_note']??($d['result']??null),'performer'=>$d['performer']??$repair->performer,'event_at'=>$completedAt,'actor_user_id'=>$r->user()->id]);if($repair->source_type==='PROPOSAL_REPAIR'&&$repair->source_id){InventoryProposal::whereKey($repair->source_id)->where('type','REPAIR')->update(['status'=>'COMPLETED','completed_at'=>$completedAt]);$this->notifyRepairProposalRequester($repair,'completed','Sửa chữa đã hoàn thành','Phiếu sửa chữa từ đề xuất của bạn đã được hoàn thành.');}}elseif($d['status']==='CANCELLED'&&$repair->source_type==='ROOM_BREAK_REPORT'&&$repair->source_id){InventoryRoomBreakReport::whereKey($repair->source_id)->update(['status'=>'CANCELLED','note'=>$d['result_note']??($d['result']??null)]);if($a){$remainingBroken=(float)InventoryRoomBreakReport::where('asset_id',$a->id)->where('status','PENDING')->sum('quantity');$a->update(['status'=>$remainingBroken>0?'BROKEN':'NORMAL','broken_quantity'=>min((float)$a->quantity,$remainingBroken)]);}}});return back()->with('success','Đã cập nhật sửa chữa.');}
+    public function repairs(Request $r)
+    {
+        $status = $r->input('status');
+        $user = $r->user();
+        $canAssignRepair = $this->canAssignRepairs($user);
+        $canCompleteRepair = $this->canCompleteRepairs($user);
 
-    public function transfers(){$roomIds=$this->assignedInventoryRoomIds();$materialIds=$this->scopedMaterialIds($roomIds);$categoryIds=$this->scopedCategoryIds($materialIds);return view('inventory::feature',['section'=>'transfers','title'=>'Điều động và thu hồi','transfers'=>InventoryTransfer::with(['asset','material','fromClassroom','toClassroom','warehouse'])->when($roomIds!==null,fn($q)=>$q->where(fn($x)=>$x->whereIn('from_classroom_id',$roomIds)->orWhereIn('to_classroom_id',$roomIds)->orWhereHas('asset',fn($a)=>$a->whereIn('classroom_id',$roomIds))))->latest()->get(),'assets'=>InventoryAsset::with('material')->when($roomIds!==null,fn($q)=>$q->whereIn('classroom_id',$roomIds))->orderBy('name')->get(),'materials'=>InventoryMaterial::with('category')->when($materialIds!==null,fn($q)=>$q->whereIn('id',$materialIds))->orderBy('name')->get(),'categories'=>InventoryCategory::where('active',true)->whereNotNull('parent_id')->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get(),'industries'=>InventoryCategory::where('active',true)->whereNull('parent_id')->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get(),'classrooms'=>Classroom::active()->with('managingUnit')->when($roomIds!==null,fn($q)=>$q->whereIn('id',$roomIds))->orderBy('name')->get(),'warehouses'=>InventoryWarehouse::where('active',true)->orderBy('name')->get(),'units'=>\Modules\Unit\Models\Unit::active()->orderBy('name')->get()]);}
+        $repairs = InventoryRepair::with(['asset.classroom.building','assignee','requestedBy'])
+            ->when($status, fn($q, $value) => $q->where('status', $value), fn($q) => $q->whereIn('status', ['OPEN','ASSIGNED']))
+            ->when(! $canAssignRepair && $canCompleteRepair, fn($q) => $q->where('assigned_to', $user->id))
+            ->latest()
+            ->get();
+        $repairBreakReports = InventoryRoomBreakReport::whereIn('id', $repairs->where('source_type', 'ROOM_BREAK_REPORT')->pluck('source_id')->filter()->values())->get()->keyBy('id');
+
+        return view('inventory::feature', [
+            'section' => 'repairs',
+            'title' => 'Phân công sửa chữa',
+            'repairs' => $repairs,
+            'repairBreakReports' => $repairBreakReports,
+            'assets' => InventoryAsset::whereIn('status', ['BROKEN','REPAIRING'])->orderBy('name')->get(),
+            'users' => \App\Models\User::where('status', 1)->orderBy('name')->get(),
+            'status' => $status,
+            'canAssignRepair' => $canAssignRepair,
+            'canCompleteRepair' => $canCompleteRepair,
+        ]);
+    }
+
+    public function repairStore(Request $r)
+    {
+        $d = $r->validate(['asset_id'=>'required|exists:inventory_assets,id','content'=>'required|string','assigned_to'=>'nullable|exists:users,id','performer'=>'nullable|string|max:255','started_at'=>'nullable|date']);
+        $a = InventoryAsset::findOrFail($d['asset_id']);
+        $existing = InventoryRepair::where('asset_id', $a->id)->whereIn('status', ['OPEN','ASSIGNED'])->latest()->first();
+        if ($existing && ($r->filled('performer') || $r->filled('assigned_to'))) {
+            $performer = $d['performer'] ?? ($d['assigned_to'] ? \App\Models\User::find($d['assigned_to'])?->name : $existing->performer);
+            $existing->update(['status'=>'ASSIGNED','assigned_to'=>$d['assigned_to'] ?? $existing->assigned_to,'performer'=>$performer,'started_at'=>$d['started_at'] ?? now()]);
+            $a->update(['status'=>'REPAIRING','repair_started_at'=>$d['started_at'] ?? now(),'repair_performer'=>$performer]);
+            $this->notifyRepairAssignee($existing->fresh(['asset']));
+            $this->notifyRepairProposalRequester($existing, 'assigned', 'Đề xuất sửa chữa đã được phân công', 'Đề xuất sửa chữa đã được phân công cho '.($performer ?: 'người sửa').'.');
+
+            return back()->with('success', 'Đã phân công người sửa.');
+        }
+
+        $repair = InventoryRepair::create($d + [
+            'status' => ($d['assigned_to'] ?? null) || ($d['performer'] ?? null) ? 'ASSIGNED' : 'OPEN',
+            'source_type' => 'REPAIR_REQUEST',
+            'requested_by' => $r->user()->id,
+            'opened_at' => now(),
+            'started_at' => ($d['assigned_to'] ?? null) || ($d['performer'] ?? null) ? ($d['started_at'] ?? now()) : null,
+        ]);
+        $a->update(['status'=>$repair->status === 'ASSIGNED' ? 'REPAIRING' : 'BROKEN','repair_started_at'=>$repair->started_at,'repair_performer'=>$d['performer'] ?? null]);
+        InventoryBrokenLog::create(['event_type'=>'BROKEN','source_type'=>'REPAIR_REQUEST','source_id'=>$repair->id,'asset_id'=>$a->id,'asset_code'=>$a->asset_code,'asset_name'=>$a->name,'quantity'=>$a->broken_quantity ?: $a->quantity,'original_grade'=>$a->grade,'grade_after'=>5,'status_after'=>$a->status,'reason'=>$d['content'],'performer'=>$d['performer'] ?? null,'event_at'=>now(),'actor_user_id'=>$r->user()->id]);
+        if ($repair->assigned_to) {
+            $this->notifyRepairAssignee($repair->load('asset'));
+        }
+
+        return back()->with('success', 'Đã ghi nhận sửa chữa.');
+    }
+
+    public function repairComplete(Request $r, InventoryRepair $repair)
+    {
+        abort_if(! $this->canAssignRepairs($r->user()) && (int) $repair->assigned_to !== (int) $r->user()->id, 403, 'Bạn chỉ được hoàn thành phiếu sửa chữa được phân công cho mình.');
+        $d = $r->validate(['status'=>'required|in:COMPLETED,CANCELLED','grade_after'=>'required_if:status,COMPLETED|nullable|integer|min:1|max:5','cost'=>'required_if:status,COMPLETED|nullable|numeric|min:0','completed_at'=>'required_if:status,COMPLETED|nullable|date','result'=>'nullable|string','result_note'=>'nullable|string','performer'=>'nullable|string|max:255']);
+        DB::transaction(function () use ($d, $repair, $r): void {
+            $completedAt = $d['completed_at'] ?? now()->toDateString();
+            $repair->update(collect($d)->except('grade_after')->all() + ['completed_at'=>$completedAt,'result_note'=>$d['result_note'] ?? ($d['result'] ?? null)]);
+            $a = $repair->asset;
+            if ($d['status'] === 'COMPLETED' && $a) {
+                $report = $repair->source_type === 'ROOM_BREAK_REPORT' && $repair->source_id ? InventoryRoomBreakReport::find($repair->source_id) : null;
+                $fixedQuantity = (float) ($report?->quantity ?: $a->broken_quantity ?: $a->quantity);
+                if ($report) {
+                    $report->update(['status'=>'COMPLETED','note'=>$d['result_note'] ?? ($d['result'] ?? null)]);
+                }
+                $remainingBroken = (float) InventoryRoomBreakReport::where('asset_id', $a->id)->where('status', 'PENDING')->sum('quantity');
+                $a->update(['status'=>$remainingBroken > 0 ? 'BROKEN' : 'NORMAL','broken_quantity'=>min((float) $a->quantity, $remainingBroken),'grade'=>$d['grade_after'],'repair_completed_at'=>$completedAt,'repair_performer'=>$d['performer'] ?? $repair->performer]);
+                if ($a->classroom_id) {
+                    InventoryRoomRepair::create(['classroom_id'=>$a->classroom_id,'asset_id'=>$a->id,'repair_date'=>$repair->started_at?->toDateString() ?: $completedAt,'completed_at'=>$completedAt,'equipment_name'=>$a->name,'content'=>$repair->content,'cost'=>$repair->cost ?: 0,'repaired_by'=>$d['performer'] ?? $repair->performer]);
+                }
+                InventoryBrokenLog::create(['event_type'=>'COMPLETED','source_type'=>$repair->source_type ?: 'REPAIR_REQUEST','source_id'=>$repair->source_id ?: $repair->id,'asset_id'=>$a->id,'asset_code'=>$a->asset_code,'asset_name'=>$a->name,'quantity'=>$fixedQuantity,'original_grade'=>$a->getOriginal('grade'),'grade_after'=>$d['grade_after'],'status_after'=>$remainingBroken > 0 ? 'BROKEN' : 'NORMAL','result_note'=>$d['result_note'] ?? ($d['result'] ?? null),'performer'=>$d['performer'] ?? $repair->performer,'event_at'=>$completedAt,'actor_user_id'=>$r->user()->id]);
+                if ($repair->source_type === 'PROPOSAL_REPAIR' && $repair->source_id) {
+                    InventoryProposal::whereKey($repair->source_id)->where('type', 'REPAIR')->update(['status'=>'COMPLETED','completed_at'=>$completedAt]);
+                    $this->notifyRepairProposalRequester($repair, 'completed', 'Sửa chữa đã hoàn thành', 'Phiếu sửa chữa từ đề xuất của bạn đã được hoàn thành.');
+                }
+            } elseif ($d['status'] === 'CANCELLED' && $repair->source_type === 'ROOM_BREAK_REPORT' && $repair->source_id) {
+                InventoryRoomBreakReport::whereKey($repair->source_id)->update(['status'=>'CANCELLED','note'=>$d['result_note'] ?? ($d['result'] ?? null)]);
+                if ($a) {
+                    $remainingBroken = (float) InventoryRoomBreakReport::where('asset_id', $a->id)->where('status', 'PENDING')->sum('quantity');
+                    $a->update(['status'=>$remainingBroken > 0 ? 'BROKEN' : 'NORMAL','broken_quantity'=>min((float) $a->quantity, $remainingBroken)]);
+                }
+            }
+        });
+
+        return back()->with('success', 'Đã cập nhật sửa chữa.');
+    }
+
+    public function transfers(){$roomIds=$this->assignedInventoryRoomIds();$materialIds=$this->scopedMaterialIds($roomIds);$categoryIds=$this->scopedCategoryIds($materialIds);return view('inventory::feature',['section'=>'transfers','title'=>'Điều động và thu hồi','transfers'=>InventoryTransfer::with(['asset','material','fromClassroom','toClassroom','warehouse'])->when($roomIds!==null,fn($q)=>$q->where(fn($x)=>$x->whereIn('from_classroom_id',$roomIds)->orWhereIn('to_classroom_id',$roomIds)->orWhereHas('asset',fn($a)=>$a->whereIn('classroom_id',$roomIds))))->latest()->get(),'assets'=>InventoryAsset::with(['material.category.parent','categoryRelation.parent'])->when($roomIds!==null,fn($q)=>$q->whereIn('classroom_id',$roomIds))->orderBy('name')->get(),'materials'=>InventoryMaterial::with('category.parent')->when($materialIds!==null,fn($q)=>$q->whereIn('id',$materialIds))->orderBy('name')->get(),'categories'=>InventoryCategory::where('active',true)->whereNotNull('parent_id')->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get(),'industries'=>InventoryCategory::where('active',true)->whereNull('parent_id')->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get(),'classrooms'=>Classroom::active()->with('managingUnit')->when($roomIds!==null,fn($q)=>$q->whereIn('id',$roomIds))->orderBy('name')->get(),'warehouses'=>InventoryWarehouse::where('active',true)->orderBy('name')->get(),'units'=>\Modules\Unit\Models\Unit::active()->orderBy('name')->get()]);}
     public function transferStore(Request $r)
     {
         $d = $r->validate([
@@ -1897,8 +2020,10 @@ class InventoryWorkflowController extends ModuleBaseController
         if ($type === 'warehouse') {
             return [
                 'Tổng SL ổn định' => 'tong_so_luong_on_dinh',
+                'SL vật tư ổn định' => 'so_luong_vat_tu_on_dinh',
                 'Số dòng ổn định' => 'so_dong_on_dinh',
                 'Tổng SL hư hại' => 'tong_so_luong_hu_hai',
+                'SL vật tư hư hại' => 'so_luong_vat_tu_hu_hai',
                 'Số dòng hư hại' => 'so_dong_hu_hai',
                 'Ngày hư' => 'ngay_hu',
                 'Lý do hỏng' => 'ly_do_hong',
@@ -1933,5 +2058,19 @@ class InventoryWorkflowController extends ModuleBaseController
 
         return $common;
     }
-    public function repairAssign(Request $r,InventoryRepair $repair){$d=$r->validate(['assigned_to'=>'nullable|exists:users,id','performer'=>'nullable|string|max:255','started_at'=>'nullable|date']);$performer=$d['performer']??($d['assigned_to']?\App\Models\User::find($d['assigned_to'])?->name:$repair->performer);abort_unless($performer||($d['assigned_to']??null),422,'Chưa chọn người sửa.');$repair->update(['assigned_to'=>$d['assigned_to']??$repair->assigned_to,'performer'=>$performer,'status'=>'ASSIGNED','started_at'=>$d['started_at']??now()]);$repair->asset?->update(['status'=>'REPAIRING','repair_started_at'=>$d['started_at']??now(),'repair_performer'=>$performer]);$this->notifyRepairProposalRequester($repair,'assigned','Đề xuất sửa chữa đã được phân công','Đề xuất sửa chữa đã được phân công cho '.($performer ?: 'người sửa').'.');return back()->with('success','Đã phân công người sửa.');}
+    public function repairAssign(Request $r, InventoryRepair $repair)
+    {
+        abort_unless($this->canAssignRepairs($r->user()), 403, 'Bạn không có quyền phân công sửa chữa.');
+
+        $d = $r->validate(['assigned_to'=>'nullable|exists:users,id','performer'=>'nullable|string|max:255','started_at'=>'nullable|date']);
+        $performer = $d['performer'] ?? ($d['assigned_to'] ? \App\Models\User::find($d['assigned_to'])?->name : $repair->performer);
+        abort_unless($performer || ($d['assigned_to'] ?? null), 422, 'Chưa chọn người sửa.');
+
+        $repair->update(['assigned_to'=>$d['assigned_to'] ?? $repair->assigned_to,'performer'=>$performer,'status'=>'ASSIGNED','started_at'=>$d['started_at'] ?? now()]);
+        $repair->asset?->update(['status'=>'REPAIRING','repair_started_at'=>$d['started_at'] ?? now(),'repair_performer'=>$performer]);
+        $this->notifyRepairAssignee($repair->fresh(['asset']));
+        $this->notifyRepairProposalRequester($repair, 'assigned', 'Đề xuất sửa chữa đã được phân công', 'Đề xuất sửa chữa đã được phân công cho '.($performer ?: 'người sửa').'.');
+
+        return back()->with('success', 'Đã phân công người sửa.');
+    }
 }

@@ -20,9 +20,15 @@ Route::middleware(['web', 'auth', 'permission:inventory.access.index'])
         Route::get('/danh-sach-vat-tu', [InventoryController::class, 'materials'])
             ->middleware('permission:inventory.materials.index')
             ->name('materials');
+        Route::get('/danh-sach-vat-tu/{material}', [InventoryController::class, 'materialShow'])
+            ->middleware('permission:inventory.materials.index')
+            ->name('materials.show');
         Route::get('/mau-import', [InventoryController::class, 'importTemplate'])
             ->middleware('permission:inventory.materials.import')
             ->name('import.template');
+        Route::get('/mau-import-word', [InventoryController::class, 'importTemplateWord'])
+            ->middleware('permission:inventory.materials.import')
+            ->name('import.template.word');
         Route::post('/', [InventoryController::class, 'store'])
             ->middleware('permission:inventory.materials.create')
             ->name('store');
@@ -137,19 +143,19 @@ Route::middleware(['web', 'auth', 'permission:inventory.access.index'])
             ->name('proposals.decide');
 
         Route::get('/phan-cong', [InventoryWorkflowController::class, 'repairs'])
-            ->middleware('permission:inventory.repairs.index')
+            ->middleware('permission:inventory.repairs.index|inventory.repairs.complete')
             ->name('repairs');
         Route::post('/phan-cong', [InventoryWorkflowController::class, 'repairStore'])
             ->middleware('permission:inventory.repairs.create')
             ->name('repairs.store');
         Route::patch('/phan-cong/{repair}/assign', [InventoryWorkflowController::class, 'repairAssign'])
-            ->middleware('permission:inventory.repairs.edit')
+            ->middleware('permission:inventory.repairs.assign|inventory.repairs.edit')
             ->name('repairs.assign');
         Route::patch('/phan-cong/{repair}/cap-nhat', [InventoryWorkflowController::class, 'repairUpdate'])
             ->middleware('permission:inventory.repairs.edit')
             ->name('repairs.update');
         Route::patch('/phan-cong/{repair}', [InventoryWorkflowController::class, 'repairComplete'])
-            ->middleware('permission:inventory.repairs.edit')
+            ->middleware('permission:inventory.repairs.complete|inventory.repairs.edit')
             ->name('repairs.complete');
         Route::delete('/phan-cong/{repair}', [InventoryWorkflowController::class, 'repairDelete'])
             ->middleware('permission:inventory.repairs.delete')
