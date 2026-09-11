@@ -414,6 +414,7 @@ class InventoryWorkflowController extends ModuleBaseController
             $processor = new \PhpOffice\PhpWord\TemplateProcessor($templatePath);
 
             $processor->setValues($this->proposalTemplateValues($proposal, $withSignature));
+            $variables = $processor->getVariables();
             $rows = $proposal->items->values()->map(fn($item, $index) => $this->proposalTemplateRowValues($item, $index + 1))->all();
             if (!$rows) {
                 $rows = [$this->emptyProposalTemplateRow()];
@@ -426,6 +427,10 @@ class InventoryWorkflowController extends ModuleBaseController
                 }
             }
 
+            $requesterSignatureImagePath = $this->userDefaultSignaturePath((int) ($proposal->proposed_by_user_id ?: $proposal->created_by ?: 0));
+            $this->setTemplateImageValue($processor, $variables, 'chu_ky_nguoi_de_nghi', $requesterSignatureImagePath);
+            $this->setTemplateImageValue($processor, $variables, 'chu_ky_nguoi_de_xuat', $requesterSignatureImagePath);
+            $this->setTemplateImageValue($processor, $variables, 'chu_ky_chi_huy_xac_nhan', $withSignature ? $signatureImagePath : null);
             if ($withSignature && $signatureImagePath && is_file($signatureImagePath)) {
                 try {
                     $processor->setImageValue('chu_ky_nguoi_duyet', [
@@ -442,6 +447,7 @@ class InventoryWorkflowController extends ModuleBaseController
             }
 
             $processor->saveAs($docx);
+            $this->normalizeProposalDocumentForType($docx, $proposal);
         }
 
         $converted = $this->convertProposalDocxToPdf($docx, $pdf, $proposal->id);
@@ -451,6 +457,52 @@ class InventoryWorkflowController extends ModuleBaseController
         \Log::info('Inventory proposal PDF build finished', ['proposal_id' => $proposal->id, 'pdf' => $converted, 'bytes' => filesize($converted)]);
 
         return $converted;
+    }
+
+    private function normalizeProposalDocumentForType(string $docx, InventoryProposal $proposal): void
+    {
+        if ($proposal->type !== 'LIQUIDATION') {
+            return;
+        }
+
+        $zip = new \ZipArchive();
+        if ($zip->open($docx) !== true) {
+            return;
+        }
+
+        $replacements = [
+            'Khắc phục, sửa chữa thiết bị công nghệ thông tin' => 'Thanh lý vật tư',
+            'KHẮC PHỤC, SỬA CHỮA THIẾT BỊ CÔNG NGHỆ THÔNG TIN' => 'THANH LÝ VẬT TƯ',
+            'Khac phuc, sua chua thiet bi cong nghe thong tin' => 'Thanh ly vat tu',
+            'KHAC PHUC, SUA CHUA THIET BI CONG NGHE THONG TIN' => 'THANH LY VAT TU',
+            'Lý do (ghi rõ tình trạng thiết bị đề nghị sửa chữa):' => 'Lý do đề nghị thanh lý:',
+            'Ly do (ghi ro tinh trang thiet bi de nghi sua chua):' => 'Ly do de nghi thanh ly:',
+            'Thiết bị đề nghị sửa chữa:' => 'Vật tư đề nghị thanh lý:',
+            'Thiet bi de nghi sua chua:' => 'Vat tu de nghi thanh ly:',
+            'Đề nghị sửa chữa' => 'Đề nghị thanh lý',
+            'De nghi sua chua' => 'De nghi thanh ly',
+            'PHIEU DE XUAT VAT TU' => 'PHIEU DE NGHI THANH LY VAT TU',
+            'PHIẾU ĐỀ XUẤT VẬT TƯ' => 'PHIẾU ĐỀ NGHỊ THANH LÝ VẬT TƯ',
+        ];
+
+        for ($i = 0; $i < $zip->numFiles; $i++) {
+            $name = $zip->getNameIndex($i);
+            if (! is_string($name) || ! preg_match('/^word\/(?:document|header\d+|footer\d+)\.xml$/', $name)) {
+                continue;
+            }
+
+            $xml = $zip->getFromName($name);
+            if (! is_string($xml) || $xml === '') {
+                continue;
+            }
+
+            $updated = str_replace(array_keys($replacements), array_values($replacements), $xml);
+            if ($updated !== $xml) {
+                $zip->addFromString($name, $updated);
+            }
+        }
+
+        $zip->close();
     }
 
     private function userDefaultSignaturePath(int $userId): ?string
@@ -743,6 +795,11 @@ class InventoryWorkflowController extends ModuleBaseController
         $commanderName = $withSignature ? ($proposal->decidedBy?->name ?: auth()->user()?->name ?: '') : '';
 
         return [
+            'ten_phieu' => 'PHIẾU ĐỀ NGHỊ',
+            'tieu_de_phieu' => 'Khắc phục, sửa chữa thiết bị công nghệ thông tin',
+            'noi_dung_de_xuat' => 'Khắc phục, sửa chữa thiết bị công nghệ thông tin',
+            'ly_do_de_xuat' => 'Lý do (ghi rõ tình trạng thiết bị đề nghị sửa chữa)',
+            'vat_tu_de_xuat' => 'Thiết bị đề nghị sửa chữa',
             'ngay' => $date->format('d'),
             'thang' => $date->format('m'),
             'nam' => $date->format('Y'),
@@ -764,8 +821,27 @@ class InventoryWorkflowController extends ModuleBaseController
         $typeLabels = self::PROPOSAL_TYPE_LABELS;
         $statusLabels = ['PENDING' => 'Chờ duyệt', 'APPROVED' => 'Đã duyệt', 'REJECTED' => 'Từ chối', 'COMPLETED' => 'Đã hoàn thành'];
         $date = now();
+        $items = $proposal->items->values();
+        $itemLines = $items->map(function ($item, int $index): string {
+            $name = $item->material_name ?: $item->name ?: 'Vật tư';
+            $code = $item->material_code ?: $item->original_code;
+            $quantity = number_format((float) ($item->quantity ?: 1), 0, ',', '.');
+            $unit = $item->unit ?: '';
+            $note = $item->note ? ' - '.$item->note : '';
+
+            return ($index + 1).'. '.trim(($code ? $code.' - ' : '').$name.' - SL: '.$quantity.' '.$unit.$note);
+        })->implode('; ');
+        $locationLines = $items->map(fn ($item) => $item->fromClassroom?->name ?: $item->from_room_name ?: $item->location_note)
+            ->filter()
+            ->unique()
+            ->implode('; ');
 
         return [
+            'ten_phieu' => $proposal->type === 'LIQUIDATION' ? 'PHIẾU ĐỀ NGHỊ THANH LÝ VẬT TƯ' : 'PHIẾU ĐỀ XUẤT VẬT TƯ',
+            'tieu_de_phieu' => $proposal->type === 'LIQUIDATION' ? 'Thanh lý vật tư' : ($typeLabels[$proposal->type] ?? $proposal->type),
+            'noi_dung_de_xuat' => $proposal->type === 'LIQUIDATION' ? 'Thanh lý vật tư' : ($typeLabels[$proposal->type] ?? $proposal->type),
+            'ly_do_de_xuat' => $proposal->type === 'LIQUIDATION' ? 'Lý do đề nghị thanh lý' : 'Lý do đề xuất',
+            'vat_tu_de_xuat' => $proposal->type === 'LIQUIDATION' ? 'Vật tư đề nghị thanh lý' : 'Vật tư đề xuất',
             'so_phieu' => $proposal->proposal_code ?: str_pad((string) $proposal->id, 4, '0', STR_PAD_LEFT).'/DXVT',
             'ma_phieu' => $proposal->proposal_code ?: '#'.$proposal->id,
             'ngay' => $date->format('d'),
@@ -776,12 +852,17 @@ class InventoryWorkflowController extends ModuleBaseController
             'trang_thai' => $statusLabels[$proposal->status] ?? $proposal->status,
             'don_vi_de_xuat' => $proposal->unit?->name ?: $proposal->proposed_by_display_name ?: '',
             'nguoi_de_xuat' => $proposal->proposed_by_display_name ?: '',
+            'nguoi_de_nghi' => $proposal->proposed_by_display_name ?: '',
             'nganh_vat_tu' => $proposal->nganh_code ?: '',
             'tieu_de' => $proposal->title ?: '',
             'mo_ta' => $proposal->description ?: '',
+            'thiet_bi_sua_chua' => $itemLines ?: $proposal->title,
+            'dia_diem' => $locationLines ?: ($items->first()?->location_note ?: ''),
             'ly_do_tu_choi' => $proposal->decision_note ?: '',
             'nguoi_duyet' => $withSignature ? ($proposal->decidedBy?->name ?: auth()->user()?->name ?: '') : '',
             'ho_ten_nguoi_duyet' => $withSignature ? ($proposal->decidedBy?->name ?: auth()->user()?->name ?: '') : '',
+            'chi_huy_xac_nhan' => $withSignature ? ($proposal->decidedBy?->name ?: auth()->user()?->name ?: '') : '',
+            'nguoi_xac_nhan_chi_huy' => $withSignature ? ($proposal->decidedBy?->name ?: auth()->user()?->name ?: '') : '',
             'ngay_duyet' => $withSignature && $proposal->decided_at ? $proposal->decided_at->format('d/m/Y') : '',
         ];
     }
@@ -832,13 +913,13 @@ class InventoryWorkflowController extends ModuleBaseController
         $center = ['alignment' => \PhpOffice\PhpWord\SimpleType\Jc::CENTER];
         $bold = ['bold' => true];
         $section->addText('TRUONG CAO DANG HAU CAN 2', $bold, $center);
-        $section->addText('PHIEU DE XUAT VAT TU', ['bold' => true, 'size' => 16], $center);
+        $section->addText('${ten_phieu}', ['bold' => true, 'size' => 16], $center);
         $section->addText('So: ${so_phieu}', [], $center);
         $section->addText('Ngay ${ngay} thang ${thang} nam ${nam}', [], ['alignment' => \PhpOffice\PhpWord\SimpleType\Jc::RIGHT]);
         $section->addText('Don vi de xuat: ${don_vi_de_xuat}');
         $section->addText('Loai de xuat: ${loai_de_xuat}');
-        $section->addText('Tieu de: ${tieu_de}');
-        $section->addText('Mo ta: ${mo_ta}');
+        $section->addText('Noi dung: ${noi_dung_de_xuat}');
+        $section->addText('${ly_do_de_xuat}: ${mo_ta}');
         $table = $section->addTable(['borderSize' => 6, 'borderColor' => '111111', 'cellMargin' => 80]);
         $table->addRow();
         foreach (['STT','Ma VT','Ten vat tu','SL thuc te phong','SL de xuat','DVT','Phong','Ghi chu'] as $heading) {
@@ -919,8 +1000,9 @@ class InventoryWorkflowController extends ModuleBaseController
             ->latest('id')
             ->first();
         if (! $repair) {
+            [$repairAsset, $sourceAsset, $originalGrade, $brokenQuantity] = $this->prepareRepairAssetFromProposalItem($item);
             $repair = InventoryRepair::create([
-                'asset_id' => $item->asset_id,
+                'asset_id' => $repairAsset->id,
                 'status' => 'OPEN',
                 'source_type' => 'PROPOSAL_REPAIR',
                 'source_id' => $proposal->id,
@@ -928,21 +1010,15 @@ class InventoryWorkflowController extends ModuleBaseController
                 'requested_by' => $proposal->proposed_by_user_id ?: $proposal->created_by,
                 'opened_at' => now(),
             ]);
-            $item->asset->update([
-                'status' => 'BROKEN',
-                'broken_quantity' => max((float) $item->quantity, (float) $item->asset->broken_quantity),
-                'grade' => 5,
-                'broken_at' => now(),
-            ]);
             InventoryBrokenLog::create([
                 'event_type' => 'BROKEN',
                 'source_type' => 'PROPOSAL_REPAIR',
                 'source_id' => $proposal->id,
-                'asset_id' => $item->asset_id,
-                'asset_code' => $item->asset->asset_code,
-                'asset_name' => $item->asset->name,
-                'quantity' => $item->quantity ?: 1,
-                'original_grade' => $item->asset->grade,
+                'asset_id' => $repairAsset->id,
+                'asset_code' => $repairAsset->asset_code,
+                'asset_name' => $repairAsset->name,
+                'quantity' => $brokenQuantity,
+                'original_grade' => $originalGrade,
                 'grade_after' => 5,
                 'status_after' => 'BROKEN',
                 'reason' => $proposal->description ?: $proposal->title,
@@ -952,6 +1028,71 @@ class InventoryWorkflowController extends ModuleBaseController
         }
 
         return $repair;
+    }
+
+    private function prepareRepairAssetFromProposalItem($item): array
+    {
+        $asset = InventoryAsset::lockForUpdate()->findOrFail($item->asset_id);
+        $requestedQuantity = max(1.0, (float) ($item->quantity ?: 1));
+        $availableQuantity = max(0.0, (float) $asset->quantity);
+        $brokenQuantity = $availableQuantity > 0 ? min($requestedQuantity, $availableQuantity) : $requestedQuantity;
+        $originalGrade = $asset->grade;
+
+        if ($asset->status === 'NORMAL' && $availableQuantity > $brokenQuantity) {
+            $remainingQuantity = $availableQuantity - $brokenQuantity;
+            $brokenAsset = $asset->replicate();
+            $brokenAsset->asset_code = $this->nextRepairAssetCode((string) $asset->asset_code);
+            $brokenAsset->quantity = $brokenQuantity;
+            $brokenAsset->broken_quantity = $brokenQuantity;
+            $brokenAsset->status = 'BROKEN';
+            $brokenAsset->grade = 5;
+            $brokenAsset->broken_at = now();
+            $brokenAsset->repair_started_at = null;
+            $brokenAsset->repair_completed_at = null;
+            $brokenAsset->repair_performer = null;
+            $brokenAsset->note = trim(($asset->note ? $asset->note."\n" : '').'Tách hỏng từ '.$asset->asset_code);
+            $brokenAsset->save();
+
+            $asset->update([
+                'quantity' => $remainingQuantity,
+                'broken_quantity' => 0,
+                'status' => 'NORMAL',
+            ]);
+
+            $item->update([
+                'asset_id' => $brokenAsset->id,
+                'source_asset_id' => $asset->id,
+                'quantity' => $brokenQuantity,
+                'original_grade' => $originalGrade,
+                'original_code' => $asset->asset_code,
+            ]);
+
+            return [$brokenAsset, $asset, $originalGrade, $brokenQuantity];
+        }
+
+        $asset->update([
+            'status' => 'BROKEN',
+            'broken_quantity' => max($brokenQuantity, (float) $asset->broken_quantity),
+            'grade' => 5,
+            'broken_at' => now(),
+        ]);
+        $item->update([
+            'quantity' => $brokenQuantity,
+            'original_grade' => $originalGrade,
+            'original_code' => $item->original_code ?: $asset->asset_code,
+        ]);
+
+        return [$asset, $asset, $originalGrade, $brokenQuantity];
+    }
+
+    private function nextRepairAssetCode(string $assetCode): string
+    {
+        $base = trim($assetCode) !== '' ? substr($assetCode, 0, 84) : 'VT';
+        do {
+            $candidate = $base.'-SC-'.strtoupper(bin2hex(random_bytes(3)));
+        } while (InventoryAsset::where('asset_code', $candidate)->exists());
+
+        return $candidate;
     }
 
     private function proposalRepair(InventoryProposal $proposal): ?InventoryRepair
@@ -1622,7 +1763,7 @@ class InventoryWorkflowController extends ModuleBaseController
             'recall' => ['name' => 'Quyết định thu hồi', 'report' => 'Quyết định thu hồi', 'file' => 'bao-cao-quyet-dinh-thu-hoi-tra-ve.docx', 'variable_file' => 'Mau_bien_Phieu_thu_hoi.docx'],
             'repair' => ['name' => 'Vật tư hư hại và sửa chữa', 'report' => 'Vật tư đang hư hại và sửa chữa', 'file' => 'bao-cao-vat-tu-dang-hu-hai-va-sua-chua.docx', 'variable_file' => 'Mau_bien_Vat_tu_hu_hai.docx'],
             'update-log' => ['name' => 'Cập nhật vật tư', 'report' => 'Cập nhật vật tư', 'file' => 'bao-cao-cap-nhat-vat-tu.docx', 'variable_file' => 'Mau_bien_Nhat_ki_cap_nhat.docx'],
-            'proposal' => ['name' => 'Giấy đề xuất vật tư', 'report' => 'Phiếu đề xuất / thanh lý', 'variable_file' => 'Mau_bien_Giay_de_xuat.docx'],
+            'proposal' => ['name' => 'Giấy đề nghị thanh lý vật tư', 'report' => 'Phiếu đề nghị thanh lý vật tư', 'variable_file' => 'Mau_bien_Giay_de_xuat.docx'],
             'repair-proposal' => ['name' => 'BM01 đề xuất sửa chữa', 'report' => 'Phiếu đề nghị khắc phục, sửa chữa thiết bị CNTT', 'variable_file' => 'BM01.docx'],
         ];
     }
