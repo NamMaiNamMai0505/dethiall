@@ -1822,7 +1822,7 @@ class InventoryWorkflowController extends ModuleBaseController
             'recall' => ['name' => 'Quyết định thu hồi', 'report' => 'Quyết định thu hồi', 'file' => 'bao-cao-quyet-dinh-thu-hoi-tra-ve.docx', 'variable_file' => 'Mau_bien_Phieu_thu_hoi.docx'],
             'repair' => ['name' => 'Vật tư hư hại và sửa chữa', 'report' => 'Vật tư đang hư hại và sửa chữa', 'file' => 'bao-cao-vat-tu-dang-hu-hai-va-sua-chua.docx', 'variable_file' => 'Mau_bien_Vat_tu_hu_hai.docx'],
             'update-log' => ['name' => 'Cập nhật vật tư', 'report' => 'Cập nhật vật tư', 'file' => 'bao-cao-cap-nhat-vat-tu.docx', 'variable_file' => 'Mau_bien_Nhat_ki_cap_nhat.docx'],
-            'proposal' => ['name' => 'Giấy đề nghị thanh lý vật tư', 'report' => 'Phiếu đề nghị thanh lý vật tư', 'variable_file' => 'Mau_bien_Giay_de_xuat.docx'],
+            'proposal' => ['name' => 'Phiếu đề xuất / thanh lý', 'report' => 'Phiếu đề xuất / thanh lý vật tư', 'variable_file' => 'Mau_bien_Giay_de_xuat.docx'],
             'repair-proposal' => ['name' => 'BM01 đề xuất sửa chữa', 'report' => 'Phiếu đề nghị khắc phục, sửa chữa thiết bị CNTT', 'variable_file' => 'BM01.docx'],
         ];
     }
