@@ -1741,7 +1741,7 @@ class InventoryWorkflowController extends ModuleBaseController
     }
     private function variableizeSimpleTemplate(\DOMDocument $xml,\DOMXPath $xpath,string $type): void
     {
-        $tables=$xpath->query('//w:tbl');$indexes=$tables->length>1?(in_array($type,['warehouse','system-warehouse'],true)?[1,2]:[1]):[0];
+        $tables=$xpath->query('//w:tbl');$indexes=$tables->length>1?($type==='warehouse'?[1,2]:[1]):[0];
         foreach($indexes as $tableIndex){$table=$tables->item($tableIndex);if(!$table)continue;$rows=$xpath->query('./w:tr',$table);if(!$rows->length)continue;$headerRows=$tables->length===1?2:1;$templateIndex=in_array($type,['increase-decrease','period'],true)?min(3,$rows->length-1):min($headerRows,$rows->length-1);$templateRow=$rows->item($templateIndex)->cloneNode(true);$totalRow=$rows->item($rows->length-1)->cloneNode(true);$removeFrom=in_array($type,['increase-decrease','period'],true)?2:$headerRows;for($i=$rows->length-1;$i>=$removeFrom;$i--)$table->removeChild($rows->item($i));$this->setTemplateRow($xml,$templateRow,$this->tableVariables($type,$xpath,$templateRow),$table);$this->setTemplateRow($xml,$totalRow,$this->totalVariables($xpath,$totalRow,$type,$tableIndex),$table);}
     }
     private function tableVariables(string $type,\DOMXPath $xpath,\DOMNode $row): array
@@ -1754,13 +1754,13 @@ class InventoryWorkflowController extends ModuleBaseController
             'update-log'=>['${stt}','${ngay_du_lieu}','${loai_bien_dong}','${ten_vat_tu}','${so_luong}','${truoc}','${sau}','${vi_tri}','${nguoi_thuc_hien}','${ly_do}'],
             'repair'=>['${stt}','${ma_vat_tu}','${ten_vat_tu}','${don_vi_tinh}','${phan_cap}','${so_luong}','${vi_tri}','${trang_thai}','${ghi_chu}'],
             'warehouse'=>['${stt}','${ma_vat_tu}','${ten_vat_tu}','${don_vi_tinh}','${phan_cap}','${so_luong}','${toa_nha}','${ly_do_hong}','${ngay_hu}','${trang_thai}'],
-            'system-warehouse'=>['${stt}','${ma_vat_tu}','${ten_vat_tu}','${don_vi_tinh}','${phan_cap}','${so_luong}','${toa_nha}','${ly_do_hong}','${ngay_hu}','${trang_thai}'],
+            'system-warehouse'=>['${stt}','${ma_vat_tu}','${ten_vat_tu}','${don_vi_tinh}','${so_luong}','${kho}','${vi_tri}','${ton_toi_thieu}','${ghi_chu}'],
             'repair-proposal'=>['${don_vi_de_xuat}','${ngay}','${thang}','${nam}','${nguoi_de_xuat}','${mo_ta}','${thiet_bi_sua_chua}','${dia_diem}','${nguoi_duyet}'],
         ];$values=$map[$type]??['${stt}','${ma_vat_tu}','${ten_vat_tu}','${don_vi_tinh}','${phan_cap}','${so_luong}','${toa_nha}','${phong}','${trang_thai}','${ghi_chu}'];return array_pad(array_slice($values,0,$cells),$cells,'');
     }
     private function totalVariables(\DOMXPath $xpath,\DOMNode $row,?string $type=null,?int $tableIndex=null): array
     {
-        $cells=$xpath->query('./w:tc',$row)->length;$total='${tong_so_luong}';if(in_array($type,['warehouse','system-warehouse'],true))$total=$tableIndex===1?'${tong_so_luong_on_dinh}':'${tong_so_luong_hu_hai}';return array_pad([null,'TỔNG CỘNG',null,$total],$cells,'');
+        $cells=$xpath->query('./w:tc',$row)->length;$total='${tong_so_luong}';if($type==='warehouse')$total=$tableIndex===1?'${tong_so_luong_on_dinh}':'${tong_so_luong_hu_hai}';return $type==='system-warehouse'?array_pad([null,'TỔNG CỘNG',null,null,$total],$cells,''):array_pad([null,'TỔNG CỘNG',null,$total],$cells,'');
     }
     private function positionFixedColumnCount(\DOMXPath $xpath,?\DOMNode $firstHeader,?\DOMNode $secondHeader): int
     {
@@ -1881,6 +1881,29 @@ class InventoryWorkflowController extends ModuleBaseController
                 'Lý do' => 'ly_do',
                 'Ghi chú' => 'ghi_chu',
             ];
+        }
+
+        if ($type === 'warehouse') {
+            return [
+                'Tổng SL ổn định' => 'tong_so_luong_on_dinh',
+                'Số dòng ổn định' => 'so_dong_on_dinh',
+                'Tổng SL hư hại' => 'tong_so_luong_hu_hai',
+                'Số dòng hư hại' => 'so_dong_hu_hai',
+                'Ngày hư' => 'ngay_hu',
+                'Lý do hỏng' => 'ly_do_hong',
+                'Trạng thái' => 'trang_thai',
+            ] + $common;
+        }
+
+        if ($type === 'system-warehouse') {
+            return [
+                'Tổng SL kho vật tư' => 'tong_so_luong_kho_vat_tu',
+                'Số dòng kho vật tư' => 'so_dong_kho_vat_tu',
+                'Tổng số kho' => 'tong_so_kho',
+                'Kho' => 'kho',
+                'Vị trí kho' => 'vi_tri',
+                'Tồn tối thiểu' => 'ton_toi_thieu',
+            ] + $common;
         }
 
         if ($type === 'repair-proposal') {

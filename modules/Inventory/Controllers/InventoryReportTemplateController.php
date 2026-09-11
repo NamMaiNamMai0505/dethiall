@@ -4,7 +4,7 @@ namespace Modules\Inventory\Controllers;
 
 use App\Http\Controllers\ModuleBaseController;
 use Illuminate\Http\Request;
-use Modules\Inventory\Models\{InventoryAsset, InventoryAuditLog, InventoryMovement, InventoryReportTemplate, InventoryTransfer};
+use Modules\Inventory\Models\{InventoryAsset, InventoryAuditLog, InventoryMovement, InventoryReportTemplate, InventoryTransfer, InventoryWarehouseItem};
 
 class InventoryReportTemplateController extends ModuleBaseController
 {
@@ -191,7 +191,13 @@ class InventoryReportTemplateController extends ModuleBaseController
             ->orderBy('name')->get();
 
         $rowsData = $assets;
-        if ($type === 'repair') {
+        if ($type === 'system-warehouse') {
+            $rowsData = InventoryWarehouseItem::with(['warehouse', 'material.category.parent'])
+                ->when($request->filled('material_id'), fn ($q) => $q->where('material_id', $request->integer('material_id')))
+                ->orderBy('warehouse_id')
+                ->orderBy('name')
+                ->get();
+        } elseif ($type === 'repair') {
             $rowsData = $assets->whereIn('status', ['BROKEN', 'REPAIRING'])->values();
         } elseif (in_array($type, ['transfer', 'recall'], true)) {
             $rowsData = InventoryTransfer::with(['asset', 'material', 'fromClassroom.managingUnit', 'toClassroom.managingUnit'])->where('type', $type === 'recall' ? 'RECALL' : 'TRANSFER')->latest()->get();
@@ -220,7 +226,13 @@ class InventoryReportTemplateController extends ModuleBaseController
             ->when($request->filled('material_id'), fn ($q) => $q->where('material_id', $request->integer('material_id')))
             ->orderBy('name')->get();
         $rowsData = $assets;
-        if ($type === 'repair') {
+        if ($type === 'system-warehouse') {
+            $rowsData = InventoryWarehouseItem::with(['warehouse', 'material.category.parent'])
+                ->when($request->filled('material_id'), fn ($q) => $q->where('material_id', $request->integer('material_id')))
+                ->orderBy('warehouse_id')
+                ->orderBy('name')
+                ->get();
+        } elseif ($type === 'repair') {
             $rowsData = $assets->whereIn('status', ['BROKEN', 'REPAIRING'])->values();
         } elseif (in_array($type, ['transfer', 'recall'], true)) {
             $rowsData = InventoryTransfer::with(['asset', 'fromClassroom.managingUnit', 'toClassroom.managingUnit'])->where('type', $type === 'recall' ? 'RECALL' : 'TRANSFER')->latest()->get();
@@ -259,7 +271,7 @@ class InventoryReportTemplateController extends ModuleBaseController
         $xpath = new \DOMXPath($xml);
         $xpath->registerNamespace('w', 'http://schemas.openxmlformats.org/wordprocessingml/2006/main');
         $tables = $xpath->query('//w:tbl');
-        $tableIndexes = $tables->length > 1 ? ($type === 'warehouse' || $type === 'system-warehouse' ? [1, 2] : [1]) : [0];
+        $tableIndexes = $tables->length > 1 ? ($type === 'warehouse' ? [1, 2] : [1]) : [0];
         foreach ($tableIndexes as $tableIndex) {
             $table = $tables->item($tableIndex);
             if (!$table) continue;
@@ -279,8 +291,8 @@ class InventoryReportTemplateController extends ModuleBaseController
             $removeFrom = in_array($type, ['increase-decrease', 'period'], true) ? 2 : $headerRows;
             for ($i = $tableRows->length - 1; $i >= $removeFrom; $i--) $table->removeChild($tableRows->item($i));
             $source = $rowsData;
-            if (($type === 'warehouse' || $type === 'system-warehouse') && $tableIndex === 1) $source = $assets->whereNotIn('status', ['BROKEN', 'REPAIRING'])->values();
-            if (($type === 'warehouse' || $type === 'system-warehouse') && $tableIndex === 2) $source = $assets->whereIn('status', ['BROKEN', 'REPAIRING'])->values();
+            if ($type === 'warehouse' && $tableIndex === 1) $source = $assets->whereNotIn('status', ['BROKEN', 'REPAIRING'])->values();
+            if ($type === 'warehouse' && $tableIndex === 2) $source = $assets->whereIn('status', ['BROKEN', 'REPAIRING'])->values();
             foreach ($source as $index => $record) {
                 $values = $this->reportRowValues($record, $type, $index + 1, $tableIndex);
                 $this->setTemplateRow($xml, $templateRow->cloneNode(true), $values, $table);
@@ -291,14 +303,14 @@ class InventoryReportTemplateController extends ModuleBaseController
                     : ($item instanceof InventoryAuditLog
                         ? abs((float) (($item->details['change'] ?? $item->details['quantity'] ?? 0)))
                         : ($item->quantity ?? $item->asset?->quantity ?? 0))));
-                $this->setTemplateRow($xml, $totalRow, [null, 'TỔNG CỘNG', null, $total], $table);
+                $this->setTemplateRow($xml, $totalRow, $type === 'system-warehouse' ? [null, 'TỔNG CỘNG', null, null, $total] : [null, 'TỔNG CỘNG', null, $total], $table);
             }
         }
         $this->replaceReportDate($xpath, $request);
         if (in_array($type, ['transfer', 'recall'], true)) $this->replaceTransferDocument($xpath, $rowsData->first(), $type);
         if ($type === 'update-log') $this->replaceUpdateSummary($xpath, $rowsData);
         if ($type === 'repair') $this->replaceRepairSummary($xpath, $rowsData);
-        if (in_array($type, ['warehouse', 'system-warehouse'], true)) {
+        if ($type === 'warehouse') {
             $this->replaceWarehouseSummary($xpath, $assets);
             $this->removeEmptyRepairSection($xpath, $assets->whereIn('status', ['BROKEN', 'REPAIRING'])->values());
         }
@@ -463,7 +475,20 @@ class InventoryReportTemplateController extends ModuleBaseController
             $values[$reasonColumns[$reason] ?? ($change >= 0 ? 9 : 15)] = $details['reason'] ?? $details['note'] ?? '';
             return $values;
         }
-        if (in_array($type, ['warehouse', 'system-warehouse'], true)) {
+        if ($record instanceof InventoryWarehouseItem) {
+            return [
+                $number,
+                $record->code ?: $record->material?->code,
+                $record->name ?: $record->material?->name,
+                $record->unit ?: $record->material?->unit,
+                $record->quantity,
+                $record->warehouse?->name ?: '',
+                $record->warehouse?->location ?: '',
+                $record->minimum_quantity,
+                $record->note ?: '',
+            ];
+        }
+        if ($type === 'warehouse') {
             $status = $record->status === 'BROKEN' ? 'Hỏng' : ($record->status === 'REPAIRING' ? 'Đang sửa chữa' : '');
             $base = [
                 $number,
@@ -532,6 +557,19 @@ class InventoryReportTemplateController extends ModuleBaseController
             $row['ghi_chu'] = $row['ly_do'];
             return $row;
         }
+        if ($record instanceof InventoryWarehouseItem) {
+            $row['ma_vat_tu'] = (string) ($record->code ?: $record->material?->code ?: '');
+            $row['ten_vat_tu'] = (string) ($record->name ?: $record->material?->name ?: '');
+            $row['nganh'] = (string) ($record->material?->category?->parent?->name ?: '');
+            $row['loai_vat_tu'] = (string) ($record->material?->category?->name ?: '');
+            $row['don_vi_tinh'] = (string) ($record->unit ?: $record->material?->unit ?: '');
+            $row['so_luong'] = (string) $record->quantity;
+            $row['kho'] = (string) ($record->warehouse?->name ?: '');
+            $row['vi_tri'] = (string) ($record->warehouse?->location ?: '');
+            $row['ton_toi_thieu'] = (string) $record->minimum_quantity;
+            $row['ghi_chu'] = (string) ($record->note ?: '');
+            return $row;
+        }
         $row['ma_vat_tu'] = (string) ($record->asset_code ?: $record->material?->code ?: '');
         $row['ten_vat_tu'] = (string) ($record->name ?: $record->material?->name ?: '');
         $row['nganh'] = (string) ($record->material?->category?->parent?->name ?: '');
@@ -568,7 +606,9 @@ class InventoryReportTemplateController extends ModuleBaseController
             'toa_nha' => '',
             'phong' => '',
             'don_vi_quan_ly' => '',
+            'kho' => '',
             'vi_tri' => '',
+            'ton_toi_thieu' => '',
             'loai_bien_dong' => '',
             'truoc' => '',
             'sau' => '',
@@ -792,7 +832,7 @@ class InventoryReportTemplateController extends ModuleBaseController
             'chuc_danh_ky' => '',
             'nguoi_ky' => '',
         ];
-        if (in_array($type, ['warehouse', 'system-warehouse'], true)) {
+        if ($type === 'warehouse') {
             $assets = InventoryAsset::with(['classroom.building', 'classroom.managingUnit', 'holdingUnit'])
                 ->when($request->filled('building_id'), fn ($q) => $q->whereHas('classroom', fn ($room) => $room->where('building_id', $request->integer('building_id'))))
                 ->when($request->filled('classroom_id'), fn ($q) => $q->where('classroom_id', $request->integer('classroom_id')))
@@ -811,6 +851,15 @@ class InventoryReportTemplateController extends ModuleBaseController
                 'so_luong_vat_tu_hu_hong' => $broken->sum('quantity'),
                 'so_dong_hu_hai' => $broken->count(),
                 'so_dong_hu_hong' => $broken->count(),
+            ];
+        } elseif ($type === 'system-warehouse') {
+            $items = InventoryWarehouseItem::with(['warehouse', 'material'])
+                ->when($request->filled('material_id'), fn ($q) => $q->where('material_id', $request->integer('material_id')))
+                ->get();
+            $values += [
+                'tong_so_luong_kho_vat_tu' => $items->sum('quantity'),
+                'so_dong_kho_vat_tu' => $items->count(),
+                'tong_so_kho' => $items->pluck('warehouse_id')->filter()->unique()->count(),
             ];
         }
 
