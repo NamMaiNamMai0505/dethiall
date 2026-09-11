@@ -100,8 +100,8 @@ class InventoryReportTemplateController extends ModuleBaseController
             'unit' => 'Báo cáo thực lực vật tư theo đơn vị',
             'period' => 'Báo cáo tổng hợp thực lực theo kỳ',
             'increase-decrease' => 'Báo cáo tăng giảm thực lực vật tư',
-            'warehouse' => 'Báo cáo kho vật tư',
-            'system-warehouse' => 'Báo cáo hệ thống kho vật tư',
+            'warehouse' => 'Báo cáo kho',
+            'system-warehouse' => 'Báo cáo kho vật tư',
             'transfer' => 'Quyết định điều động vật tư',
             'recall' => 'Quyết định thu hồi vật tư',
             'repair' => 'Báo cáo vật tư hư hại và sửa chữa',
@@ -109,6 +109,8 @@ class InventoryReportTemplateController extends ModuleBaseController
             'using-position' => 'Báo cáo vật tư đang sử dụng theo vị trí',
             'using-total' => 'Báo cáo vật tư đang sử dụng tổng thể',
         ];
+        $stableAssets = $assets->whereNotIn('status', ['BROKEN', 'REPAIRING'])->values();
+        $brokenAssets = $assets->whereIn('status', ['BROKEN', 'REPAIRING'])->values();
         $processor->setValues([
             'ngay_bao_cao' => $today->format('d/m/Y'),
             'ngay' => $today->format('d'),
@@ -124,6 +126,15 @@ class InventoryReportTemplateController extends ModuleBaseController
             'tong_so_luong' => (string) $rowsData->sum(fn ($item) => (float) ($item->quantity ?? $item->asset?->quantity ?? 0)),
             'tong_vat_tu' => (string) $assets->count(),
             'tong_so_luong_vat_tu' => (string) $assets->sum('quantity'),
+            'tong_so_luong_on_dinh' => (string) $stableAssets->sum('quantity'),
+            'so_luong_vat_tu_on_dinh' => (string) $stableAssets->sum('quantity'),
+            'so_dong_on_dinh' => (string) $stableAssets->count(),
+            'tong_so_luong_hu_hai' => (string) $brokenAssets->sum('quantity'),
+            'tong_so_luong_hu_hong' => (string) $brokenAssets->sum('quantity'),
+            'so_luong_vat_tu_hu_hai' => (string) $brokenAssets->sum('quantity'),
+            'so_luong_vat_tu_hu_hong' => (string) $brokenAssets->sum('quantity'),
+            'so_dong_hu_hai' => (string) $brokenAssets->count(),
+            'so_dong_hu_hong' => (string) $brokenAssets->count(),
         ]);
 
         $rows = $rowsData->values()->map(fn ($record, $index) => $this->variableRowValues($record, $type, $index + 1))->all();
@@ -271,7 +282,7 @@ class InventoryReportTemplateController extends ModuleBaseController
             if (($type === 'warehouse' || $type === 'system-warehouse') && $tableIndex === 1) $source = $assets->whereNotIn('status', ['BROKEN', 'REPAIRING'])->values();
             if (($type === 'warehouse' || $type === 'system-warehouse') && $tableIndex === 2) $source = $assets->whereIn('status', ['BROKEN', 'REPAIRING'])->values();
             foreach ($source as $index => $record) {
-                $values = $this->reportRowValues($record, $type, $index + 1);
+                $values = $this->reportRowValues($record, $type, $index + 1, $tableIndex);
                 $this->setTemplateRow($xml, $templateRow->cloneNode(true), $values, $table);
             }
             if ($totalRow) {
@@ -403,7 +414,7 @@ class InventoryReportTemplateController extends ModuleBaseController
         $table->appendChild($row);
     }
 
-    private function reportRowValues(mixed $record, string $type, int $number): array
+    private function reportRowValues(mixed $record, string $type, int $number, ?int $tableIndex = null): array
     {
         if ($record instanceof InventoryTransfer) {
             return [$number, $record->asset?->name ?: $record->material?->name, $record->asset?->unit ?: 'Cái', $record->asset?->grade ?: 1, $record->quantity ?: 1, $record->general_note ?: ''];
@@ -452,6 +463,23 @@ class InventoryReportTemplateController extends ModuleBaseController
             $values[$reasonColumns[$reason] ?? ($change >= 0 ? 9 : 15)] = $details['reason'] ?? $details['note'] ?? '';
             return $values;
         }
+        if (in_array($type, ['warehouse', 'system-warehouse'], true)) {
+            $status = $record->status === 'BROKEN' ? 'Hỏng' : ($record->status === 'REPAIRING' ? 'Đang sửa chữa' : '');
+            $base = [
+                $number,
+                $record->asset_code,
+                $record->name,
+                $record->unit ?: $record->material?->unit,
+                $record->grade ?: 1,
+                $record->quantity,
+                $record->classroom?->building?->name ?: 'Kho vật tư',
+            ];
+
+            return $tableIndex === 2
+                ? array_merge($base, [$record->note ?: '', optional($record->broken_at)->format('d/m/Y') ?: '', $status])
+                : array_merge($base, [$record->classroom?->name ?: 'Kho vật tư']);
+        }
+
         return [$record->asset_code, $record->name, $record->unit ?: $record->material?->unit, $record->grade ?: 1, $record->quantity, $record->classroom?->building?->name ?: 'Kho vật tư', $record->classroom?->name ?: 'Kho vật tư', $record->status === 'BROKEN' ? 'Hỏng' : ($record->status === 'REPAIRING' ? 'Đang sửa chữa' : '')];
     }
 
@@ -516,6 +544,10 @@ class InventoryReportTemplateController extends ModuleBaseController
         $row['phong'] = (string) ($record->classroom?->name ?: 'Kho vật tư');
         $row['don_vi_quan_ly'] = (string) ($record->classroom?->managingUnit?->name ?: $record->holdingUnit?->name ?: '');
         $row['vi_tri'] = trim($row['toa_nha'].' / '.$row['phong'], ' /');
+        $row['ngay_hu'] = optional($record->broken_at)->format('d/m/Y') ?: '';
+        $row['ngay_hong'] = $row['ngay_hu'];
+        $row['ly_do'] = (string) ($record->note ?: '');
+        $row['ly_do_hong'] = $row['ly_do'];
         $row['ghi_chu'] = (string) ($record->note ?: '');
         return $row;
     }
@@ -541,7 +573,10 @@ class InventoryReportTemplateController extends ModuleBaseController
             'truoc' => '',
             'sau' => '',
             'nguoi_thuc_hien' => '',
+            'ngay_hu' => '',
+            'ngay_hong' => '',
             'ly_do' => '',
+            'ly_do_hong' => '',
             'ghi_chu' => '',
         ];
     }
@@ -757,6 +792,27 @@ class InventoryReportTemplateController extends ModuleBaseController
             'chuc_danh_ky' => '',
             'nguoi_ky' => '',
         ];
+        if (in_array($type, ['warehouse', 'system-warehouse'], true)) {
+            $assets = InventoryAsset::with(['classroom.building', 'classroom.managingUnit', 'holdingUnit'])
+                ->when($request->filled('building_id'), fn ($q) => $q->whereHas('classroom', fn ($room) => $room->where('building_id', $request->integer('building_id'))))
+                ->when($request->filled('classroom_id'), fn ($q) => $q->where('classroom_id', $request->integer('classroom_id')))
+                ->when($request->filled('unit_id'), fn ($q) => $q->whereHas('classroom', fn ($room) => $room->where('managing_unit_id', $request->integer('unit_id'))))
+                ->when($request->filled('material_id'), fn ($q) => $q->where('material_id', $request->integer('material_id')))
+                ->get();
+            $stable = $assets->whereNotIn('status', ['BROKEN', 'REPAIRING']);
+            $broken = $assets->whereIn('status', ['BROKEN', 'REPAIRING']);
+            $values += [
+                'tong_so_luong_on_dinh' => $stable->sum('quantity'),
+                'so_luong_vat_tu_on_dinh' => $stable->sum('quantity'),
+                'so_dong_on_dinh' => $stable->count(),
+                'tong_so_luong_hu_hai' => $broken->sum('quantity'),
+                'tong_so_luong_hu_hong' => $broken->sum('quantity'),
+                'so_luong_vat_tu_hu_hai' => $broken->sum('quantity'),
+                'so_luong_vat_tu_hu_hong' => $broken->sum('quantity'),
+                'so_dong_hu_hai' => $broken->count(),
+                'so_dong_hu_hong' => $broken->count(),
+            ];
+        }
 
         foreach ($xpath->query('//w:p|//w:tc') as $container) {
             $nodes = $xpath->query('.//w:t', $container);

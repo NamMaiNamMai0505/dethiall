@@ -52,8 +52,9 @@
 
     @php
         $commonVariables = ['ngay_bao_cao','ngay','thang','nam','tu_ngay','den_ngay','tieu_de','loai_bao_cao','ten_mau','ma_mau','tong_so','tong_so_luong','tong_vat_tu','tong_so_luong_vat_tu'];
+        $warehouseVariables = ['tong_so_luong_on_dinh','so_luong_vat_tu_on_dinh','so_dong_on_dinh','tong_so_luong_hu_hai','so_luong_vat_tu_hu_hai','so_dong_hu_hai','tong_so_luong_hu_hong','so_luong_vat_tu_hu_hong','so_dong_hu_hong'];
         $proposalVariables = ['ten_phieu','tieu_de_phieu','noi_dung_de_xuat','ly_do_de_xuat','vat_tu_de_xuat','so_phieu','ma_phieu','ngay_in','loai_de_xuat','trang_thai','don_vi_de_xuat','nguoi_de_xuat','nguoi_de_nghi','nganh_vat_tu','mo_ta','ly_do_tu_choi','nguoi_duyet','ho_ten_nguoi_duyet','chi_huy_xac_nhan','nguoi_xac_nhan_chi_huy','ngay_duyet','chu_ky_nguoi_duyet','chu_ky_nguoi_de_nghi','chu_ky_nguoi_de_xuat','chu_ky_chi_huy_xac_nhan'];
-        $rowVariables = ['stt','ngay_du_lieu','ma_vat_tu','ten_vat_tu','nganh','loai_vat_tu','don_vi_tinh','so_luong','so_luong_thuc_te_phong','so_luong_de_xuat','phan_cap','trang_thai','toa_nha','phong','don_vi_quan_ly','vi_tri','loai_bien_dong','truoc','sau','nguoi_thuc_hien','ly_do','ghi_chu'];
+        $rowVariables = ['stt','ngay_du_lieu','ma_vat_tu','ten_vat_tu','nganh','loai_vat_tu','don_vi_tinh','so_luong','so_luong_thuc_te_phong','so_luong_de_xuat','phan_cap','trang_thai','toa_nha','phong','don_vi_quan_ly','vi_tri','loai_bien_dong','truoc','sau','nguoi_thuc_hien','ngay_hu','ngay_hong','ly_do','ly_do_hong','ghi_chu'];
     @endphp
 
     <div class="rounded-2xl border bg-white p-5">
@@ -76,6 +77,15 @@
                     @endforeach
                     <span class="rounded border border-slate-900 px-2 py-1 font-mono text-xs">{{ '${bang_du_lieu}' }}</span>
                 </div>
+            </div>
+            <div>
+                <p class="mb-2 font-semibold">Riêng mẫu báo cáo kho</p>
+                <div class="flex flex-wrap gap-2">
+                    @foreach($warehouseVariables as $variable)
+                        <span class="rounded border border-slate-900 px-2 py-1 font-mono text-xs">{{ '${'.$variable.'}' }}</span>
+                    @endforeach
+                </div>
+                <p class="mt-2 text-xs text-slate-500">${tong_so_luong_on_dinh} là tổng số lượng vật tư ổn định trong kho; ${tong_so_luong_hu_hai} là tổng số lượng vật tư hư hại hoặc đang sửa trong kho. ${so_dong_on_dinh} và ${so_dong_hu_hai} là số dòng thật đang in trong từng bảng.</p>
             </div>
             <div>
                 <p class="mb-2 font-semibold">Riêng mẫu giấy đề xuất</p>

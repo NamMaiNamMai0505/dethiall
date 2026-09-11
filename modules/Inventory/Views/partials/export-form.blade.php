@@ -47,8 +47,8 @@
                     <option value="movement">Thống kê tăng, giảm thực lực vật tư</option>
                     <option value="period">Báo cáo tổng hợp theo kỳ</option>
                     <option value="using">Báo cáo vật tư đang sử dụng</option>
-                    <option value="warehouse">Báo cáo kho vật tư</option>
-                    <option value="system-warehouse">Báo cáo hệ thống kho-vật tư</option>
+                    <option value="warehouse">Báo cáo kho</option>
+                    <option value="system-warehouse">Báo cáo kho vật tư</option>
                     <option value="transfer">Quyết định điều động</option>
                     <option value="recall">Quyết định thu hồi</option>
                     <option value="repair">Vật tư đang hư hại và sửa chữa</option>

@@ -1742,7 +1742,7 @@ class InventoryWorkflowController extends ModuleBaseController
     private function variableizeSimpleTemplate(\DOMDocument $xml,\DOMXPath $xpath,string $type): void
     {
         $tables=$xpath->query('//w:tbl');$indexes=$tables->length>1?(in_array($type,['warehouse','system-warehouse'],true)?[1,2]:[1]):[0];
-        foreach($indexes as $tableIndex){$table=$tables->item($tableIndex);if(!$table)continue;$rows=$xpath->query('./w:tr',$table);if(!$rows->length)continue;$headerRows=$tables->length===1?2:1;$templateIndex=in_array($type,['increase-decrease','period'],true)?min(3,$rows->length-1):min($headerRows,$rows->length-1);$templateRow=$rows->item($templateIndex)->cloneNode(true);$totalRow=$rows->item($rows->length-1)->cloneNode(true);$removeFrom=in_array($type,['increase-decrease','period'],true)?2:$headerRows;for($i=$rows->length-1;$i>=$removeFrom;$i--)$table->removeChild($rows->item($i));$this->setTemplateRow($xml,$templateRow,$this->tableVariables($type,$xpath,$templateRow),$table);$this->setTemplateRow($xml,$totalRow,$this->totalVariables($xpath,$totalRow),$table);}
+        foreach($indexes as $tableIndex){$table=$tables->item($tableIndex);if(!$table)continue;$rows=$xpath->query('./w:tr',$table);if(!$rows->length)continue;$headerRows=$tables->length===1?2:1;$templateIndex=in_array($type,['increase-decrease','period'],true)?min(3,$rows->length-1):min($headerRows,$rows->length-1);$templateRow=$rows->item($templateIndex)->cloneNode(true);$totalRow=$rows->item($rows->length-1)->cloneNode(true);$removeFrom=in_array($type,['increase-decrease','period'],true)?2:$headerRows;for($i=$rows->length-1;$i>=$removeFrom;$i--)$table->removeChild($rows->item($i));$this->setTemplateRow($xml,$templateRow,$this->tableVariables($type,$xpath,$templateRow),$table);$this->setTemplateRow($xml,$totalRow,$this->totalVariables($xpath,$totalRow,$type,$tableIndex),$table);}
     }
     private function tableVariables(string $type,\DOMXPath $xpath,\DOMNode $row): array
     {
@@ -1753,12 +1753,14 @@ class InventoryWorkflowController extends ModuleBaseController
             'recall'=>['${stt}','${ten_vat_tu}','${don_vi_tinh}','${phan_cap}','${so_luong}','${ghi_chu}'],
             'update-log'=>['${stt}','${ngay_du_lieu}','${loai_bien_dong}','${ten_vat_tu}','${so_luong}','${truoc}','${sau}','${vi_tri}','${nguoi_thuc_hien}','${ly_do}'],
             'repair'=>['${stt}','${ma_vat_tu}','${ten_vat_tu}','${don_vi_tinh}','${phan_cap}','${so_luong}','${vi_tri}','${trang_thai}','${ghi_chu}'],
+            'warehouse'=>['${stt}','${ma_vat_tu}','${ten_vat_tu}','${don_vi_tinh}','${phan_cap}','${so_luong}','${toa_nha}','${ly_do_hong}','${ngay_hu}','${trang_thai}'],
+            'system-warehouse'=>['${stt}','${ma_vat_tu}','${ten_vat_tu}','${don_vi_tinh}','${phan_cap}','${so_luong}','${toa_nha}','${ly_do_hong}','${ngay_hu}','${trang_thai}'],
             'repair-proposal'=>['${don_vi_de_xuat}','${ngay}','${thang}','${nam}','${nguoi_de_xuat}','${mo_ta}','${thiet_bi_sua_chua}','${dia_diem}','${nguoi_duyet}'],
         ];$values=$map[$type]??['${stt}','${ma_vat_tu}','${ten_vat_tu}','${don_vi_tinh}','${phan_cap}','${so_luong}','${toa_nha}','${phong}','${trang_thai}','${ghi_chu}'];return array_pad(array_slice($values,0,$cells),$cells,'');
     }
-    private function totalVariables(\DOMXPath $xpath,\DOMNode $row): array
+    private function totalVariables(\DOMXPath $xpath,\DOMNode $row,?string $type=null,?int $tableIndex=null): array
     {
-        $cells=$xpath->query('./w:tc',$row)->length;return array_pad([null,'TỔNG CỘNG',null,'${tong_so_luong}'],$cells,'');
+        $cells=$xpath->query('./w:tc',$row)->length;$total='${tong_so_luong}';if(in_array($type,['warehouse','system-warehouse'],true))$total=$tableIndex===1?'${tong_so_luong_on_dinh}':'${tong_so_luong_hu_hai}';return array_pad([null,'TỔNG CỘNG',null,$total],$cells,'');
     }
     private function positionFixedColumnCount(\DOMXPath $xpath,?\DOMNode $firstHeader,?\DOMNode $secondHeader): int
     {
@@ -1815,10 +1817,10 @@ class InventoryWorkflowController extends ModuleBaseController
             'unit' => ['name' => 'Theo đơn vị', 'report' => 'Thống kê thực lực vật tư theo đơn vị', 'file' => 'bao-cao-thuc-luc-hien-co-tong-the.docx', 'variable_file' => 'Mau_bien_Don_vi.docx'],
             'increase-decrease' => ['name' => 'Tăng, giảm', 'report' => 'Thống kê tăng, giảm thực lực vật tư', 'file' => 'bao-cao-tang-giam-thuc-luc-vat-tu.docx', 'variable_file' => 'Mau_bien_Tang_giam.docx'],
             'period' => ['name' => 'Tổng hợp theo kỳ', 'report' => 'Báo cáo tổng hợp theo kỳ', 'file' => 'bao-cao-tong-hop-thuc-luc-theo-ky.docx', 'variable_file' => 'Mau_bien_Tong_hop_theo_ky.docx'],
-            'warehouse' => ['name' => 'Kho vật tư', 'report' => 'Báo cáo kho vật tư', 'file' => 'bao-cao-kho-vat-tu.docx', 'variable_file' => 'Mau_bien_Kho.docx'],
+            'warehouse' => ['name' => 'Kho', 'report' => 'Báo cáo kho', 'file' => 'bao-cao-kho-vat-tu.docx', 'variable_file' => 'Mau_bien_Kho.docx'],
             'using-position' => ['name' => 'Theo vị trí lắp đặt', 'report' => 'Báo cáo vật tư đang sử dụng', 'scope' => 'Theo vị trí lắp đặt', 'file' => 'bao-cao-vt-dang-su-dung-vi-tri.docx', 'variable_file' => 'mau-bien-vat-tu-dang-su-dung-theo-vi-tri.docx'],
             'using-total' => ['name' => 'Tổng hợp toàn bộ', 'report' => 'Báo cáo vật tư đang sử dụng', 'scope' => 'Tổng hợp toàn bộ', 'file' => 'bao-cao-vt-dang-su-dung-tong-the.docx', 'variable_file' => 'mau-bien-vat-tu-dang-su-dung-tong-hop.docx'],
-            'system-warehouse' => ['name' => 'Hệ thống kho-vật tư', 'report' => 'Báo cáo hệ thống kho-vật tư', 'file' => 'bao-cao-kho-he-thong-kho-vt.docx', 'variable_file' => 'Mau_bien_Kho_vat_tu.docx'],
+            'system-warehouse' => ['name' => 'Kho vật tư', 'report' => 'Báo cáo kho vật tư', 'file' => 'bao-cao-kho-he-thong-kho-vt.docx', 'variable_file' => 'Mau_bien_Kho_vat_tu.docx'],
             'transfer' => ['name' => 'Quyết định điều động', 'report' => 'Quyết định điều động', 'file' => 'bao-cao-quyet-dinh-dieu-dong.docx', 'variable_file' => 'Mau_bien_Phieu_dieu_dong.docx'],
             'recall' => ['name' => 'Quyết định thu hồi', 'report' => 'Quyết định thu hồi', 'file' => 'bao-cao-quyet-dinh-thu-hoi-tra-ve.docx', 'variable_file' => 'Mau_bien_Phieu_thu_hoi.docx'],
             'repair' => ['name' => 'Vật tư hư hại và sửa chữa', 'report' => 'Vật tư đang hư hại và sửa chữa', 'file' => 'bao-cao-vat-tu-dang-hu-hai-va-sua-chua.docx', 'variable_file' => 'Mau_bien_Vat_tu_hu_hai.docx'],
