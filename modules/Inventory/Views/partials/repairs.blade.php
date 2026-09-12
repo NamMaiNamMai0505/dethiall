@@ -1,3 +1,7 @@
+@php
+    $canAssignRepair = $canAssignRepair ?? (auth()->user()?->isSuperAdmin() || \App\Support\PermissionCheck::can(auth()->user(), 'inventory.repairs.assign') || \App\Support\PermissionCheck::can(auth()->user(), 'inventory.repairs.edit'));
+    $canCompleteRepair = $canCompleteRepair ?? (auth()->user()?->isSuperAdmin() || \App\Support\PermissionCheck::can(auth()->user(), 'inventory.repairs.complete') || \App\Support\PermissionCheck::can(auth()->user(), 'inventory.repairs.edit'));
+@endphp
 <div class="rounded-2xl border bg-white p-5">
     <div class="mb-4 flex items-center justify-between">
         <div>
@@ -35,6 +39,7 @@
             <tbody>
                 @forelse($repairs as $i => $repair)
                     @php($repairBreakReport = ($repairBreakReports ?? collect())->get($repair->source_id))
+                    @php($canCompleteThisRepair = $canCompleteRepair && ($canAssignRepair || (int) $repair->assigned_to === (int) auth()->id()))
                     <tr class="border-b">
                         <td class="p-3">{{ $i + 1 }}</td>
                         <td class="p-3">
@@ -51,14 +56,19 @@
                         <td class="p-3">{{ $repair->performer ?: $repair->assignee?->name ?: '—' }}</td>
                         <td class="p-3">{{ $repair->started_at?->format('d/m/Y') ?: '—' }}</td>
                         <td class="p-3">
-                            @if($repair->status === 'OPEN')
+                            @if($canAssignRepair && $repair->status === 'OPEN')
                                 <button type="button" class="rounded bg-slate-900 px-3 py-2 text-white" data-repair-open="{{ $repair->id }}">Phân công</button>
                             @elseif($repair->status === 'ASSIGNED')
+                                @if($canAssignRepair)
                                 <button type="button" class="rounded bg-slate-900 px-3 py-2 text-white" data-repair-open="{{ $repair->id }}">Sửa phân công</button>
+                                @endif
+                                @if($canCompleteThisRepair)
                                 <button type="button" class="mt-2 rounded border px-3 py-2" data-repair-complete-open="{{ $repair->id }}">Hoàn thành</button>
+                                @endif
                             @endif
                         </td>
                     </tr>
+                    @if($canAssignRepair)
                     <tr id="repair-modal-{{ $repair->id }}" class="hidden">
                         <td colspan="9" class="p-4">
                             <form method="POST" action="{{ route('inventory.repairs.assign', $repair) }}" class="grid gap-3 rounded-xl border bg-slate-50 p-4 md:grid-cols-3">
@@ -84,6 +94,8 @@
                             </form>
                         </td>
                     </tr>
+                    @endif
+                    @if($canCompleteThisRepair)
                     <tr id="repair-complete-{{ $repair->id }}" class="hidden">
                         <td colspan="9" class="p-4">
                             <form method="POST" action="{{ route('inventory.repairs.complete', $repair) }}" class="grid gap-3 rounded-xl border bg-emerald-50 p-4 md:grid-cols-3">
@@ -114,6 +126,7 @@
                             </form>
                         </td>
                     </tr>
+                    @endif
                 @empty
                     <tr><td colspan="9" class="p-5 text-center text-slate-500">Chưa có phiếu.</td></tr>
                 @endforelse

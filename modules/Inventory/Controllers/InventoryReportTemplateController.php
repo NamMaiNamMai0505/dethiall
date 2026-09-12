@@ -202,7 +202,7 @@ class InventoryReportTemplateController extends ModuleBaseController
         } elseif (in_array($type, ['transfer', 'recall'], true)) {
             $rowsData = InventoryTransfer::with(['asset', 'material', 'fromClassroom.managingUnit', 'toClassroom.managingUnit'])->where('type', $type === 'recall' ? 'RECALL' : 'TRANSFER')->latest()->get();
         } elseif (in_array($type, ['increase-decrease', 'update-log'], true)) {
-            $actions = $type === 'increase-decrease' ? ['INCREASE', 'DECREASE', 'ADJUST'] : ['CREATE', 'UPDATE', 'IMPORT', 'INCREASE', 'DECREASE', 'ADJUST', 'MOVEMENT'];
+            $actions = $type === 'increase-decrease' ? ['INCREASE', 'DECREASE', 'ADJUST'] : ['UPDATE', 'IMPORT', 'INCREASE', 'DECREASE', 'ADJUST', 'MOVEMENT'];
             $rowsData = InventoryAuditLog::with('user')->whereIn('action', $actions)
                 ->when($request->filled('from'), fn ($q) => $q->whereDate('created_at', '>=', $request->input('from')))
                 ->when($request->filled('to'), fn ($q) => $q->whereDate('created_at', '<=', $request->input('to')))
@@ -245,7 +245,7 @@ class InventoryReportTemplateController extends ModuleBaseController
                 ->when($request->filled('to'), fn ($q) => $q->whereDate('created_at', '<=', $request->input('to')))
                 ->latest()->get();
         } elseif ($type === 'update-log') {
-            $rowsData = InventoryAuditLog::with('user')->whereIn('action', ['CREATE', 'UPDATE', 'IMPORT', 'INCREASE', 'DECREASE', 'ADJUST', 'MOVEMENT'])
+            $rowsData = InventoryAuditLog::with('user')->whereIn('action', ['UPDATE', 'IMPORT', 'INCREASE', 'DECREASE', 'ADJUST', 'MOVEMENT'])
                 ->when($request->filled('from'), fn ($q) => $q->whereDate('created_at', '>=', $request->input('from')))
                 ->when($request->filled('to'), fn ($q) => $q->whereDate('created_at', '<=', $request->input('to')))
                 ->latest()->get();
@@ -377,31 +377,61 @@ class InventoryReportTemplateController extends ModuleBaseController
             'so_luong_tang' => $change > 0 ? (string) $change : '',
             'so_luong_giam' => $change < 0 ? (string) abs($change) : '',
             'tren_cap' => '',
+            'dieu_dong_den' => '',
             'mua_sam' => '',
             'tang_phan_cap' => '',
             'kiem_ke_tang' => '',
             'tang_khac' => '',
             'tra_tren' => '',
+            'dieu_dong_di' => '',
             'hao_hut' => '',
-            'thanh_ly' => '',
             'hu_hong' => '',
             'kiem_ke_giam' => '',
+            'thanh_ly' => '',
+            'giam_phan_cap' => '',
             'giam_khac' => '',
         ];
-        $key = match (true) {
+        $key = $this->increaseDecreaseReasonColumn((string) ($details['reason_code'] ?? ''), $reason, $change);
+        $row[$key] = (string) ($details['reason'] ?? $details['note'] ?? '');
+        return $row;
+    }
+
+    private function increaseDecreaseReasonColumn(string $code, string $reason, float $change): string
+    {
+        $code = strtoupper(trim($code));
+        $byCode = [
+            'T01' => 'tren_cap',
+            'T02' => 'dieu_dong_den',
+            'T03' => 'mua_sam',
+            'T04' => 'kiem_ke_tang',
+            'T05' => 'tang_phan_cap',
+            'T06' => 'tang_khac',
+            'G01' => 'tra_tren',
+            'G02' => 'dieu_dong_di',
+            'G03' => 'hao_hut',
+            'G04' => 'hu_hong',
+            'G05' => 'kiem_ke_giam',
+            'G06' => 'thanh_ly',
+            'G07' => 'giam_phan_cap',
+            'G08' => 'giam_khac',
+        ];
+        if (isset($byCode[$code])) return $byCode[$code];
+
+        return match (true) {
             $change >= 0 && (str_contains($reason, 'trên cấp') || str_contains($reason, 'tren cap')) => 'tren_cap',
+            $change >= 0 && (str_contains($reason, 'điều động đến') || str_contains($reason, 'dieu dong den')) => 'dieu_dong_den',
             $change >= 0 && (str_contains($reason, 'mua sắm') || str_contains($reason, 'mua sam')) => 'mua_sam',
             $change >= 0 && str_contains($reason, 'phân cấp') => 'tang_phan_cap',
             $change >= 0 && str_contains($reason, 'kiểm kê') => 'kiem_ke_tang',
             $change < 0 && (str_contains($reason, 'trả trên') || str_contains($reason, 'tra tren')) => 'tra_tren',
+            $change < 0 && (str_contains($reason, 'điều động đi') || str_contains($reason, 'dieu dong di')) => 'dieu_dong_di',
             $change < 0 && (str_contains($reason, 'hao hụt') || str_contains($reason, 'hao hut')) => 'hao_hut',
             $change < 0 && str_contains($reason, 'thanh lý') => 'thanh_ly',
             $change < 0 && (str_contains($reason, 'hư hỏng') || str_contains($reason, 'hu hong')) => 'hu_hong',
             $change < 0 && str_contains($reason, 'kiểm kê') => 'kiem_ke_giam',
+            $change < 0 && str_contains($reason, 'phân cấp') => 'giam_phan_cap',
             default => $change >= 0 ? 'tang_khac' : 'giam_khac',
         };
-        $row[$key] = (string) ($details['reason'] ?? $details['note'] ?? '');
-        return $row;
     }
 
     private function setTemplateRowVariables(\DOMXPath $xpath, \DOMNode $row, array $values, \DOMNode $table): void
@@ -442,7 +472,7 @@ class InventoryReportTemplateController extends ModuleBaseController
                     'INCREASE' => 'Tăng', 'DECREASE' => 'Giảm', 'ADJUST' => 'Điều chỉnh',
                     'MOVEMENT' => 'Biến động',
                 ][$record->action] ?? $record->action;
-                $quantity = $details['quantity'] ?? abs((float) ($details['change'] ?? 0));
+                $quantity = abs((float) ($details['quantity'] ?? $details['change'] ?? 0));
                 $location = $details['install_address'] ?? $details['location'] ?? '';
                 return [
                     $number,
@@ -462,17 +492,31 @@ class InventoryReportTemplateController extends ModuleBaseController
             $material = $details['name'] ?? 'Vật tư';
             // Mẫu tăng/giảm không có cột mã ở đầu: cột 0 là tên vật tư,
             // cột 1 là ĐVT, cột 2 là phân cấp, cột 3/4 là tăng/giảm.
-            $values = array_fill(0, 16, '');
+            $values = array_fill(0, 19, '');
             $values[0] = $material;
             $values[1] = $details['unit'] ?? '';
             $values[2] = $details['grade'] ?? '';
             $values[3] = $change > 0 ? $change : '';
             $values[4] = $change < 0 ? abs($change) : '';
             $reason = mb_strtolower(trim((string) ($details['reason'] ?? $details['note'] ?? '')));
-            $reasonColumns = $change >= 0
-                ? ['mua sắm' => 6, 'mua sam' => 6, 'trên cấp' => 5, 'tăng phân cấp' => 7, 'kiểm kê' => 8]
-                : ['hao hụt' => 11, 'hao hut' => 11, 'thanh lý' => 12, 'hư hỏng' => 13, 'hư hong' => 13, 'trả trên' => 10, 'kiểm kê' => 14];
-            $values[$reasonColumns[$reason] ?? ($change >= 0 ? 9 : 15)] = $details['reason'] ?? $details['note'] ?? '';
+            $columnName = $this->increaseDecreaseReasonColumn((string) ($details['reason_code'] ?? ''), $reason, $change);
+            $reasonColumns = [
+                'tren_cap' => 5,
+                'dieu_dong_den' => 6,
+                'mua_sam' => 7,
+                'kiem_ke_tang' => 8,
+                'tang_phan_cap' => 9,
+                'tang_khac' => 10,
+                'tra_tren' => 11,
+                'dieu_dong_di' => 12,
+                'hao_hut' => 13,
+                'hu_hong' => 14,
+                'kiem_ke_giam' => 15,
+                'thanh_ly' => 16,
+                'giam_phan_cap' => 17,
+                'giam_khac' => 18,
+            ];
+            $values[$reasonColumns[$columnName] ?? ($change >= 0 ? 10 : 18)] = $details['reason'] ?? $details['note'] ?? '';
             return $values;
         }
         if ($record instanceof InventoryWarehouseItem) {
@@ -541,12 +585,15 @@ class InventoryReportTemplateController extends ModuleBaseController
             return $row;
         }
         if ($record instanceof InventoryAuditLog) {
+            if ($type === 'increase-decrease') {
+                return array_merge($row, $this->increaseDecreaseRow($record));
+            }
             $details = (array) $record->details;
             $row['ngay_du_lieu'] = optional($record->created_at)->format('d/m/Y');
             $row['ma_vat_tu'] = (string) ($details['asset_code'] ?? $details['code'] ?? '');
             $row['ten_vat_tu'] = (string) ($details['name'] ?? 'Vật tư');
             $row['don_vi_tinh'] = (string) ($details['unit'] ?? '');
-            $row['so_luong'] = (string) ($details['quantity'] ?? abs((float) ($details['change'] ?? 0)));
+            $row['so_luong'] = (string) abs((float) ($details['quantity'] ?? $details['change'] ?? 0));
             $row['phan_cap'] = (string) ($details['grade'] ?? '');
             $row['loai_bien_dong'] = ['CREATE' => 'Thêm mới', 'UPDATE' => 'Cập nhật', 'IMPORT' => 'Import', 'INCREASE' => 'Tăng', 'DECREASE' => 'Giảm', 'ADJUST' => 'Điều chỉnh', 'MOVEMENT' => 'Biến động'][$record->action] ?? $record->action;
             $row['truoc'] = (string) ($details['before'] ?? '');
@@ -602,6 +649,22 @@ class InventoryReportTemplateController extends ModuleBaseController
             'don_vi_tinh' => '',
             'so_luong' => '',
             'phan_cap' => '',
+            'so_luong_tang' => '',
+            'so_luong_giam' => '',
+            'tren_cap' => '',
+            'dieu_dong_den' => '',
+            'mua_sam' => '',
+            'kiem_ke_tang' => '',
+            'tang_phan_cap' => '',
+            'tang_khac' => '',
+            'tra_tren' => '',
+            'dieu_dong_di' => '',
+            'hao_hut' => '',
+            'hu_hong' => '',
+            'kiem_ke_giam' => '',
+            'thanh_ly' => '',
+            'giam_phan_cap' => '',
+            'giam_khac' => '',
             'trang_thai' => '',
             'toa_nha' => '',
             'phong' => '',

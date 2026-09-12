@@ -1,10 +1,145 @@
 <div class="space-y-4">
-    <div class="flex items-center justify-between rounded border bg-white p-4"><div><p class="text-xs uppercase text-slate-500">{{ $isRoot ? 'Ngành vật tư' : 'Loại vật tư thuộc ngành '.$category->parent?->code }}</p><h2 class="text-xl font-bold">{{ $category->code }} — {{ $category->name }}</h2></div><a href="{{ route('inventory.category') }}" class="rounded border px-3 py-2">Quay lại danh mục vật tư</a></div>
+    <div class="flex items-center justify-between rounded border bg-white p-4">
+        <div>
+            <p class="text-xs uppercase text-slate-500">{{ $isRoot ? 'Ngành vật tư' : 'Loại vật tư thuộc ngành '.$category->parent?->code }}</p>
+            <h2 class="text-xl font-bold">{{ $category->code }} — {{ $category->name }}</h2>
+        </div>
+        <a href="{{ route('inventory.category') }}" class="rounded border px-3 py-2">Quay lại danh mục vật tư</a>
+    </div>
+
     @if($isRoot)
-        <form method="POST" action="{{ route('inventory.category.store') }}" class="grid gap-3 rounded border bg-white p-4 md:grid-cols-3">@csrf<input type="hidden" name="parent_id" value="{{ $category->id }}"><h2 class="md:col-span-3 font-semibold">Thêm loại vật tư thuộc {{ $category->code }}</h2><input name="name" required placeholder="Tên loại vật tư" class="rounded border p-2 md:col-span-2"><button class="rounded bg-blue-600 px-4 py-2 text-white">Thêm loại — tự sinh mã</button><p class="text-xs text-slate-500 md:col-span-3">Mã được sinh tuần tự theo ngành: {{ $category->code }}01, {{ $category->code }}02...</p></form>
-        <div class="overflow-x-auto rounded border bg-white p-4"><h2 class="mb-3 font-semibold">Các loại vật tư trong ngành</h2><table class="w-full min-w-[900px] text-left text-sm"><thead class="bg-slate-100"><tr><th class="p-3">STT</th><th class="p-3">Mã loại</th><th class="p-3">Tên loại</th><th class="p-3">Số vật tư</th><th class="p-3">Thao tác</th></tr></thead><tbody>@forelse($category->children as $i=>$type)<tr class="border-t"><td class="p-3">{{ $i+1 }}</td><td class="p-3 font-semibold">{{ $type->code }}</td><td class="p-3">{{ $type->name }}</td><td class="p-3">{{ $type->materials_count }}</td><td class="p-3"><div class="flex flex-wrap gap-2"><a href="{{ route('inventory.category.show',$type) }}" class="rounded border border-slate-300 px-3 py-1.5 text-xs font-bold text-slate-700">Chi tiết</a><button type="button" class="rounded bg-blue-600 px-3 py-1.5 text-xs font-bold text-white" onclick="document.getElementById('category-type-edit-{{ $type->id }}').classList.toggle('hidden')">Sửa</button><form method="POST" action="{{ route('inventory.category.delete',$type) }}" onsubmit="return confirm('Xóa loại vật tư này?');">@csrf @method('DELETE')<button class="rounded bg-rose-600 px-3 py-1.5 text-xs font-bold text-white">Xóa</button></form></div></td></tr><tr id="category-type-edit-{{ $type->id }}" class="hidden bg-blue-50/60"><td colspan="5" class="p-4"><form method="POST" action="{{ route('inventory.category.update',$type) }}" class="grid gap-3 rounded border bg-white p-4 md:grid-cols-2">@csrf @method('PATCH')<label class="text-sm font-semibold">Tên loại<input name="name" value="{{ $type->name }}" required class="mt-1 w-full rounded border p-2"></label><label class="text-sm font-semibold">Mô tả<input name="description" value="{{ $type->description }}" class="mt-1 w-full rounded border p-2"></label><button class="w-fit rounded bg-blue-600 px-4 py-2 text-white">Lưu</button></form></td></tr>@empty<tr><td colspan="5" class="p-4 text-center text-slate-500">Ngành chưa có loại vật tư.</td></tr>@endforelse</tbody></table></div>
+        <form method="POST" action="{{ route('inventory.category.store') }}" class="grid gap-3 rounded border bg-white p-4 md:grid-cols-3">
+            @csrf
+            <input type="hidden" name="parent_id" value="{{ $category->id }}">
+            <h2 class="font-semibold md:col-span-3">Thêm loại vật tư thuộc {{ $category->code }}</h2>
+            <input name="name" required placeholder="Tên loại vật tư" class="rounded border p-2 md:col-span-2">
+            <button class="rounded bg-blue-600 px-4 py-2 text-white">Thêm loại — tự sinh mã</button>
+            <p class="text-xs text-slate-500 md:col-span-3">Mã được sinh tuần tự theo ngành: {{ $category->code }}01, {{ $category->code }}02...</p>
+        </form>
+
+        <form method="POST" action="{{ route('inventory.import') }}" enctype="multipart/form-data" class="rounded border bg-white p-4">
+            @csrf
+            <input type="hidden" name="import_type" value="category">
+            <input type="hidden" name="industry_id" value="{{ $category->id }}">
+            <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                    <h2 class="font-semibold">Import loại vật tư vào {{ $category->code }}</h2>
+                    <p class="mt-1 text-sm text-slate-500">File chỉ cần Mã loại vật tư và Tên loại vật tư.</p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    <a href="{{ route('inventory.import.template', ['type' => 'category']) }}" class="rounded border px-4 py-2">Tải mẫu Excel (.xlsx)</a>
+                    <a href="{{ route('inventory.import.template.word', ['type' => 'category']) }}" class="rounded border px-4 py-2">Tải mẫu DOCX (.docx)</a>
+                </div>
+            </div>
+            <div class="grid gap-3 md:grid-cols-4">
+                <input name="file" type="file" accept=".xlsx,.xls,.csv,.txt,.docx" required class="rounded border p-2 md:col-span-3">
+                <button class="rounded bg-slate-700 px-4 py-2 text-white">Import loại vật tư</button>
+            </div>
+        </form>
+
+        <div class="overflow-x-auto rounded border bg-white p-4">
+            <h2 class="mb-3 font-semibold">Các loại vật tư trong ngành</h2>
+            <table class="w-full min-w-[900px] text-left text-sm">
+                <thead class="bg-slate-100"><tr><th class="p-3">STT</th><th class="p-3">Mã loại</th><th class="p-3">Tên loại</th><th class="p-3">Số vật tư</th><th class="p-3">Thao tác</th></tr></thead>
+                <tbody>
+                    @forelse($category->children as $i=>$type)
+                        <tr class="border-t">
+                            <td class="p-3">{{ $i+1 }}</td>
+                            <td class="p-3 font-semibold">{{ $type->code }}</td>
+                            <td class="p-3">{{ $type->name }}</td>
+                            <td class="p-3">{{ $type->materials_count }}</td>
+                            <td class="p-3">
+                                <div class="flex flex-wrap gap-2">
+                                    <a href="{{ route('inventory.category.show',$type) }}" class="rounded border border-slate-300 px-3 py-1.5 text-xs font-bold text-slate-700">Chi tiết</a>
+                                    <button type="button" class="rounded bg-blue-600 px-3 py-1.5 text-xs font-bold text-white" onclick="document.getElementById('category-type-edit-{{ $type->id }}').classList.toggle('hidden')">Sửa</button>
+                                    <form method="POST" action="{{ route('inventory.category.delete',$type) }}" onsubmit="return confirm('Xóa loại vật tư này?');">@csrf @method('DELETE')<button class="rounded bg-rose-600 px-3 py-1.5 text-xs font-bold text-white">Xóa</button></form>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr id="category-type-edit-{{ $type->id }}" class="hidden bg-blue-50/60">
+                            <td colspan="5" class="p-4">
+                                <form method="POST" action="{{ route('inventory.category.update',$type) }}" class="grid gap-3 rounded border bg-white p-4 md:grid-cols-2">
+                                    @csrf @method('PATCH')
+                                    <label class="text-sm font-semibold">Tên loại<input name="name" value="{{ $type->name }}" required class="mt-1 w-full rounded border p-2"></label>
+                                    <label class="text-sm font-semibold">Mô tả<input name="description" value="{{ $type->description }}" class="mt-1 w-full rounded border p-2"></label>
+                                    <button class="w-fit rounded bg-blue-600 px-4 py-2 text-white">Lưu</button>
+                                </form>
+                            </td>
+                        </tr>
+                    @empty
+                        <tr><td colspan="5" class="p-4 text-center text-slate-500">Ngành chưa có loại vật tư.</td></tr>
+                    @endforelse
+                </tbody>
+            </table>
+        </div>
     @else
-        <div class="grid gap-4 lg:grid-cols-2"><form method="POST" action="{{ route('inventory.store') }}" class="grid gap-3 rounded border bg-white p-4 md:grid-cols-2">@csrf<input type="hidden" name="category_id" value="{{ $category->id }}"><h2 class="font-semibold md:col-span-2">Thêm vật tư vào {{ $category->code }}</h2><input name="code" required placeholder="Mã vật tư" class="rounded border p-2"><input name="name" required placeholder="Tên vật tư" class="rounded border p-2"><input name="unit" required value="cái" placeholder="Đơn vị tính" class="rounded border p-2"><input name="quantity" type="number" min="0" step=".01" value="0" placeholder="Số lượng" class="rounded border p-2"><input name="manufacture_year" type="number" placeholder="Năm sản xuất" class="rounded border p-2"><input name="usage_year" type="number" placeholder="Năm sử dụng" class="rounded border p-2"><input name="classification" placeholder="Phân cấp" class="rounded border p-2"><input name="status" value="ACTIVE" placeholder="Trạng thái" class="rounded border p-2"><label class="text-sm">Ngày mua<input name="purchase_date" type="date" class="mt-1 w-full rounded border p-2"></label><label class="text-sm">Ngày hết hạn bảo hành<input name="expiry_date" type="date" class="mt-1 w-full rounded border p-2"></label><button class="rounded bg-blue-600 px-4 py-2 text-white md:col-span-2">Thêm vật tư</button></form><form method="POST" action="{{ route('inventory.import') }}" enctype="multipart/form-data" class="rounded border bg-white p-4">@csrf<input type="hidden" name="category_id" value="{{ $category->id }}"><h2 class="mb-3 font-semibold">Import vật tư vào {{ $category->code }}</h2><p class="mb-3 text-sm text-slate-500">Tất cả dòng import sẽ thuộc loại vật tư này.</p><input name="file" type="file" accept=".xlsx,.xls,.csv" required class="w-full rounded border p-2"><div class="mt-3 flex gap-2"><button class="rounded bg-slate-700 px-4 py-2 text-white">Import</button><a href="{{ route('inventory.import.template') }}" class="rounded border px-4 py-2">Tải mẫu</a></div></form></div>
-        <div class="overflow-x-auto rounded border bg-white p-4"><h2 class="mb-3 font-semibold">Vật tư thuộc {{ $category->code }} — {{ $category->name }}</h2><table class="w-full min-w-[1200px] text-left text-sm"><thead class="bg-slate-100"><tr><th class="p-3">STT</th><th class="p-3">Mã</th><th class="p-3">Tên</th><th class="p-3">Đơn vị</th><th class="p-3">Số lượng</th><th class="p-3">Năm SX</th><th class="p-3">Năm SD</th><th class="p-3">Phân cấp</th><th class="p-3">Trạng thái</th><th class="p-3">Ngày mua</th><th class="p-3">HSD bảo hành</th><th class="p-3">Thao tác</th></tr></thead><tbody>@forelse($category->materials as $i=>$material)@php($cannotDelete = (($material->warehouse_items_count ?? 0) + ($material->proposal_items_count ?? 0) + ($material->transfers_count ?? 0)) > 0)<tr class="border-t"><td class="p-3">{{ $i+1 }}</td><td class="p-3">{{ $material->code }}</td><td class="p-3 font-semibold"><a href="{{ route('inventory.materials.show',$material) }}" class="text-blue-700 hover:underline">{{ $material->name }}</a></td><td class="p-3">{{ $material->unit }}</td><td class="p-3">{{ $material->quantity }}</td><td class="p-3">{{ $material->manufacture_year ?: '—' }}</td><td class="p-3">{{ $material->usage_year ?: '—' }}</td><td class="p-3">{{ $material->classification ?: '—' }}</td><td class="p-3">{{ $material->status ?: '—' }}</td><td class="p-3">{{ $material->purchase_date?->format('d/m/Y') ?: '—' }}</td><td class="p-3">{{ $material->expiry_date?->format('d/m/Y') ?: '—' }}</td><td class="p-3"><div class="flex flex-wrap gap-2"><button type="button" class="rounded bg-blue-600 px-3 py-1.5 text-xs font-bold text-white" onclick="document.getElementById('category-material-edit-{{ $material->id }}').classList.toggle('hidden')">Sửa</button>@if($cannotDelete)<span class="rounded border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700">Đang sử dụng</span>@else<form method="POST" action="{{ route('inventory.destroy',$material) }}" onsubmit="return confirm('Xóa vật tư này?');">@csrf @method('DELETE')<button class="rounded bg-rose-600 px-3 py-1.5 text-xs font-bold text-white">Xóa</button></form>@endif</div></td></tr><tr id="category-material-edit-{{ $material->id }}" class="hidden bg-blue-50/60"><td colspan="12" class="p-4"><form method="POST" action="{{ route('inventory.update',$material) }}" class="grid gap-3 rounded border bg-white p-4 md:grid-cols-4">@csrf @method('PATCH')<input type="hidden" name="category_id" value="{{ $category->id }}"><label class="text-sm font-semibold">Mã<input name="code" value="{{ $material->code }}" required class="mt-1 w-full rounded border p-2"></label><label class="text-sm font-semibold">Tên<input name="name" value="{{ $material->name }}" required class="mt-1 w-full rounded border p-2"></label><label class="text-sm font-semibold">Đơn vị<input name="unit" value="{{ $material->unit }}" required class="mt-1 w-full rounded border p-2"></label><label class="text-sm font-semibold">Số lượng<input name="quantity" type="number" min="0" step=".01" value="{{ $material->quantity }}" class="mt-1 w-full rounded border p-2"></label><button class="w-fit rounded bg-blue-600 px-4 py-2 text-white">Lưu</button></form></td></tr>@empty<tr><td colspan="12" class="p-4 text-center text-slate-500">Loại vật tư chưa có vật tư.</td></tr>@endforelse</tbody></table></div>
+        <div class="grid gap-4 lg:grid-cols-2">
+            <form method="POST" action="{{ route('inventory.store') }}" class="grid gap-3 rounded border bg-white p-4 md:grid-cols-2">
+                @csrf
+                <input type="hidden" name="category_id" value="{{ $category->id }}">
+                <h2 class="font-semibold md:col-span-2">Thêm vật tư vào {{ $category->code }}</h2>
+                <input name="name" required placeholder="Tên vật tư" class="rounded border p-2">
+                <input name="unit" required value="cái" placeholder="Đơn vị tính" class="rounded border p-2">
+                <p class="text-xs text-slate-500 md:col-span-2">Mã vật tư tự sinh theo mã loại {{ $category->code }}.</p>
+                <button class="rounded bg-blue-600 px-4 py-2 text-white md:col-span-2">Thêm vật tư</button>
+            </form>
+
+            <form method="POST" action="{{ route('inventory.import') }}" enctype="multipart/form-data" class="rounded border bg-white p-4">
+                @csrf
+                <input type="hidden" name="import_type" value="material">
+                <input type="hidden" name="category_id" value="{{ $category->id }}">
+                <h2 class="mb-3 font-semibold">Import vật tư vào {{ $category->code }}</h2>
+                <p class="mb-3 text-sm text-slate-500">File chỉ cần Tên vật tư và Đơn vị tính; mã vật tư tự sinh theo loại {{ $category->code }}.</p>
+                <input name="file" type="file" accept=".xlsx,.xls,.csv,.txt,.docx" required class="w-full rounded border p-2">
+                <div class="mt-3 flex flex-wrap gap-2">
+                    <button class="rounded bg-slate-700 px-4 py-2 text-white">Import vật tư</button>
+                    <a href="{{ route('inventory.import.template', ['type' => 'material', 'scoped' => 1]) }}" class="rounded border px-4 py-2">Tải mẫu Excel (.xlsx)</a>
+                    <a href="{{ route('inventory.import.template.word', ['type' => 'material', 'scoped' => 1]) }}" class="rounded border px-4 py-2">Tải mẫu DOCX (.docx)</a>
+                </div>
+            </form>
+        </div>
+
+        <div class="overflow-x-auto rounded border bg-white p-4">
+            <h2 class="mb-3 font-semibold">Vật tư thuộc {{ $category->code }} — {{ $category->name }}</h2>
+            <table class="w-full min-w-[850px] text-left text-sm">
+                <thead class="bg-slate-100"><tr><th class="p-3">STT</th><th class="p-3">Mã vật tư</th><th class="p-3">Tên vật tư</th><th class="p-3">Đơn vị tính</th><th class="p-3">Mã loại vật tư</th><th class="p-3">Thao tác</th></tr></thead>
+                <tbody>
+                    @forelse($category->materials as $i=>$material)
+                        @php($cannotDelete = (($material->warehouse_items_count ?? 0) + ($material->proposal_items_count ?? 0) + ($material->transfers_count ?? 0)) > 0)
+                        <tr class="border-t">
+                            <td class="p-3">{{ $i+1 }}</td>
+                            <td class="p-3 font-semibold">{{ $material->code }}</td>
+                            <td class="p-3"><a href="{{ route('inventory.materials.show',$material) }}" class="text-blue-700 hover:underline">{{ $material->name }}</a></td>
+                            <td class="p-3">{{ $material->unit }}</td>
+                            <td class="p-3">{{ $category->code }}</td>
+                            <td class="p-3">
+                                <div class="flex flex-wrap gap-2">
+                                    <button type="button" class="rounded bg-blue-600 px-3 py-1.5 text-xs font-bold text-white" onclick="document.getElementById('category-material-edit-{{ $material->id }}').classList.toggle('hidden')">Sửa</button>
+                                    @if($cannotDelete)
+                                        <span class="rounded border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700">Đang sử dụng</span>
+                                    @else
+                                        <form method="POST" action="{{ route('inventory.destroy',$material) }}" onsubmit="return confirm('Xóa vật tư này?');">@csrf @method('DELETE')<button class="rounded bg-rose-600 px-3 py-1.5 text-xs font-bold text-white">Xóa</button></form>
+                                    @endif
+                                </div>
+                            </td>
+                        </tr>
+                        <tr id="category-material-edit-{{ $material->id }}" class="hidden bg-blue-50/60">
+                            <td colspan="6" class="p-4">
+                                <form method="POST" action="{{ route('inventory.update',$material) }}" class="grid gap-3 rounded border bg-white p-4 md:grid-cols-4">
+                                    @csrf @method('PATCH')
+                                    <input type="hidden" name="category_id" value="{{ $category->id }}">
+                                    <label class="text-sm font-semibold">Mã vật tư<input name="code" value="{{ $material->code }}" required readonly class="mt-1 w-full rounded border bg-slate-50 p-2"></label>
+                                    <label class="text-sm font-semibold">Tên vật tư<input name="name" value="{{ $material->name }}" required class="mt-1 w-full rounded border p-2"></label>
+                                    <label class="text-sm font-semibold">Đơn vị tính<input name="unit" value="{{ $material->unit }}" required class="mt-1 w-full rounded border p-2"></label>
+                                    <button class="w-fit self-end rounded bg-blue-600 px-4 py-2 text-white">Lưu</button>
+                                </form>
+                            </td>
+                        </tr>
+                    @empty
+                        <tr><td colspan="6" class="p-4 text-center text-slate-500">Loại vật tư chưa có vật tư.</td></tr>
+                    @endforelse
+                </tbody>
+            </table>
+        </div>
     @endif
 </div>

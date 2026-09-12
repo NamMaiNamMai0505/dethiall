@@ -11,6 +11,7 @@
                 <th class="p-3">Thời gian</th>
                 <th class="p-3">Vật tư</th>
                 <th class="p-3">Số lượng</th>
+                <th class="p-3">Phân cấp</th>
                 <th class="p-3">Loại cập nhật</th>
                 <th class="p-3">Lý do</th>
                 <th class="p-3">Người thực hiện</th>
@@ -23,11 +24,13 @@
                 @php($assetCode = data_get($details, 'asset_code', data_get($details, 'code', '—')))
                 @php($assetName = data_get($details, 'name', data_get($details, 'material_name', '—')))
                 @php($quantity = (int) data_get($details, 'quantity', abs((int) data_get($details, 'change', data_get($details, 'quantity_processed', 0)))))
+                @php($grade = data_get($details, 'grade', data_get($details, 'classification', '—')))
                 @php($reason = data_get($details, 'reason', data_get($details, 'note', data_get($details, 'decision_note', '—'))))
                 <tr class="border-t">
                     <td class="p-3">{{ $item->created_at?->format('d/m/Y H:i') }}</td>
                     <td class="p-3">{{ $assetCode }} — {{ $assetName }}</td>
                     <td class="p-3">{{ $quantity }}</td>
+                    <td class="p-3">{{ $grade === '—' ? '—' : 'Cấp '.$grade }}</td>
                     <td class="p-3">{{ $inventoryActionLabels[$item->action] ?? $item->action }}</td>
                     <td class="p-3">{{ $reason }}</td>
                     <td class="p-3">{{ $item->user?->name ?: '—' }}</td>
@@ -48,7 +51,7 @@
                 </tr>
                 @if($canEditInventoryLog)
                     <tr id="audit-log-edit-{{ $item->id }}" class="hidden bg-blue-50/60">
-                        <td colspan="7" class="p-4">
+                        <td colspan="8" class="p-4">
                             <form method="POST" action="{{ route('inventory.logs.update', $item) }}" class="grid gap-3 rounded border bg-white p-4 md:grid-cols-3">
                                 @csrf
                                 @method('PATCH')
@@ -64,7 +67,7 @@
                     </tr>
                 @endif
             @empty
-                <tr><td colspan="7" class="p-5 text-center text-slate-500">Chưa có nhật ký cập nhật vật tư.</td></tr>
+                <tr><td colspan="8" class="p-5 text-center text-slate-500">Chưa có nhật ký cập nhật vật tư.</td></tr>
             @endforelse
         </tbody>
     </table>

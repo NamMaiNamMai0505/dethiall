@@ -21,9 +21,8 @@ class InventoryMaterial extends Model
     {
         $category = $this->category;
         $categoryPath = trim(($category?->parent?->code ? $category->parent->code.' / ' : '').($category?->code ?: ''));
-        $classification = trim((string) ($this->classification ?: 'Chưa phân cấp'));
 
-        return collect([$this->code, $this->name, $categoryPath ?: null, $classification])
+        return collect([$this->code, $this->name, $categoryPath ?: null])
             ->filter(fn ($part) => $part !== null && $part !== '')
             ->implode(' — ');
     }
