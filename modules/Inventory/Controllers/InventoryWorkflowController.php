@@ -108,7 +108,82 @@ class InventoryWorkflowController extends ModuleBaseController
     public function categoryShow(InventoryCategory $category){$roomIds=$this->assignedInventoryRoomIds();$materialIds=$this->scopedMaterialIds($roomIds);$categoryIds=$this->scopedCategoryIds($materialIds);abort_if($categoryIds!==null&&!in_array((int)$category->id,$categoryIds,true),403,'Tài khoản này không được gán ngành / loại vật tư này.');$category->load(['parent','children'=>fn($q)=>$q->when($categoryIds!==null,fn($x)=>$x->whereIn('id',$categoryIds))->withCount(['materials'=>fn($m)=>$m->when($materialIds!==null,fn($x)=>$x->whereIn('id',$materialIds))])->orderBy('code'),'materials'=>fn($q)=>$q->when($materialIds!==null,fn($x)=>$x->whereIn('id',$materialIds))->with('category')->withCount(['assets','warehouseItems','proposalItems','transfers','movements'])]);return view('inventory::feature',['section'=>'category-detail','title'=>'Chi tiết '.$category->name,'category'=>$category,'isRoot'=>$category->parent_id===null]);}
     public function categoryStore(Request $r){$d=$r->validate(['parent_id'=>'nullable|exists:inventory_categories,id','code'=>'nullable|string|max:50|unique:inventory_categories,code','name'=>'required|string|max:255','description'=>'nullable|string']);if(!empty($d['parent_id'])){$parent=InventoryCategory::findOrFail($d['parent_id']);$prefix=$parent->code;$next=InventoryCategory::where('parent_id',$parent->id)->get()->map(fn($x)=>(int) substr($x->code,strlen($prefix)))->max()+1;$d['code']=$prefix.str_pad((string)$next,2,'0',STR_PAD_LEFT);}else{abort_if(empty($d['code']),422,'Ngành gốc phải có mã ngành.');}InventoryCategory::create($d);return back()->with('success','Đã thêm ngành/loại vật tư.');}
     public function categoryUpdate(Request $r,InventoryCategory $category){$rules=['name'=>'required|string|max:255','description'=>'nullable|string'];if($category->parent_id===null)$rules['code']='required|string|max:50|unique:inventory_categories,code,'.$category->id;$category->update($r->validate($rules));return back()->with('success','Đã cập nhật danh mục.');}
-    public function categoryDelete(InventoryCategory $category){if($category->materials()->exists()||$category->children()->exists())return back()->withErrors(['category'=>'Không thể xóa danh mục đang có dữ liệu con.']);$category->delete();return back()->with('success','Đã xóa danh mục.');}
+    public function categoryDelete(InventoryCategory $category)
+    {
+        $summary = $this->categoryDeleteSummary($category);
+
+        if ($summary['blocked']) {
+            return back()->withErrors([
+                'category' => 'Không thể xóa danh mục vì có vật tư đang liên kết '.implode(', ', $summary['blocked']).'. Hãy xử lý dữ liệu liên quan trước.',
+            ]);
+        }
+
+        DB::transaction(function () use ($category, $summary): void {
+            foreach ($summary['materials'] as $material) {
+                $material->assets()->delete();
+                $material->delete();
+            }
+
+            InventoryUserCategory::whereIn('category_id', $summary['category_ids'])->delete();
+            foreach (array_reverse($summary['category_ids']) as $categoryId) {
+                InventoryCategory::whereKey($categoryId)->delete();
+            }
+
+            InventoryAuditLog::create([
+                'user_id' => auth()->id(),
+                'action' => 'DELETE',
+                'entity_type' => 'category',
+                'entity_id' => $category->id,
+                'details' => [
+                    'code' => $category->code,
+                    'name' => $category->name,
+                    'categories_deleted' => count($summary['category_ids']),
+                    'materials_deleted' => $summary['materials']->count(),
+                    'room_assets_deleted' => $summary['assets_count'],
+                ],
+            ]);
+        });
+
+        return back()->with('success', 'Đã xóa danh mục cùng toàn bộ loại vật tư, vật tư và vật tư trong phòng liên quan.');
+    }
+
+    private function categoryDeleteSummary(InventoryCategory $category): array
+    {
+        $categoryIds = $this->categoryTreeIds($category);
+        $materials = InventoryMaterial::withCount(['assets', 'warehouseItems', 'proposalItems', 'transfers'])
+            ->whereIn('category_id', $categoryIds)
+            ->get();
+
+        $blocked = [];
+        if ($materials->sum('warehouse_items_count') > 0) {
+            $blocked[] = 'vật tư trong kho';
+        }
+        if ($materials->sum('proposal_items_count') > 0) {
+            $blocked[] = 'phiếu đề xuất';
+        }
+        if ($materials->sum('transfers_count') > 0) {
+            $blocked[] = 'phiếu điều động';
+        }
+
+        return [
+            'category_ids' => $categoryIds,
+            'materials' => $materials,
+            'assets_count' => (int) $materials->sum('assets_count'),
+            'blocked' => $blocked,
+        ];
+    }
+
+    private function categoryTreeIds(InventoryCategory $category): array
+    {
+        $ids = [(int) $category->id];
+        $children = InventoryCategory::where('parent_id', $category->id)->get();
+
+        foreach ($children as $child) {
+            array_push($ids, ...$this->categoryTreeIds($child));
+        }
+
+        return array_values(array_unique($ids));
+    }
 
     public function assets(Request $r){$roomIds=$this->assignedInventoryRoomIds($r->user());$materialIds=$this->scopedMaterialIds($roomIds);$categoryIds=$this->scopedCategoryIds($materialIds);$buildingIds=$this->scopedBuildingIds($roomIds);$assets=InventoryAsset::with(['material.category.parent','categoryRelation.parent','classroom'])->when($roomIds!==null,fn($q)=>$q->whereIn('classroom_id',$roomIds))->when($r->search,fn($q,$s)=>$q->where(fn($x)=>$x->where('asset_code','like',"%$s%")->orWhere('name','like',"%$s%")))->latest()->paginate(20)->withQueryString();$allAssets=InventoryAsset::with(['material.category.parent','categoryRelation.parent','classroom'])->when($roomIds!==null,fn($q)=>$q->whereIn('classroom_id',$roomIds))->latest()->get();$auditLogs=InventoryAuditLog::with('user')->latest()->limit(100)->get()->each->resolveDetails();return view('inventory::feature',['section'=>'assets','title'=>'Cập nhật vật tư','assets'=>$assets,'allAssets'=>$allAssets,'auditLogs'=>$auditLogs,'materials'=>InventoryMaterial::with('category.parent')->when($materialIds!==null,fn($q)=>$q->whereIn('id',$materialIds))->orderBy('name')->get(),'classrooms'=>Classroom::active()->when($roomIds!==null,fn($q)=>$q->whereIn('id',$roomIds))->orderBy('name')->get(),'categories'=>InventoryCategory::whereNotNull('parent_id')->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get(),'industries'=>InventoryCategory::whereNull('parent_id')->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get(),'buildings'=>Building::when($buildingIds!==null,fn($q)=>$q->whereIn('id',$buildingIds))->orderBy('name')->get(),'units'=>\Modules\Unit\Models\Unit::active()->orderBy('name')->get()]);}
     public function assetBulkStoreDelta(Request $r)
