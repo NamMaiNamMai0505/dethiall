@@ -17,4 +17,14 @@ class InventoryMaterial extends Model
     public function warehouseItems() { return $this->hasMany(InventoryWarehouseItem::class, 'material_id'); }
     public function proposalItems() { return $this->hasMany(InventoryProposalItem::class, 'material_id'); }
     public function transfers() { return $this->hasMany(InventoryTransfer::class, 'material_id'); }
+    public function getInventoryDisplayNameAttribute(): string
+    {
+        $category = $this->category;
+        $categoryPath = trim(($category?->parent?->code ? $category->parent->code.' / ' : '').($category?->code ?: ''));
+        $classification = trim((string) ($this->classification ?: 'Chưa phân cấp'));
+
+        return collect([$this->code, $this->name, $categoryPath ?: null, $classification])
+            ->filter(fn ($part) => $part !== null && $part !== '')
+            ->implode(' — ');
+    }
 }

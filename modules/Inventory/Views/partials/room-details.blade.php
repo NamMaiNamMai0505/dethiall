@@ -40,7 +40,7 @@
                     <option value="">Chọn thiết bị hỏng</option>
                     @foreach($breakReportAssets as $asset)
                         @php($sourceKey = (string) ($asset->material?->category_id ?: ('asset-category-'.md5((string) ($asset->category ?: 'khac')))))
-                        <option value="{{ $asset->id }}" data-source-key="{{ $sourceKey }}" data-quantity="{{ (float) $asset->quantity }}" @selected(old('asset_id') == $asset->id)>{{ $asset->asset_code ?: '—' }} — {{ $asset->name }} ({{ (float) $asset->quantity }} {{ $asset->unit }})</option>
+                        <option value="{{ $asset->id }}" data-source-key="{{ $sourceKey }}" data-quantity="{{ (float) $asset->quantity }}" @selected(old('asset_id') == $asset->id)>{{ $asset->inventory_display_name }} ({{ (float) $asset->quantity }} {{ $asset->unit }})</option>
                     @endforeach
                 </select>
             </label>

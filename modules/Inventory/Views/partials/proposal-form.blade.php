@@ -65,14 +65,9 @@
                     <select name="material_picker" id="proposal-material" required class="mt-1 w-full rounded-lg border bg-white p-2.5">
                         <option value="">Chọn vật tư</option>
                         @foreach($assets as $asset)
-                            @php
-                                $assetTypeId = $asset->material?->category_id ?: $asset->category_id;
-                                $assetCode = $asset->material?->code ?: $asset->asset_code;
-                                $assetName = $asset->material?->name ?: $asset->name;
-                                $assetGrade = $asset->grade ? 'Cấp '.$asset->grade : 'Chưa phân cấp';
-                            @endphp
+                            @php($assetTypeId = $asset->material?->category_id ?: $asset->category_id)
                             @if($assetTypeId && $asset->classroom_id)
-                                <option value="asset:{{ $asset->id }}" data-type-id="{{ $assetTypeId }}" data-room-id="{{ $asset->classroom_id }}">{{ $assetCode }} — {{ $assetName }} — {{ $assetGrade }}</option>
+                                <option value="asset:{{ $asset->id }}" data-type-id="{{ $assetTypeId }}" data-room-id="{{ $asset->classroom_id }}">{{ $asset->inventory_display_name }}</option>
                             @endif
                         @endforeach
                     </select>
@@ -104,15 +99,11 @@
     ])->values();
     $proposalAssetOptions = ($assets ?? collect())->map(function ($asset) {
         $type = $asset->material?->category ?: $asset->categoryRelation;
-        $code = $asset->material?->code ?: $asset->asset_code;
-        $name = $asset->material?->name ?: $asset->name;
-        $grade = $asset->grade ? 'Cấp '.$asset->grade : 'Chưa phân cấp';
-
         return [
             'value' => 'asset:'.$asset->id,
             'asset' => (string) $asset->id,
             'material' => $asset->material_id ? (string) $asset->material_id : '',
-            'text' => trim($code.' — '.$name.' — '.$grade),
+            'text' => $asset->inventory_display_name,
             'type' => (string) ($asset->material?->category_id ?: $asset->category_id),
             'rooms' => [$asset->classroom_id ? (string) $asset->classroom_id : ''],
         ];
