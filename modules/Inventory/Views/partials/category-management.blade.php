@@ -25,7 +25,32 @@
             </div>
         </div>
 
-        <div class="grid gap-4 p-5 lg:grid-cols-2">
+        <div class="grid gap-4 p-5 xl:grid-cols-3">
+            <form method="POST" action="{{ route('inventory.import') }}" enctype="multipart/form-data" class="rounded-xl border border-emerald-100 bg-emerald-50/50 p-4 xl:col-span-3">
+                @csrf
+                <input type="hidden" name="update_type" value="IN">
+                <input type="hidden" name="reason" value="Import cây danh mục vật tư">
+                <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+                    <div class="flex items-center gap-2">
+                        <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-600 text-white"><i class="bi bi-file-earmark-arrow-up"></i></span>
+                        <h3 class="font-bold text-slate-900">Import ngành / loại / vật tư</h3>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <a href="{{ route('inventory.import.template') }}" class="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white shadow-sm hover:bg-emerald-700"><i class="bi bi-file-earmark-excel"></i> Mẫu Excel</a>
+                        <a href="{{ route('inventory.import.template.word') }}" class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white shadow-sm hover:bg-blue-700"><i class="bi bi-file-earmark-word"></i> Mẫu DOCX</a>
+                    </div>
+                </div>
+                <div class="grid gap-3 lg:grid-cols-4">
+                    <label class="text-sm font-semibold text-slate-700 lg:col-span-3">File import cây danh mục <span class="text-red-600">*</span>
+                        <input name="file" type="file" accept=".xlsx,.xls,.csv,.txt,.docx" required class="mt-1 w-full rounded-lg border bg-white p-2.5">
+                        <span class="mt-1 block text-xs font-medium text-slate-500">Có thể import riêng Ngành, Ngành + Loại, hoặc đầy đủ Ngành + Loại + Vật tư.</span>
+                    </label>
+                    <button class="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2.5 font-bold text-white lg:self-end">
+                        <i class="bi bi-upload"></i> Import cây
+                    </button>
+                </div>
+            </form>
+
             <form method="POST" action="{{ route('inventory.category.store') }}" class="rounded-xl border border-blue-100 bg-blue-50/50 p-4">
                 @csrf
                 <div class="mb-3 flex items-center gap-2">
