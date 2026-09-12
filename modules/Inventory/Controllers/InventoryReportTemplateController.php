@@ -202,8 +202,8 @@ class InventoryReportTemplateController extends ModuleBaseController
         } elseif (in_array($type, ['transfer', 'recall'], true)) {
             $rowsData = InventoryTransfer::with(['asset', 'material', 'fromClassroom.managingUnit', 'toClassroom.managingUnit'])->where('type', $type === 'recall' ? 'RECALL' : 'TRANSFER')->latest()->get();
         } elseif (in_array($type, ['increase-decrease', 'update-log'], true)) {
-            $actions = $type === 'increase-decrease' ? ['INCREASE', 'DECREASE', 'ADJUST'] : ['UPDATE', 'IMPORT', 'INCREASE', 'DECREASE', 'ADJUST', 'MOVEMENT'];
-            $rowsData = InventoryAuditLog::with('user')->whereIn('action', $actions)
+            $rowsData = InventoryAuditLog::with('user')->whereIn('action', ['INCREASE', 'DECREASE', 'ADJUST'])
+                ->whereIn('entity_type', ['material', 'asset'])
                 ->when($request->filled('from'), fn ($q) => $q->whereDate('created_at', '>=', $request->input('from')))
                 ->when($request->filled('to'), fn ($q) => $q->whereDate('created_at', '<=', $request->input('to')))
                 ->latest()->get();
@@ -241,11 +241,13 @@ class InventoryReportTemplateController extends ModuleBaseController
             $rowsData = collect([$rowsData->first()]);
         } elseif ($type === 'increase-decrease') {
             $rowsData = InventoryAuditLog::with('user')->whereIn('action', ['INCREASE', 'DECREASE', 'ADJUST'])
+                ->whereIn('entity_type', ['material', 'asset'])
                 ->when($request->filled('from'), fn ($q) => $q->whereDate('created_at', '>=', $request->input('from')))
                 ->when($request->filled('to'), fn ($q) => $q->whereDate('created_at', '<=', $request->input('to')))
                 ->latest()->get();
         } elseif ($type === 'update-log') {
-            $rowsData = InventoryAuditLog::with('user')->whereIn('action', ['UPDATE', 'IMPORT', 'INCREASE', 'DECREASE', 'ADJUST', 'MOVEMENT'])
+            $rowsData = InventoryAuditLog::with('user')->whereIn('action', ['INCREASE', 'DECREASE', 'ADJUST'])
+                ->whereIn('entity_type', ['material', 'asset'])
                 ->when($request->filled('from'), fn ($q) => $q->whereDate('created_at', '>=', $request->input('from')))
                 ->when($request->filled('to'), fn ($q) => $q->whereDate('created_at', '<=', $request->input('to')))
                 ->latest()->get();
