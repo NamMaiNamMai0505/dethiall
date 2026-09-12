@@ -135,7 +135,7 @@ class InventoryController extends ModuleBaseController
     }
     public function index(Request $request){$roomIds=$this->assignedInventoryRoomIds($request->user());$materialIds=$this->scopedMaterialIds($roomIds);$categoryIds=$this->scopedCategoryIds($materialIds);$buildingIds=$roomIds===null?null:\Modules\Classroom\Models\Classroom::whereIn('id',$roomIds)->whereNotNull('building_id')->distinct()->pluck('building_id')->map(fn($id)=>(int)$id)->values()->all();$materials=InventoryMaterial::with(['category','building','classroom'])->withCount(['assets','warehouseItems','proposalItems','transfers','movements'])->when($materialIds!==null,fn($q)=>$q->whereIn('id',$materialIds))->when($request->search,fn($q,$s)=>$q->where(fn($x)=>$x->where('code','like',"%$s%")->orWhere('name','like',"%$s%")))->latest()->paginate(20)->withQueryString();$industries=InventoryCategory::whereNull('parent_id')->where('active',true)->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get();$categories=InventoryCategory::whereNotNull('parent_id')->where('active',true)->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get();$buildings=\Modules\Building\Models\Building::where('status',true)->when($buildingIds!==null,fn($q)=>$q->whereIn('id',$buildingIds))->orderBy('name')->get();$classrooms=\Modules\Classroom\Models\Classroom::active()->when($roomIds!==null,fn($q)=>$q->whereIn('id',$roomIds))->orderBy('name')->get();$stats=['materials'=>InventoryMaterial::when($materialIds!==null,fn($q)=>$q->whereIn('id',$materialIds))->count(),'quantity'=>InventoryMaterial::when($materialIds!==null,fn($q)=>$q->whereIn('id',$materialIds))->sum('quantity'),'pending'=>InventoryProposal::where('status','PENDING')->when($roomIds!==null,fn($q)=>$q->whereHas('items',fn($i)=>$i->whereIn('from_classroom_id',$roomIds)->orWhereIn('target_room_id',$roomIds)->orWhereHas('asset',fn($a)=>$a->whereIn('classroom_id',$roomIds))))->count()];return view('inventory::index',compact('materials','categories','industries','buildings','classrooms','stats'));}
     public function store(Request $request){$d=$request->validate(['industry_id'=>'nullable|exists:inventory_categories,id','category_id'=>'nullable|exists:inventory_categories,id','building_id'=>'nullable|exists:buildings,id','classroom_id'=>'nullable|exists:classrooms,id','code'=>'required|string|max:80|unique:inventory_materials,code','name'=>'required|string|max:255','unit'=>'required|string|max:30','quantity'=>'required|integer|min:0','min_quantity'=>'nullable|integer|min:0','price'=>'nullable|numeric|min:0','status'=>'nullable|string|max:30','manufacture_year'=>'nullable|integer|min:1900|max:2200','usage_year'=>'nullable|integer|min:1900|max:2200','classification'=>'nullable|string|max:255','asset_status'=>'nullable|string|max:30','purchase_date'=>'nullable|date','expiry_date'=>'nullable|date','location'=>'nullable|string|max:255','note'=>'nullable|string','description'=>'nullable|string']);$roomIds=$this->assignedInventoryRoomIds($request->user());abort_if($roomIds!==null&&!empty($d['classroom_id'])&&!in_array((int)$d['classroom_id'],$roomIds,true),403,'Tài khoản này không được gán phòng vật tư này.');if(!empty($d['industry_id'])&&!empty($d['category_id'])&&!InventoryCategory::whereKey($d['category_id'])->where('parent_id',$d['industry_id'])->exists())return back()->withErrors(['category_id'=>'Loại vật tư không thuộc ngành vật tư đã chọn.'])->withInput();unset($d['industry_id']);DB::transaction(function()use($d,$request){$m=InventoryMaterial::create($d);if((int)$d['quantity']>0)InventoryMovement::create(['material_id'=>$m->id,'type'=>'IN','quantity'=>$d['quantity'],'note'=>'Opening stock','created_by'=>$request->user()->id]);InventoryAuditLog::create(['user_id'=>$request->user()->id,'action'=>'CREATE','entity_type'=>'material','entity_id'=>$m->id,'details'=>$d]);});return back()->with('success','Đã thêm vật tư.');}
-    public function import(Request $request){$d=$request->validate(['category_id'=>'nullable|exists:inventory_categories,id','update_type'=>'nullable|in:IN,OUT','reason'=>'nullable|string|max:255','file'=>'required|file|mimes:xlsx,xls,csv,txt,docx|max:20480']);$d['update_type']=$d['update_type']??'IN';$d['reason']=$d['reason']??'Import vật tư';[$headers,$rows]=$this->readImportRows($request->file('file'));$headers=array_map(fn($v)=>$this->normalizeImportHeader($v),$headers);$missing=array_diff(['code','name'],array_filter($headers));abort_if($missing,422,'File import thiếu cột bắt buộc: '.implode(', ',$missing).'.');abort_if(empty($d['category_id'])&&!array_intersect(['category_code','category_name'],$headers),422,'File import cần có cột Mã loại hoặc Tên loại để xác định loại vật tư.');$count=0;DB::transaction(function()use($rows,$headers,$request,$d,&$count){foreach($rows as $index=>$row){$line=$index+2;$v=[];foreach($headers as $key=>$header){if($header!=='')$v[$header]=trim((string)($row[$key]??''));}if(($v['code']??'')===''&&($v['name']??'')==='')continue;abort_if(($v['code']??'')===''||($v['name']??'')==='',422,"Dòng {$line} thiếu mã hoặc tên vật tư.");$cat=!empty($d['category_id'])?InventoryCategory::find($d['category_id']):$this->resolveImportCategory($v);abort_unless($cat,422,"Dòng {$line} chưa xác định được loại vật tư. Hãy nhập Mã loại hoặc Tên loại đúng với danh mục hiện có.");$payload=['category_id'=>$cat->id,'name'=>$v['name'],'unit'=>$v['unit']??'cái','quantity'=>(float)($v['quantity']??0),'min_quantity'=>(float)($v['min_quantity']??0),'price'=>(float)($v['price']??0),'status'=>$v['status']??'ACTIVE','manufacture_year'=>($v['manufacture_year']??null)?(int)$v['manufacture_year']:null,'usage_year'=>($v['usage_year']??null)?(int)$v['usage_year']:null,'classification'=>$v['classification']??null,'asset_status'=>$v['asset_status']??'NORMAL','purchase_date'=>$v['purchase_date']??null,'expiry_date'=>$v['expiry_date']??null,'location'=>$v['location']??null,'note'=>$v['note']??null,'description'=>$v['description']??null];$m=InventoryMaterial::updateOrCreate(['code'=>$v['code']],$payload);if((float)$payload['quantity']>0)InventoryMovement::create(['material_id'=>$m->id,'type'=>$d['update_type'],'quantity'=>$payload['quantity'],'note'=>$d['reason'],'created_by'=>$request->user()->id]);InventoryAuditLog::create(['user_id'=>$request->user()->id,'action'=>'IMPORT','entity_type'=>'material','entity_id'=>$m->id,'details'=>$payload+['code'=>$v['code'],'industry_code'=>$v['industry_code']??null,'category_code'=>$v['category_code']??null,'update_type'=>$d['update_type'],'reason'=>$d['reason']]]);$count++;}});return back()->with('success',"Đã import {$count} dòng vật tư.");}
+    public function import(Request $request){$d=$request->validate(['category_id'=>'nullable|exists:inventory_categories,id','update_type'=>'nullable|in:IN,OUT','reason'=>'nullable|string|max:255','file'=>'required|file|mimes:xlsx,xls,csv,txt,docx|max:20480']);$d['update_type']=$d['update_type']??'IN';$d['reason']=$d['reason']??'Import vật tư';[$headers,$rows]=$this->readImportRows($request->file('file'));$headers=array_map(fn($v)=>$this->normalizeImportHeader($v),$headers);$missing=array_diff(['code','name'],array_filter($headers));abort_if($missing,422,'File import thiếu cột bắt buộc: '.implode(', ',$missing).'.');abort_if(empty($d['category_id'])&&!array_intersect(['category_code','category_name'],$headers),422,'File import cần có cột Mã loại hoặc Tên loại để tạo/xác định loại vật tư.');$count=0;DB::transaction(function()use($rows,$headers,$request,$d,&$count){foreach($rows as $index=>$row){$line=$index+2;$v=[];foreach($headers as $key=>$header){if($header!=='')$v[$header]=trim((string)($row[$key]??''));}if(($v['code']??'')===''&&($v['name']??'')==='')continue;abort_if(($v['code']??'')===''||($v['name']??'')==='',422,"Dòng {$line} thiếu mã hoặc tên vật tư.");$cat=!empty($d['category_id'])?InventoryCategory::find($d['category_id']):$this->resolveOrCreateImportCategory($v,$line);abort_unless($cat,422,"Dòng {$line} chưa xác định được loại vật tư. Hãy nhập Mã loại hoặc Tên loại.");$payload=['category_id'=>$cat->id,'name'=>$v['name'],'unit'=>$v['unit']??'cái','quantity'=>(float)($v['quantity']??0),'min_quantity'=>(float)($v['min_quantity']??0),'price'=>(float)($v['price']??0),'status'=>$v['status']??'ACTIVE','manufacture_year'=>($v['manufacture_year']??null)?(int)$v['manufacture_year']:null,'usage_year'=>($v['usage_year']??null)?(int)$v['usage_year']:null,'classification'=>$v['classification']??null,'asset_status'=>$v['asset_status']??'NORMAL','purchase_date'=>$v['purchase_date']??null,'expiry_date'=>$v['expiry_date']??null,'location'=>$v['location']??null,'note'=>$v['note']??null,'description'=>$v['description']??null];$m=InventoryMaterial::updateOrCreate(['code'=>$v['code']],$payload);if((float)$payload['quantity']>0)InventoryMovement::create(['material_id'=>$m->id,'type'=>$d['update_type'],'quantity'=>$payload['quantity'],'note'=>$d['reason'],'created_by'=>$request->user()->id]);InventoryAuditLog::create(['user_id'=>$request->user()->id,'action'=>'IMPORT','entity_type'=>'material','entity_id'=>$m->id,'details'=>$payload+['code'=>$v['code'],'industry_code'=>$v['industry_code']??null,'category_code'=>$v['category_code']??null,'update_type'=>$d['update_type'],'reason'=>$d['reason']]]);$count++;}});return back()->with('success',"Đã import {$count} dòng vật tư.");}
     private function normalizeImportHeader($header): string
     {
         $key = mb_strtolower(trim((string) $header));
@@ -164,7 +164,7 @@ class InventoryController extends ModuleBaseController
 
         return $map[$key] ?? $key;
     }
-    private function resolveImportCategory(array $values): ?InventoryCategory
+    private function resolveOrCreateImportCategory(array $values, int $line): ?InventoryCategory
     {
         $industry = null;
         if (($values['industry_code'] ?? '') !== '') {
@@ -174,18 +174,45 @@ class InventoryController extends ModuleBaseController
             $industry = InventoryCategory::whereNull('parent_id')->where('name', $values['industry_name'])->first();
         }
 
-        $query = InventoryCategory::query()->whereNotNull('parent_id');
-        if ($industry) {
-            $query->where('parent_id', $industry->id);
-        }
-        if (($values['category_code'] ?? '') !== '') {
-            return (clone $query)->where('code', $values['category_code'])->first();
-        }
-        if (($values['category_name'] ?? '') !== '') {
-            return (clone $query)->where('name', $values['category_name'])->first();
+        if (! $industry) {
+            $industryCode = trim((string) ($values['industry_code'] ?? ''));
+            $industryName = trim((string) ($values['industry_name'] ?? ''));
+            abort_if($industryCode === '' || $industryName === '', 422, "Dòng {$line} cần có Mã ngành và Tên ngành để tạo ngành vật tư.");
+            $industry = InventoryCategory::create([
+                'code' => $industryCode,
+                'name' => $industryName,
+                'active' => true,
+            ]);
         }
 
-        return null;
+        $query = InventoryCategory::query()->where('parent_id', $industry->id);
+        if (($values['category_code'] ?? '') !== '') {
+            $category = (clone $query)->where('code', $values['category_code'])->first();
+            if ($category) return $category;
+        }
+        if (($values['category_name'] ?? '') !== '') {
+            $category = (clone $query)->where('name', $values['category_name'])->first();
+            if ($category) return $category;
+        }
+
+        $categoryCode = trim((string) ($values['category_code'] ?? ''));
+        $categoryName = trim((string) ($values['category_name'] ?? ''));
+        abort_if($categoryName === '', 422, "Dòng {$line} cần có Tên loại để tạo loại vật tư.");
+
+        if ($categoryCode === '') {
+            $next = InventoryCategory::where('parent_id', $industry->id)
+                ->get()
+                ->map(fn ($item) => (int) substr((string) $item->code, strlen((string) $industry->code)))
+                ->max() + 1;
+            $categoryCode = $industry->code.str_pad((string) $next, 2, '0', STR_PAD_LEFT);
+        }
+
+        return InventoryCategory::create([
+            'parent_id' => $industry->id,
+            'code' => $categoryCode,
+            'name' => $categoryName,
+            'active' => true,
+        ]);
     }
     private function readImportRows($file): array
     {
