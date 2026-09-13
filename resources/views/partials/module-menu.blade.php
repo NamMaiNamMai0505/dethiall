@@ -18,6 +18,7 @@
                 ]],
                 ['label' => 'Nghiệp vụ', 'items' => [
                     ['label' => 'Cập nhật vật tư', 'route' => 'inventory.assets', 'icon' => 'bi-pencil-square'],
+                    ['label' => 'Quản lý tài sản công', 'route' => 'inventory.public-assets', 'icon' => 'bi-building-gear'],
                     ['label' => 'Đề xuất / Thanh lý', 'route' => 'inventory.proposals', 'icon' => 'bi-send'],
                     ['label' => 'Duyệt đề xuất', 'route' => 'inventory.proposals.approval', 'icon' => 'bi-check2-square'],
                     ['label' => 'Phân công sửa chữa', 'route' => 'inventory.repairs', 'icon' => 'bi-tools'],
@@ -104,6 +105,7 @@
         'inventory.materials' => 'inventory.materials.index',
         'inventory.warehouse' => 'inventory.warehouses.index',
         'inventory.assets' => 'inventory.assets.index',
+        'inventory.public-assets' => 'inventory.reports.index',
         'inventory.proposals' => 'inventory.proposals.index',
         'inventory.proposals.approval' => 'inventory.proposals.approve',
         'inventory.repairs' => 'inventory.repairs.index',

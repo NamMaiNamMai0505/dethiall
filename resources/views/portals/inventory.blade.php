@@ -17,6 +17,7 @@
         ['route'=>'inventory.category','permission'=>'inventory.categories.index','label'=>'Danh mục vật tư','desc'=>'Cây ngành, loại và vật tư; bấm từng mục để xem chi tiết','icon'=>'bi-diagram-3'],
         ['route'=>'inventory.warehouse','permission'=>'inventory.warehouses.index','label'=>'Kho vật tư','desc'=>'Theo dõi kho và số lượng tồn','icon'=>'bi-boxes'],
         ['route'=>'inventory.assets','permission'=>'inventory.assets.index','label'=>'Cập nhật vật tư','desc'=>'Ghi nhận tăng, giảm và điều chỉnh tài sản','icon'=>'bi-pencil-square'],
+        ['route'=>'inventory.public-assets','permission'=>'inventory.reports.index','label'=>'Quản lý tài sản công','desc'=>'Theo dõi thực lực, tình trạng và khấu hao tài sản','icon'=>'bi-building-gear'],
         ['route'=>'inventory.proposals','permission'=>'inventory.proposals.index','label'=>'Đề xuất / Thanh lý','desc'=>'Mua sắm, sửa chữa, thay thế, thanh lý','icon'=>'bi-send'],
         ['route'=>'inventory.proposals.approval','permission'=>'inventory.proposals.approve','label'=>'Duyệt đề xuất','desc'=>'Xem xét, phê duyệt và in phiếu đề xuất','icon'=>'bi-check2-square'],
         ['route'=>'inventory.repairs','permission'=>'inventory.repairs.index','label'=>'Phân công sửa chữa','desc'=>'Tiếp nhận hỏng hóc và xử lý sửa chữa','icon'=>'bi-tools'],

@@ -54,6 +54,8 @@
             section table td:last-child { vertical-align: top; white-space: normal; }
         </style>
         @include('inventory::partials.assets', ['assets' => $assets, 'materials' => $materials, 'classrooms' => $classrooms])
+    @elseif($section === 'public-assets')
+        @include('inventory::partials.public-assets')
     @elseif($section === 'proposals' || $section === 'liquidation')
         <div class="mb-4 grid gap-4 md:grid-cols-3"><div class="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"><p class="text-sm text-slate-500">Số lượng vật tư đã thanh lý</p><p class="mt-2 text-3xl font-bold text-slate-900">{{ number_format((int)($liquidatedQuantity ?? 0), 0, ',', '.') }}</p></div></div>
         @include('inventory::partials.proposals')

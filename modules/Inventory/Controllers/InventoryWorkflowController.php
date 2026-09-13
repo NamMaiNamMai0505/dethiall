@@ -186,6 +186,82 @@ class InventoryWorkflowController extends ModuleBaseController
     }
 
     public function assets(Request $r){$roomIds=$this->assignedInventoryRoomIds($r->user());$materialIds=$this->scopedMaterialIds($roomIds);$categoryIds=$this->scopedCategoryIds($materialIds);$buildingIds=$this->scopedBuildingIds($roomIds);$assets=InventoryAsset::with(['material.category.parent','categoryRelation.parent','classroom'])->when($roomIds!==null,fn($q)=>$q->whereIn('classroom_id',$roomIds))->when($r->search,fn($q,$s)=>$q->where(fn($x)=>$x->where('asset_code','like',"%$s%")->orWhere('name','like',"%$s%")))->latest()->paginate(20)->withQueryString();$allAssets=InventoryAsset::with(['material.category.parent','categoryRelation.parent','classroom'])->when($roomIds!==null,fn($q)=>$q->whereIn('classroom_id',$roomIds))->latest()->get();$auditLogs=InventoryAuditLog::with('user')->whereNotIn('action',['CREATE','DELETE'])->latest()->limit(100)->get()->each->resolveDetails();return view('inventory::feature',['section'=>'assets','title'=>'Cập nhật vật tư','assets'=>$assets,'allAssets'=>$allAssets,'auditLogs'=>$auditLogs,'materials'=>InventoryMaterial::with('category.parent')->when($materialIds!==null,fn($q)=>$q->whereIn('id',$materialIds))->orderBy('name')->get(),'classrooms'=>Classroom::active()->when($roomIds!==null,fn($q)=>$q->whereIn('id',$roomIds))->orderBy('name')->get(),'categories'=>InventoryCategory::whereNotNull('parent_id')->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get(),'industries'=>InventoryCategory::whereNull('parent_id')->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get(),'buildings'=>Building::when($buildingIds!==null,fn($q)=>$q->whereIn('id',$buildingIds))->orderBy('name')->get(),'units'=>\Modules\Unit\Models\Unit::active()->orderBy('name')->get()]);}
+    public function publicAssets(Request $r)
+    {
+        $roomIds = $this->assignedInventoryRoomIds($r->user());
+        $reportYear = (int) $r->integer('year', now()->year);
+        $baseQuery = InventoryAsset::with(['material.category.parent','categoryRelation.parent','classroom.building','holdingUnit'])
+            ->where('management_type', 'ASSET')
+            ->when($roomIds !== null, fn($q) => $q->whereIn('classroom_id', $roomIds));
+        $filterSuggestions = (clone $baseQuery)
+            ->latest()
+            ->limit(100)
+            ->get()
+            ->flatMap(fn(InventoryAsset $asset) => [
+                $asset->asset_code,
+                $asset->name,
+                $asset->supplier,
+                $asset->contract_invoice_number,
+                $asset->classroom?->name,
+            ])
+            ->filter()
+            ->unique()
+            ->values();
+        $assets = $baseQuery
+            ->when($r->search, fn($q, $s) => $q->where(fn($x) => $x->where('asset_code', 'like', "%$s%")->orWhere('name', 'like', "%$s%")->orWhere('supplier', 'like', "%$s%")))
+            ->when($r->classroom_id, fn($q, $id) => $q->where('classroom_id', $id))
+            ->when($r->status, fn($q, $status) => $q->where('status', $status))
+            ->latest()
+            ->paginate(20)
+            ->withQueryString();
+
+        $assets->getCollection()->transform(function (InventoryAsset $asset) use ($reportYear): InventoryAsset {
+            $baseYear = (int) ($asset->purchase_date?->format('Y') ?: $asset->usage_year ?: $asset->created_at?->format('Y') ?: $reportYear);
+            $depreciatedYears = max(0, $reportYear - $baseYear + 1);
+            $rate = (float) $asset->depreciation_rate;
+            $depreciatedPercent = min(100, $depreciatedYears * $rate);
+            $remainingPercent = max(0, 100 - $depreciatedPercent);
+            $initialValue = (float) $asset->total_amount;
+            if ($initialValue <= 0) {
+                $initialValue = (float) $asset->unit_price * (float) $asset->quantity;
+            }
+            $asset->setAttribute('depreciated_years', $depreciatedYears);
+            $asset->setAttribute('depreciated_percent', $depreciatedPercent);
+            $asset->setAttribute('remaining_percent', $remainingPercent);
+            $asset->setAttribute('remaining_value', $initialValue * $remainingPercent / 100);
+            $asset->setAttribute('initial_value', $initialValue);
+            return $asset;
+        });
+
+        return view('inventory::feature', [
+            'section' => 'public-assets',
+            'title' => 'Quản lý tài sản công',
+            'assets' => $assets,
+            'reportYear' => $reportYear,
+            'classrooms' => Classroom::active()->when($roomIds !== null, fn($q) => $q->whereIn('id', $roomIds))->orderBy('name')->get(),
+            'filterSuggestions' => $filterSuggestions,
+        ]);
+    }
+
+    public function publicAssetDepreciationUpdate(Request $r, InventoryAsset $asset)
+    {
+        abort_unless($asset->management_type === 'ASSET', 404);
+        $roomIds = $this->assignedInventoryRoomIds($r->user());
+        abort_if($roomIds !== null && ! in_array((int) $asset->classroom_id, $roomIds, true), 403);
+        $data = $r->validate([
+            'depreciation_rate' => 'required|numeric|min:0|max:100',
+            'unit_price' => 'nullable|numeric|min:0',
+            'total_amount' => 'nullable|numeric|min:0',
+            'contract_invoice_number' => 'nullable|string|max:150',
+            'supplier' => 'nullable|string|max:255',
+        ]);
+        if ((float) ($data['total_amount'] ?? 0) <= 0 && (float) ($data['unit_price'] ?? 0) > 0) {
+            $data['total_amount'] = (float) $data['unit_price'] * (float) $asset->quantity;
+        }
+        $asset->update($data);
+        InventoryAuditLog::create(['user_id' => $r->user()->id, 'action' => 'ADJUST', 'entity_type' => 'asset', 'entity_id' => $asset->id, 'details' => $data + ['source' => 'public_asset_depreciation']]);
+        return back()->with('success', 'Đã cập nhật khấu hao tài sản công.');
+    }
     private function inventoryMovementReasonLabels(): array
     {
         return [
@@ -222,6 +298,67 @@ class InventoryWorkflowController extends ModuleBaseController
 
         return $data;
     }
+
+    private function publicAssetValidationRules(): array
+    {
+        return [
+            'management_type' => 'nullable|in:MATERIAL,ASSET',
+            'unit_price' => 'nullable|numeric|min:0',
+            'total_amount' => 'nullable|numeric|min:0',
+            'contract_invoice_number' => 'nullable|string|max:150',
+            'supplier' => 'nullable|string|max:255',
+            'depreciation_rate' => 'nullable|numeric|min:0|max:100',
+        ];
+    }
+
+    private function syncPublicAssetFromMovement(array $data, InventoryMaterial $material, int $delta, string $type): void
+    {
+        if (($data['management_type'] ?? 'MATERIAL') !== 'ASSET') {
+            return;
+        }
+
+        if ($type === 'OUT') {
+            $asset = InventoryAsset::where('material_id', $material->id)
+                ->where('management_type', 'ASSET')
+                ->when(! empty($data['classroom_id']), fn($q) => $q->where('classroom_id', $data['classroom_id']))
+                ->latest('id')
+                ->lockForUpdate()
+                ->first();
+            if ($asset) {
+                $asset->update(['quantity' => max(0, (int) $asset->quantity - $delta)]);
+            }
+            return;
+        }
+
+        $unitPrice = (float) ($data['unit_price'] ?? 0);
+        $totalAmount = (float) ($data['total_amount'] ?? 0);
+        if ($totalAmount <= 0 && $unitPrice > 0) {
+            $totalAmount = $unitPrice * $delta;
+        }
+
+        InventoryAsset::create([
+            'material_id' => $material->id,
+            'category_id' => $material->category_id,
+            'classroom_id' => $data['classroom_id'] ?? null,
+            'holding_unit_id' => $data['holding_unit_id'] ?? null,
+            'asset_code' => $material->code ?: 'TS-'.now()->format('YmdHis').'-'.random_int(100, 999),
+            'name' => $material->name,
+            'category' => $material->category?->name,
+            'quantity' => $delta,
+            'unit' => $material->unit ?: 'cái',
+            'unit_price' => $unitPrice,
+            'total_amount' => $totalAmount,
+            'contract_invoice_number' => $data['contract_invoice_number'] ?? null,
+            'supplier' => $data['supplier'] ?? null,
+            'depreciation_rate' => (float) ($data['depreciation_rate'] ?? 0),
+            'management_type' => 'ASSET',
+            'grade' => $data['grade'] ?? 1,
+            'purchase_date' => $data['purchase_date'] ?? ($data['decision_date'] ?? now()->toDateString()),
+            'install_address' => $data['install_address'] ?? $material->location,
+            'status' => 'NORMAL',
+            'note' => $data['note'] ?? ($data['reason'] ?? null),
+        ]);
+    }
     public function assetBulkStoreDelta(Request $r)
     {
         $data = $r->validate([
@@ -231,9 +368,14 @@ class InventoryWorkflowController extends ModuleBaseController
             'holding_unit_id' => 'nullable|exists:units,id',
             'reason' => 'required|string|max:255',
             'reason_code' => 'required|string|in:T01,T02,T03,T04,T05,T06,G01,G02,G03,G04,G05,G06,G07,G08',
+            ...$this->publicAssetValidationRules(),
             'items' => 'required|array|min:1',
             'items.*.material_id' => 'required|exists:inventory_materials,id',
             'items.*.quantity' => 'required|integer|min:1',
+            'items.*.category_id' => 'nullable|exists:inventory_categories,id',
+            'items.*.grade' => 'nullable|integer|min:1|max:5',
+            'items.*.purchase_date' => 'nullable|date',
+            'items.*.decision_number' => 'nullable|string|max:100',
         ]);
         $data = $this->normalizeInventoryMovementReason($data);
         $room = !empty($data['classroom_id']) ? Classroom::with(['building', 'managingUnit'])->find($data['classroom_id']) : null;
@@ -268,6 +410,7 @@ class InventoryWorkflowController extends ModuleBaseController
                     'entity_id' => $material->id,
                     'details' => $data + ['source' => 'asset_update', 'material_id' => $material->id, 'asset_code' => $material->code, 'name' => $material->name, 'install_address' => $material->location, 'before' => $before, 'after' => $after, 'change' => $data['update_type'] === 'IN' ? $delta : -$delta],
                 ]);
+                $this->syncPublicAssetFromMovement($data + $item + ['purchase_date' => $item['purchase_date'] ?? null, 'grade' => $item['grade'] ?? 1], $material, $delta, $data['update_type']);
             }
         });
 
@@ -282,7 +425,7 @@ class InventoryWorkflowController extends ModuleBaseController
             'change_type' => 'required|in:IN,OUT',
             'quantity' => 'required|integer|min:1',
             'reason' => 'required|string|max:255',
-            'reason_code' => 'required|string|in:T01,T02,T03,T04,T05,T06,G01,G02,G03,G04,G05,G06,G07,G08',
+            'reason_code' => 'nullable|string|in:T01,T02,T03,T04,T05,T06,G01,G02,G03,G04,G05,G06,G07,G08',
             'decision_date' => 'nullable|date',
             'decision_number' => 'nullable|string|max:100',
             'building_id' => 'nullable|exists:buildings,id',
@@ -292,6 +435,7 @@ class InventoryWorkflowController extends ModuleBaseController
             'signer' => 'nullable|string|max:255',
             'performer' => 'nullable|string|max:255',
             'note' => 'nullable|string',
+            ...$this->publicAssetValidationRules(),
         ]);
         $data = $this->normalizeInventoryMovementReason($data);
 
@@ -321,6 +465,7 @@ class InventoryWorkflowController extends ModuleBaseController
             $material->update(['quantity' => $after]);
             InventoryMovement::create(['material_id' => $material->id, 'type' => $data['change_type'], 'quantity' => $delta, 'note' => $data['reason'], 'created_by' => $r->user()->id]);
             InventoryAuditLog::create(['user_id' => $r->user()->id, 'action' => $data['change_type'] === 'IN' ? 'INCREASE' : 'DECREASE', 'entity_type' => 'material', 'entity_id' => $material->id, 'details' => $data + ['source' => 'asset_update', 'before' => $before, 'after' => $after, 'change' => $change]]);
+            $this->syncPublicAssetFromMovement($data, $material, $delta, $data['change_type']);
         });
 
         return back()->with('success', 'Đã cập nhật số lượng vật tư.');
@@ -352,9 +497,9 @@ class InventoryWorkflowController extends ModuleBaseController
 
     public function assetBulkStore(Request $r){$d=$r->validate(['category_id'=>'nullable|exists:inventory_categories,id','building_id'=>'nullable|exists:buildings,id','classroom_id'=>'nullable|exists:classrooms,id','holding_unit_id'=>'nullable|exists:units,id','update_type'=>'required|in:IN,OUT','reason'=>'required|string|max:255','items'=>'required|array|min:1','items.*.category_id'=>'nullable|exists:inventory_categories,id','items.*.name'=>'required|string|max:255','items.*.asset_code'=>'nullable|string|max:100','items.*.quantity'=>'required|numeric|min:.01','items.*.unit'=>'nullable|string|max:30','items.*.grade'=>'nullable|integer|min:1|max:5','items.*.manufacture_year'=>'nullable|integer|min:1900|max:2200','items.*.usage_year'=>'nullable|integer|min:1900|max:2200','items.*.purchase_date'=>'nullable|date','items.*.install_address'=>'nullable|string|max:255','items.*.note'=>'nullable|string']);DB::transaction(function()use($d){foreach($d['items'] as $item){$item['asset_code']=$item['asset_code']?:'VT-'.now()->format('YmdHis').'-'.random_int(100,999);$item['unit']=$item['unit']?:'cái';$item['status']='NORMAL';$item['classroom_id']=$d['classroom_id']??null;$item['holding_unit_id']=$d['holding_unit_id']??null;$item['category']=$item['category_id']??($d['category_id']??null);$item['note']=$item['note']??$d['reason'];InventoryAsset::create(collect($item)->only(['asset_code','name','quantity','unit','grade','manufacture_year','usage_year','purchase_date','install_address','note','status','classroom_id','holding_unit_id','category'])->all());}});return back()->with('success','Đã lưu '.count($d['items']).' dòng vật tư.');}
     public function assetChange(Request $r){$d=$r->validate(['asset_id'=>'nullable|exists:inventory_assets,id','material_id'=>'nullable|exists:inventory_materials,id','change_type'=>'required|in:IN,OUT','quantity'=>'required|integer|min:1','asset_code'=>'nullable|string|max:100','name'=>'nullable|string|max:255','category'=>'nullable|string|max:255','classroom_id'=>'nullable|exists:classrooms,id','holding_unit_id'=>'nullable|exists:units,id','install_address'=>'nullable|string|max:255','grade'=>'nullable|integer|min:1|max:5','manufacture_year'=>'nullable|integer|min:1900|max:2200','usage_year'=>'nullable|integer|min:1900|max:2200','purchase_date'=>'nullable|date','reason'=>'required|string|max:255','decision_date'=>'nullable|date','decision_number'=>'nullable|string|max:100','signer'=>'nullable|string|max:255','performer'=>'nullable|string|max:255','building_name'=>'nullable|string|max:255','note'=>'nullable|string']);$asset=($d['asset_id']??null)?InventoryAsset::findOrFail($d['asset_id']):null;$material=($d['material_id']??null)?InventoryMaterial::findOrFail($d['material_id']):null;abort_if(!$asset&&!$material,422,'Chưa chọn vật tư cần cập nhật.');$current=(int)($asset?->quantity??$material?->quantity??0);$newQuantity=(int)$d['quantity'];$change=$newQuantity-$current;abort_if($newQuantity<0,422,'Số lượng sau cập nhật không hợp lệ.');DB::transaction(function()use($d,$asset,$material,$change,$newQuantity,$current){if($asset){$fields=collect($d)->only(['asset_code','name','category','classroom_id','holding_unit_id','install_address','grade','manufacture_year','usage_year','purchase_date','note'])->filter(fn($v)=>$v!==null&&$v!=='')->all();$asset->update($fields+['quantity'=>$newQuantity]);$this->syncMaterialQuantityFromAssets($asset->material_id);}if(!$asset&&$material)$material->update(['quantity'=>$newQuantity]);if(!$asset&&$material)InventoryMovement::create(['material_id'=>$material->id,'type'=>$d['change_type'],'quantity'=>abs($change),'note'=>$d['reason'],'created_by'=>auth()->id()]);InventoryAuditLog::create(['user_id'=>auth()->id(),'action'=>$d['change_type']==='IN'?'INCREASE':'DECREASE','entity_type'=>$material&&!$asset?'material':'asset','entity_id'=>$asset?->id??$material?->id,'details'=>$d+['before'=>$current,'after'=>$newQuantity,'change'=>$change]]);});return back()->with('success','Đã cập nhật số lượng vật tư.');}
-    public function assetAdjust(Request $r){$d=$r->validate(['asset_id'=>'required|exists:inventory_assets,id','quantity'=>'required|numeric|min:0','grade'=>'nullable|integer|min:1|max:5','status'=>'required|in:NORMAL,BROKEN,REPAIRING,LIQUIDATED','reason'=>'required|string|max:255','decision_date'=>'nullable|date','decision_number'=>'nullable|string|max:100','signer'=>'nullable|string|max:255','note'=>'nullable|string']);$asset=InventoryAsset::findOrFail($d['asset_id']);$asset->update(collect($d)->only(['quantity','grade','status','note'])->all());$this->syncMaterialQuantityFromAssets($asset->material_id);InventoryAuditLog::create(['user_id'=>auth()->id(),'action'=>'ADJUST','entity_type'=>'asset','entity_id'=>$asset->id,'details'=>$d]);return back()->with('success','Đã điều chỉnh vật tư.');}
-    public function assetStore(Request $r){$d=$r->validate(['material_id'=>'nullable|exists:inventory_materials,id','industry_id'=>'required|exists:inventory_categories,id','category_id'=>'required|exists:inventory_categories,id','classroom_id'=>'nullable|exists:classrooms,id','holding_unit_id'=>'nullable|exists:units,id','asset_code'=>'required|string|max:100','name'=>'required|string|max:255','category'=>'nullable|string|max:255','quantity'=>'required|numeric|min:.01','broken_quantity'=>'nullable|numeric|min:0','unit'=>'nullable|string|max:30','grade'=>'nullable|integer|min:1|max:5','manufacture_year'=>'nullable|integer|min:1900|max:2200','usage_year'=>'nullable|integer|min:1900|max:2200','install_address'=>'nullable|string|max:255','status'=>'required|in:NORMAL,BROKEN,REPAIRING,LIQUIDATED','purchase_date'=>'nullable|date','expiry_date'=>'nullable|date','broken_at'=>'nullable|date','repair_started_at'=>'nullable|date','repair_completed_at'=>'nullable|date','repair_performer'=>'nullable|string|max:255','note'=>'nullable|string','description'=>'nullable|string']);$type=InventoryCategory::whereKey($d['category_id'])->where('parent_id',$d['industry_id'])->where('active',true)->firstOrFail();$d['category']=$type->name;unset($d['industry_id'],$d['category_id']);$asset=InventoryAsset::create($d);$this->syncMaterialQuantityFromAssets($asset->material_id);return back()->with('success','Đã thêm tài sản.');}
-    public function assetUpdate(Request $r,InventoryAsset $asset){$d=$r->validate(['material_id'=>'nullable|exists:inventory_materials,id','industry_id'=>'required|exists:inventory_categories,id','category_id'=>'required|exists:inventory_categories,id','classroom_id'=>'nullable|exists:classrooms,id','holding_unit_id'=>'nullable|exists:units,id','asset_code'=>'required|string|max:100','name'=>'required|string|max:255','category'=>'nullable|string|max:255','quantity'=>'required|numeric|min:.01','broken_quantity'=>'nullable|numeric|min:0','unit'=>'nullable|string|max:30','grade'=>'nullable|integer|min:1|max:5','manufacture_year'=>'nullable|integer|min:1900|max:2200','usage_year'=>'nullable|integer|min:1900|max:2200','install_address'=>'nullable|string|max:255','status'=>'required|in:NORMAL,BROKEN,REPAIRING,LIQUIDATED','purchase_date'=>'nullable|date','expiry_date'=>'nullable|date','broken_at'=>'nullable|date','repair_started_at'=>'nullable|date','repair_completed_at'=>'nullable|date','repair_performer'=>'nullable|string|max:255','note'=>'nullable|string','description'=>'nullable|string']);$type=InventoryCategory::whereKey($d['category_id'])->where('parent_id',$d['industry_id'])->where('active',true)->firstOrFail();$oldMaterialId=$asset->material_id;$d['category']=$type->name;unset($d['industry_id'],$d['category_id']);$asset->update($d);$this->syncMaterialQuantityFromAssets($oldMaterialId);$this->syncMaterialQuantityFromAssets($asset->material_id);return back()->with('success','Đã cập nhật tài sản.');}
+    public function assetAdjust(Request $r){$d=$r->validate(['asset_id'=>'required|exists:inventory_assets,id','quantity'=>'required|numeric|min:0','grade'=>'nullable|integer|min:1|max:5','status'=>'required|in:NORMAL,BROKEN,REPAIRING,LIQUIDATED','reason'=>'required|string|max:255','decision_date'=>'nullable|date','decision_number'=>'nullable|string|max:100','signer'=>'nullable|string|max:255','note'=>'nullable|string',...$this->publicAssetValidationRules()]);$asset=InventoryAsset::findOrFail($d['asset_id']);$asset->update(collect($d)->only(['quantity','grade','status','note','management_type','unit_price','total_amount','contract_invoice_number','supplier','depreciation_rate'])->all());$this->syncMaterialQuantityFromAssets($asset->material_id);InventoryAuditLog::create(['user_id'=>auth()->id(),'action'=>'ADJUST','entity_type'=>'asset','entity_id'=>$asset->id,'details'=>$d]);return back()->with('success','Đã điều chỉnh vật tư.');}
+    public function assetStore(Request $r){$d=$r->validate(['material_id'=>'nullable|exists:inventory_materials,id','industry_id'=>'required|exists:inventory_categories,id','category_id'=>'required|exists:inventory_categories,id','classroom_id'=>'nullable|exists:classrooms,id','holding_unit_id'=>'nullable|exists:units,id','asset_code'=>'required|string|max:100','name'=>'required|string|max:255','category'=>'nullable|string|max:255','quantity'=>'required|numeric|min:.01','broken_quantity'=>'nullable|numeric|min:0','unit'=>'nullable|string|max:30','grade'=>'nullable|integer|min:1|max:5','manufacture_year'=>'nullable|integer|min:1900|max:2200','usage_year'=>'nullable|integer|min:1900|max:2200','install_address'=>'nullable|string|max:255','status'=>'required|in:NORMAL,BROKEN,REPAIRING,LIQUIDATED','purchase_date'=>'nullable|date','expiry_date'=>'nullable|date','broken_at'=>'nullable|date','repair_started_at'=>'nullable|date','repair_completed_at'=>'nullable|date','repair_performer'=>'nullable|string|max:255','note'=>'nullable|string','description'=>'nullable|string',...$this->publicAssetValidationRules()]);$type=InventoryCategory::whereKey($d['category_id'])->where('parent_id',$d['industry_id'])->where('active',true)->firstOrFail();$d['category']=$type->name;$d['management_type']=$d['management_type']??'MATERIAL';$d['total_amount']=(float)($d['total_amount']??0)>0?$d['total_amount']:(float)($d['unit_price']??0)*(float)$d['quantity'];unset($d['industry_id'],$d['category_id']);$asset=InventoryAsset::create($d);$this->syncMaterialQuantityFromAssets($asset->material_id);return back()->with('success','Đã thêm tài sản.');}
+    public function assetUpdate(Request $r,InventoryAsset $asset){$d=$r->validate(['material_id'=>'nullable|exists:inventory_materials,id','industry_id'=>'required|exists:inventory_categories,id','category_id'=>'required|exists:inventory_categories,id','classroom_id'=>'nullable|exists:classrooms,id','holding_unit_id'=>'nullable|exists:units,id','asset_code'=>'required|string|max:100','name'=>'required|string|max:255','category'=>'nullable|string|max:255','quantity'=>'required|numeric|min:.01','broken_quantity'=>'nullable|numeric|min:0','unit'=>'nullable|string|max:30','grade'=>'nullable|integer|min:1|max:5','manufacture_year'=>'nullable|integer|min:1900|max:2200','usage_year'=>'nullable|integer|min:1900|max:2200','install_address'=>'nullable|string|max:255','status'=>'required|in:NORMAL,BROKEN,REPAIRING,LIQUIDATED','purchase_date'=>'nullable|date','expiry_date'=>'nullable|date','broken_at'=>'nullable|date','repair_started_at'=>'nullable|date','repair_completed_at'=>'nullable|date','repair_performer'=>'nullable|string|max:255','note'=>'nullable|string','description'=>'nullable|string',...$this->publicAssetValidationRules()]);$type=InventoryCategory::whereKey($d['category_id'])->where('parent_id',$d['industry_id'])->where('active',true)->firstOrFail();$oldMaterialId=$asset->material_id;$d['category']=$type->name;$d['management_type']=$d['management_type']??'MATERIAL';$d['total_amount']=(float)($d['total_amount']??0)>0?$d['total_amount']:(float)($d['unit_price']??0)*(float)$d['quantity'];unset($d['industry_id'],$d['category_id']);$asset->update($d);$this->syncMaterialQuantityFromAssets($oldMaterialId);$this->syncMaterialQuantityFromAssets($asset->material_id);return back()->with('success','Đã cập nhật tài sản.');}
     public function assetDelete(InventoryAsset $asset){if($asset->repairs()->exists()||$asset->proposals()->exists())return back()->withErrors(['asset'=>'Không thể xóa tài sản đã có lịch sử.']);$materialId=$asset->material_id;$asset->delete();$this->syncMaterialQuantityFromAssets($materialId);return back()->with('success','Đã xóa tài sản.');}
 
     public function warehouse(){$roomIds=$this->assignedInventoryRoomIds();$materialIds=$this->scopedMaterialIds($roomIds);$categoryIds=$this->scopedCategoryIds($materialIds);return view('inventory::feature',['section'=>'warehouse','title'=>'Kho vật tư','warehouses'=>InventoryWarehouse::with(['manager','industry','items'=>fn($q)=>$q->when($materialIds!==null,fn($x)=>$x->whereIn('material_id',$materialIds)),'items.material.category.parent'])->latest()->get(),'users'=>\App\Models\User::where('status',1)->orderBy('name')->get(),'industries'=>InventoryCategory::whereNull('parent_id')->where('active',true)->when($categoryIds!==null,fn($q)=>$q->whereIn('id',$categoryIds))->orderBy('code')->get(),'materials'=>InventoryMaterial::with('category.parent')->when($materialIds!==null,fn($q)=>$q->whereIn('id',$materialIds))->orderBy('name')->get()]);}

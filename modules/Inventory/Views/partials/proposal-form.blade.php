@@ -65,7 +65,7 @@
                     <select name="material_picker" id="proposal-material" required class="mt-1 w-full rounded-lg border bg-white p-2.5">
                         <option value="">Chọn vật tư</option>
                         @foreach($assets as $asset)
-                            @php($assetTypeId = $asset->material?->category_id ?: $asset->category_id)
+                            @php $assetTypeId = $asset->material?->category_id ?: $asset->category_id; @endphp
                             @if($assetTypeId && $asset->classroom_id)
                                 <option value="asset:{{ $asset->id }}" data-type-id="{{ $assetTypeId }}" data-room-id="{{ $asset->classroom_id }}">{{ $asset->inventory_display_name }}</option>
                             @endif

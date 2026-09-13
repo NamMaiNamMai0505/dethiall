@@ -92,6 +92,13 @@ Route::middleware(['web', 'auth', 'permission:inventory.access.index'])
             ->middleware('permission:inventory.assets.delete')
             ->name('assets.delete');
 
+        Route::get('/tai-san-cong', [InventoryWorkflowController::class, 'publicAssets'])
+            ->middleware('permission:inventory.reports.index')
+            ->name('public-assets');
+        Route::patch('/tai-san-cong/{asset}/khau-hao', [InventoryWorkflowController::class, 'publicAssetDepreciationUpdate'])
+            ->middleware('permission:inventory.assets.edit')
+            ->name('public-assets.depreciation');
+
         Route::get('/kho', [InventoryWorkflowController::class, 'warehouse'])
             ->middleware('permission:inventory.warehouses.index')
             ->name('warehouse');

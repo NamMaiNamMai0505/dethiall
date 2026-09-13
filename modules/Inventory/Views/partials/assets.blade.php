@@ -80,7 +80,7 @@
         <form method="POST" action="{{ route('inventory.assets.change') }}" class="grid gap-4 md:grid-cols-4">@csrf
             <label class="text-sm font-semibold">Ngành vật tư<select id="single-industry" class="mt-1 w-full rounded-lg border px-3 py-2.5"><option value="">Chọn ngành vật tư</option>@foreach(($industries ?? collect()) as $item)<option value="{{ $item->id }}">{{ $item->code }} — {{ $item->name }}</option>@endforeach</select></label>
             <label class="text-sm font-semibold">Loại vật tư<select id="single-category" class="mt-1 w-full rounded-lg border px-3 py-2.5"><option value="">Chọn loại vật tư</option>@foreach(($categories ?? collect()) as $item)<option value="{{ $item->id }}" data-parent="{{ $item->parent_id }}">{{ $item->code }} — {{ $item->name }}</option>@endforeach</select></label>
-            <label class="text-sm font-semibold md:col-span-2">Vật tư<select id="single-asset" name="asset_id" required class="mt-1 w-full rounded-lg border px-3 py-2.5"><option value="">Chọn vật tư</option>@foreach(($materials ?? collect())->where('quantity', '>', 0) as $item)<option value="material-{{ $item->id }}" data-code="{{ $item->code }}" data-name="{{ $item->name }}" data-quantity="{{ (int) $item->quantity }}" data-grade="{{ $item->grade }}" data-category="{{ $item->category_id }}" data-address="{{ $item->location }}">{{ $item->inventory_display_name }}</option>@endforeach</select></label>
+            <label class="text-sm font-semibold md:col-span-2">Vật tư<select id="single-asset" name="asset_id" required class="mt-1 w-full rounded-lg border px-3 py-2.5"><option value="">Chọn vật tư</option>@foreach(($materials ?? collect())->where('quantity', '>', 0) as $item)@php $itemGrade = (int) data_get($item, 'grade', 1); @endphp<option value="material-{{ $item->id }}" data-code="{{ $item->code }}" data-name="{{ $item->name }}" data-quantity="{{ (int) $item->quantity }}" data-grade="{{ $itemGrade ?: 1 }}" data-category="{{ $item->category_id }}" data-address="{{ $item->location }}">{{ $item->inventory_display_name }} — Cấp {{ $itemGrade ?: 1 }}</option>@endforeach</select></label>
             <label class="text-sm font-semibold">Mã vật tư<input id="single-selected-code" name="asset_code" readonly class="mt-1 w-full rounded-lg border bg-slate-50 px-3 py-2.5"></label>
             <label class="text-sm font-semibold">Tên vật tư<input id="single-selected-name" name="name" readonly class="mt-1 w-full rounded-lg border bg-slate-50 px-3 py-2.5"></label>
             <label class="text-sm font-semibold">Số lượng trước cập nhật<input id="single-before-quantity" readonly class="mt-1 w-full rounded-lg border bg-slate-50 px-3 py-2.5"></label>
@@ -92,7 +92,7 @@
             <label class="text-sm font-semibold">Ngày quyết định<input name="decision_date" type="date" class="mt-1 w-full rounded-lg border px-3 py-2.5"></label>
             <label class="text-sm font-semibold">Số quyết định<input name="decision_number" placeholder="Nhập số quyết định" class="mt-1 w-full rounded-lg border px-3 py-2.5"></label>
             <label class="text-sm font-semibold">Tòa nhà<select id="single-building" name="building_id" class="mt-1 w-full rounded-lg border px-3 py-2.5"><option value="">Chọn tòa nhà</option>@foreach(($buildings ?? collect()) as $item)<option value="{{ $item->id }}">{{ $item->name }}</option>@endforeach</select></label>
-            <label class="text-sm font-semibold">Phòng<select id="single-room" name="classroom_id" class="mt-1 w-full rounded-lg border px-3 py-2.5"><option value="">Chọn phòng</option>@foreach(($classrooms ?? collect()) as $item)<option value="{{ $item->id }}" data-building="{{ $item->building_id }}">{{ $item->name }}</option>@endforeach</select><input type="hidden" id="single-address-value" name="install_address"></label>
+            <label class="text-sm font-semibold">Phòng<select id="single-room" name="classroom_id" class="mt-1 w-full rounded-lg border px-3 py-2.5"><option value="">Chọn phòng</option>@foreach(($classrooms ?? collect()) as $item)<option value="{{ $item->id }}" data-building="{{ $item->building_id }}" data-unit="{{ $item->managing_unit_id }}">{{ $item->name }}</option>@endforeach</select><input type="hidden" id="single-address-value" name="install_address"></label>
             <label class="text-sm font-semibold">Người ký<input name="signer" placeholder="Nhập người ký" class="mt-1 w-full rounded-lg border px-3 py-2.5"></label>
             <label class="text-sm font-semibold md:col-span-2">Đơn vị quản lý<select name="holding_unit_id" class="mt-1 w-full rounded-lg border px-3 py-2.5"><option value="">Chọn đơn vị quản lý</option>@foreach(($units ?? collect()) as $item)<option value="{{ $item->id }}">{{ $item->name }}</option>@endforeach</select></label>
             <label class="text-sm font-semibold md:col-span-2">Ghi chú<textarea name="note" rows="2" placeholder="Nhập ghi chú" class="mt-1 w-full rounded-lg border px-3 py-2.5"></textarea></label>
@@ -137,7 +137,7 @@
                 'name' => $material->name,
                 'address' => $material->location,
                 'quantity' => (int) $material->quantity,
-                'grade' => $material->grade,
+                'grade' => (int) data_get($material, 'grade', 1) ?: 1,
             ],
         ]);
         $singleAssetData = collect();
@@ -149,7 +149,7 @@
     <section id="inventory-panel-import" class="inventory-update-panel hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div class="flex flex-wrap items-center justify-between gap-3"><div><h2 class="font-bold text-slate-900">Import vật tư</h2><p class="mt-1 text-sm text-slate-500">File vật tư chỉ cần Mã loại vật tư, Tên vật tư và Đơn vị tính; mã vật tư tự sinh theo loại.</p></div><div class="flex flex-wrap gap-2"><a href="{{ route('inventory.import.template', ['type' => 'material']) }}" class="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:bg-emerald-700"><i class="bi bi-file-earmark-excel"></i> Tải mẫu Excel (.xlsx)</a><a href="{{ route('inventory.import.template.word', ['type' => 'material']) }}" class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:bg-blue-700"><i class="bi bi-file-earmark-word"></i> Tải mẫu DOCX (.docx)</a></div></div><form method="POST" action="{{ route('inventory.import') }}" enctype="multipart/form-data" class="mt-4 grid gap-4 md:grid-cols-4">@csrf<input type="hidden" name="import_type" value="material"><label class="text-sm font-semibold text-slate-700 md:col-span-3">Tệp import <span class="text-rose-500">*</span><input type="file" name="file" accept=".xlsx,.xls,.csv,.txt,.docx" required class="mt-1 w-full rounded-lg border px-3 py-2"></label><div class="flex items-end"><button class="w-full rounded-lg bg-slate-900 px-4 py-2.5 font-bold text-white">Import vật tư</button></div></form></section>
     <section id="inventory-panel-bulk" class="inventory-update-panel rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><form method="POST" action="{{ route('inventory.assets.bulk.store') }}">@csrf<div class="grid items-end gap-3 md:grid-cols-5"><select name="category_id" class="rounded-lg border px-3 py-2.5"><option value="">Chọn ngành</option>@foreach(($categories ?? collect()) as $category)<option value="{{ $category->id }}">{{ $category->code }} — {{ $category->name }}</option>@endforeach</select><select name="building_id" class="rounded-lg border px-3 py-2.5"><option value="">Chọn tòa nhà</option>@foreach(($buildings ?? collect()) as $building)<option value="{{ $building->id }}">{{ $building->name }}</option>@endforeach</select><select name="classroom_id" class="rounded-lg border px-3 py-2.5"><option value="">Chọn phòng</option>@foreach(($classrooms ?? collect()) as $room)<option value="{{ $room->id }}">{{ $room->name }}</option>@endforeach</select><select name="holding_unit_id" class="rounded-lg border px-3 py-2.5"><option value="">Đơn vị quản lý</option>@foreach(($units ?? collect()) as $unit)<option value="{{ $unit->id }}">{{ $unit->name }}</option>@endforeach</select><button type="button" id="inventory-add-row" class="inventory-bulk-actions h-[46px] min-h-[46px] whitespace-nowrap rounded-lg border border-slate-300 px-4 py-2.5 font-bold">+ Thêm dòng</button></div><div class="inventory-bulk-table-wrap mt-4"><table class="w-full min-w-[1500px] text-sm"><thead class="bg-slate-50"><tr><th class="p-2 text-left">#</th><th class="p-2 text-left">Loại</th><th class="p-2 text-left">Tên thiết bị</th><th class="p-2">Năm SX</th><th class="p-2">Năm SD</th><th class="p-2">Ngày thực hiện</th><th class="p-2">Địa chỉ lắp đặt</th><th class="p-2">Số lượng</th><th class="p-2">Phân cấp</th><th class="p-2">Số quyết định</th></tr></thead><tbody id="inventory-bulk-rows"></tbody></table></div><div class="mt-4 flex justify-end"><button class="sticky bottom-2 rounded-lg bg-slate-900 px-5 py-2.5 font-bold text-white">Lưu tăng (nhiều dòng)</button></div></form></section>
     <script>
-     (()=>{const tabs=[...document.querySelectorAll('.inventory-update-tab')],panels={bulk:document.getElementById('inventory-panel-bulk'),single:document.getElementById('inventory-panel-single'),import:document.getElementById('inventory-panel-import')};tabs.forEach(t=>t.addEventListener('click',()=>{tabs.forEach(x=>{const on=x===t;x.classList.toggle('bg-slate-900',on);x.classList.toggle('text-white',on);x.classList.toggle('text-slate-600',!on)});Object.entries(panels).forEach(([k,p])=>p?.classList.toggle('hidden',k!==t.dataset.panel));}));const body=document.getElementById('inventory-bulk-rows'),categoryOptions=`@foreach(($categories ?? collect()) as $category)<option value="{{ $category->id }}">{{ $category->code }} — {{ $category->name }}</option>@endforeach`,materialOptions=`@foreach(($materials ?? collect()) as $material)<option value="{{ $material->id }}" data-category="{{ $material->category_id }}" data-code="{{ e($material->code) }}" data-name="{{ e($material->name) }}" data-address="{{ e($material->location) }}" data-quantity="{{ (int) $material->quantity }}" data-grade="{{ $material->grade }}">{{ $material->inventory_display_name }}</option>@endforeach`;const add=()=>{const i=body.children.length;body.insertAdjacentHTML('beforeend',`<tr class="border-t"><td class="p-2">${i+1}</td><td class="p-2"><select name="items[${i}][category_id]" required class="w-40 rounded border px-2 py-2"><option value="">Chọn loại vật tư</option>${categoryOptions}</select></td><td class="p-2"><select name="items[${i}][material_id]" required class="bulk-material w-56 rounded border px-2 py-2"><option value="">Chọn vật tư</option>${materialOptions}</select><input type="hidden" name="items[${i}][name]"><input type="hidden" name="items[${i}][asset_code]"><input type="hidden" name="items[${i}][install_address]"></td><td class="p-2"><input name="items[${i}][manufacture_year]" value="2000" class="w-20 rounded border px-2 py-2"></td><td class="p-2"><input name="items[${i}][usage_year]" value="2000" class="w-20 rounded border px-2 py-2"></td><td class="inventory-bulk-date-cell p-2"><input name="items[${i}][purchase_date]" type="date" class="inventory-bulk-date w-full rounded border px-2 py-2"></td><td class="p-2"><span class="bulk-address text-sm text-slate-600">Tự động theo vật tư</span></td><td class="p-2"><input name="items[${i}][quantity]" type="number" min=".01" step=".01" value="1" required class="w-20 rounded border px-2 py-2"></td><td class="p-2"><select name="items[${i}][grade]" class="w-28 rounded border px-2 py-2"><option value="1">1 — Rất tốt</option><option value="2">2 — Tốt</option><option value="3">3 — Khá</option><option value="4">4 — Trung bình</option><option value="5">5 — Kém</option></select></td><td class="p-2"><input name="items[${i}][decision_number]" class="w-28 rounded border px-2 py-2"></td></tr>`);const row=body.lastElementChild,category=row.querySelector('[name$="[category_id]"]'),material=row.querySelector('.bulk-material'),sync=()=>{const selected=material.selectedOptions[0];[...material.options].forEach(o=>{o.hidden=!!category.value&&o.dataset.category!==category.value;o.disabled=o.hidden});const item=selected?.value?selected.dataset:null;row.querySelector('[name$="[name]"]').value=item?.name||'';row.querySelector('[name$="[asset_code]"]').value=item?.code||'';row.querySelector('[name$="[install_address]"]').value=item?.address||'';row.querySelector('.bulk-address').textContent=item?.address||'Tự động theo vật tư'};category.addEventListener('change',()=>{material.value='';sync()});material.addEventListener('change',sync);sync();setTimeout(()=>{if(typeof window.initDateInputs==='function')window.initDateInputs(row)},50)};add();document.getElementById('inventory-add-row')?.addEventListener('click',add)})();
+     (()=>{const tabs=[...document.querySelectorAll('.inventory-update-tab')],panels={bulk:document.getElementById('inventory-panel-bulk'),single:document.getElementById('inventory-panel-single'),import:document.getElementById('inventory-panel-import')};tabs.forEach(t=>t.addEventListener('click',()=>{tabs.forEach(x=>{const on=x===t;x.classList.toggle('bg-slate-900',on);x.classList.toggle('text-white',on);x.classList.toggle('text-slate-600',!on)});Object.entries(panels).forEach(([k,p])=>p?.classList.toggle('hidden',k!==t.dataset.panel));}));const body=document.getElementById('inventory-bulk-rows'),categoryOptions=`@foreach(($categories ?? collect()) as $category)<option value="{{ $category->id }}">{{ $category->code }} — {{ $category->name }}</option>@endforeach`,materialOptions=`@foreach(($materials ?? collect()) as $material)@php $materialGrade = (int) data_get($material, 'grade', 1); @endphp<option value="{{ $material->id }}" data-category="{{ $material->category_id }}" data-code="{{ e($material->code) }}" data-name="{{ e($material->name) }}" data-address="{{ e($material->location) }}" data-quantity="{{ (int) $material->quantity }}" data-grade="{{ $materialGrade ?: 1 }}">{{ $material->inventory_display_name }} — Cấp {{ $materialGrade ?: 1 }}</option>@endforeach`;const add=()=>{const i=body.children.length;body.insertAdjacentHTML('beforeend',`<tr class="border-t"><td class="p-2">${i+1}</td><td class="p-2"><select name="items[${i}][category_id]" required class="w-40 rounded border px-2 py-2"><option value="">Chọn loại vật tư</option>${categoryOptions}</select></td><td class="p-2"><select name="items[${i}][material_id]" required class="bulk-material w-56 rounded border px-2 py-2"><option value="">Chọn vật tư</option>${materialOptions}</select><input type="hidden" name="items[${i}][name]"><input type="hidden" name="items[${i}][asset_code]"><input type="hidden" name="items[${i}][install_address]"></td><td class="p-2"><input name="items[${i}][manufacture_year]" value="2000" class="w-20 rounded border px-2 py-2"></td><td class="p-2"><input name="items[${i}][usage_year]" value="2000" class="w-20 rounded border px-2 py-2"></td><td class="inventory-bulk-date-cell p-2"><input name="items[${i}][purchase_date]" type="date" class="inventory-bulk-date w-full rounded border px-2 py-2"></td><td class="p-2"><span class="bulk-address text-sm text-slate-600">Tự động theo vật tư</span></td><td class="p-2"><input name="items[${i}][quantity]" type="number" min=".01" step=".01" value="1" required class="w-20 rounded border px-2 py-2"></td><td class="p-2"><select name="items[${i}][grade]" class="w-28 rounded border px-2 py-2"><option value="1">1 — Rất tốt</option><option value="2">2 — Tốt</option><option value="3">3 — Khá</option><option value="4">4 — Trung bình</option><option value="5">5 — Kém</option></select></td><td class="p-2"><input name="items[${i}][decision_number]" class="w-28 rounded border px-2 py-2"></td></tr>`);const row=body.lastElementChild,category=row.querySelector('[name$="[category_id]"]'),material=row.querySelector('.bulk-material'),sync=()=>{const selected=material.selectedOptions[0];[...material.options].forEach(o=>{o.hidden=!!category.value&&o.dataset.category!==category.value;o.disabled=o.hidden});const item=selected?.value?selected.dataset:null;row.querySelector('[name$="[name]"]').value=item?.name||'';row.querySelector('[name$="[asset_code]"]').value=item?.code||'';row.querySelector('[name$="[install_address]"]').value=item?.address||'';row.querySelector('[name$="[grade]"]').value=item?.grade||'1';row.querySelector('.bulk-address').textContent=item?.address||'Tự động theo vật tư'};category.addEventListener('change',()=>{material.value='';sync()});material.addEventListener('change',sync);sync();setTimeout(()=>{if(typeof window.initDateInputs==='function')window.initDateInputs(row)},50)};add();document.getElementById('inventory-add-row')?.addEventListener('click',add)})();
      </script>
      <script>
         document.addEventListener('DOMContentLoaded',()=>{const table=document.getElementById('inventory-panel-bulk')?.querySelector('table');if(table){const headers=table.querySelectorAll('thead th');if(headers[1])headers[1].textContent='Loại vật tư';if(headers[2])headers[2].textContent='Vật tư'};});
@@ -273,7 +273,7 @@
             const syncRooms=()=>{if(!room)return;const buildingId=panel.querySelector('select[name="building_name"]')?.selectedOptions[0]?.dataset?.buildingId||'',current=room.value,items=roomData.filter(item=>String(item.building)===String(buildingId)),options=items.map(item=>({value:String(item.id),text:item.name}));if(room.tomselect){room.tomselect.clear(true);room.tomselect.clearOptions();room.tomselect.addOptions(options);room.tomselect.refreshOptions(false);if(items.some(item=>String(item.id)===String(current)))room.tomselect.setValue(current,true);}else{room.innerHTML='<option value="">Phòng chứa vật tư</option>'+options.map(item=>`<option value="${item.value}">${item.text}</option>`).join('');room.value=items.some(item=>String(item.id)===String(current))?current:'';}};
             const typeData=[@foreach(($categories ?? collect()) as $type){id:'{{ $type->id }}',parent:'{{ $type->parent_id }}',code:'{{ addslashes($type->code) }}',name:'{{ addslashes($type->name) }}'},@endforeach];
             const syncTypes=()=>{const industryValue=String(industry.value||''),current=category.value,items=typeData.filter(type=>String(type.parent)===industryValue),options=items.map(type=>({value:String(type.id),text:`${type.code} — ${type.name}`}));if(category.tomselect){category.tomselect.clear(true);category.tomselect.clearOptions();category.tomselect.addOptions(options);category.tomselect.refreshOptions(false);if(items.some(type=>String(type.id)===String(current)))category.tomselect.setValue(current,true);}else{category.innerHTML='<option value="">Chọn loại vật tư</option>'+options.map(option=>`<option value="${option.value}">${option.text}</option>`).join('');category.value=items.some(type=>String(type.id)===String(current))?current:'';}};
-            const materialFallback=[@foreach(($materials ?? collect()) as $material){id:'{{ $material->id }}',category:'{{ $material->category_id }}',code:'{{ addslashes($material->code) }}',name:'{{ addslashes($material->name) }}',text:'{{ addslashes($material->inventory_display_name) }}',address:'{{ addslashes($material->location ?? '') }}',quantity:'{{ (int) $material->quantity }}',grade:'{{ $material->grade }}',date:'{{ optional($material->purchase_date)->format('Y-m-d') }}'},@endforeach];
+            const materialFallback=[@foreach(($materials ?? collect()) as $material)@php $fallbackGrade = (int) data_get($material, 'grade', 1); @endphp {id:'{{ $material->id }}',category:'{{ $material->category_id }}',code:'{{ addslashes($material->code) }}',name:'{{ addslashes($material->name) }}',text:'{{ addslashes($material->inventory_display_name) }} — Cấp {{ $fallbackGrade ?: 1 }}',address:'{{ addslashes($material->location ?? '') }}',quantity:'{{ (int) $material->quantity }}',grade:'{{ $fallbackGrade ?: 1 }}',date:'{{ optional($material->purchase_date)->format('Y-m-d') }}'},@endforeach];
             materialFallback.forEach(item=>{if(asset.querySelector(`option[value="material-${item.id}"]`))return;const option=new Option(item.text,`material-${item.id}`);option.dataset.materialCategory=item.category;option.dataset.category=item.category;option.dataset.code=item.code;option.dataset.name=item.name;option.dataset.address=item.address;option.dataset.quantity=item.quantity;option.dataset.grade=item.grade;option.dataset.date=item.date;asset.appendChild(option)});
             const source=[...asset.options].slice(1).map(option=>({value:option.value,text:option.text,category:option.dataset.category||'',materialCategory:option.dataset.materialCategory||'',data:option}));
             const syncAssets=()=>{
@@ -298,7 +298,7 @@
             const industry=form.querySelector('select[name="category_id"]'),building=form.querySelector('select[name="building_id"]'),room=form.querySelector('select[name="classroom_id"]');
             const types=[@foreach(($categories ?? collect()) as $type){id:'{{ $type->id }}',parent:'{{ $type->parent_id }}',code:'{{ addslashes($type->code) }}',name:'{{ addslashes($type->name) }}'},@endforeach];
             const rooms=[@foreach(($classrooms ?? collect()) as $item){id:'{{ $item->id }}',building:'{{ $item->building_id }}',name:'{{ addslashes($item->name) }}'},@endforeach];
-             const materials=[@foreach(($materials ?? collect()) as $item){id:'{{ $item->id }}',category:'{{ $item->category_id }}',code:'{{ addslashes($item->code) }}',name:'{{ addslashes($item->name) }}',text:'{{ addslashes($item->inventory_display_name) }}',address:'{{ addslashes($item->location ?? '') }}',quantity:'{{ (int) $item->quantity }}',grade:'{{ $item->grade }}'},@endforeach];
+             const materials=[@foreach(($materials ?? collect()) as $item)@php $rowGrade = (int) data_get($item, 'grade', 1); @endphp {id:'{{ $item->id }}',category:'{{ $item->category_id }}',code:'{{ addslashes($item->code) }}',name:'{{ addslashes($item->name) }}',text:'{{ addslashes($item->inventory_display_name) }} — Cấp {{ $rowGrade ?: 1 }}',address:'{{ addslashes($item->location ?? '') }}',quantity:'{{ (int) $item->quantity }}',grade:'{{ $rowGrade ?: 1 }}'},@endforeach];
             window.inventoryBulkMaterialData=Object.fromEntries(materials.map(item=>[String(item.id),item]));
             const assets=[@foreach(($allAssets ?? collect()) as $item){id:'a{{ $item->id }}',category:'{{ $item->material?->category_id ?: $item->category }}',code:'{{ addslashes($item->asset_code) }}',name:'{{ addslashes($item->name) }}',text:'{{ addslashes($item->inventory_display_name) }}',quantity:'{{ (int) $item->quantity }}',grade:'{{ $item->grade }}'},@endforeach];
             const items=assets.length?assets:materials;
@@ -352,4 +352,179 @@
 </div>
 <script>
 (()=>{const init=()=>{const rows=document.getElementById('inventory-bulk-rows');if(!rows||rows.dataset.gradeBound==='1')return;rows.dataset.gradeBound='1';const sync=()=>rows.querySelectorAll('select[name$="[grade]"]').forEach(select=>{if(select.dataset.gradeSynced==='1')return;const value=select.value||'1';select.className=select.className.replace('w-28','w-36');select.innerHTML='<option value="1">Cấp 1 — Rất bền</option><option value="2">Cấp 2 — Bền</option><option value="3">Cấp 3 — Khá bền</option><option value="4">Cấp 4 — Trung bình</option><option value="5">Cấp 5 — Kém bền</option>';select.value=value;select.dataset.gradeSynced='1'});sync();new MutationObserver(sync).observe(rows,{childList:true,subtree:true});};document.addEventListener('DOMContentLoaded',init);document.addEventListener('turbo:load',init);if(document.readyState!=='loading')init();})();
+</script>
+<script>
+(() => {
+    const init = () => {
+        const labels = {
+            unit_price: 'Đơn giá',
+            total_amount: 'Thành tiền',
+            contract_invoice_number: 'Số hợp đồng/Hóa đơn',
+            supplier: 'Đơn vị cung cấp',
+            depreciation_rate: 'Khấu hao (%)'
+        };
+        const addPublicAssetFields = (form, anchorSelector) => {
+            if (!form || form.dataset.publicAssetFields === '1') return;
+            form.dataset.publicAssetFields = '1';
+            const anchor = form.querySelector(anchorSelector) || form.lastElementChild;
+            const wrap = document.createElement('div');
+            wrap.className = 'public-asset-fields grid gap-3 rounded-lg border bg-slate-50 p-3 md:col-span-4 md:grid-cols-5';
+            wrap.innerHTML = Object.entries(labels).map(([name, label]) => `<label class="text-sm font-semibold text-slate-700">${label}<input name="${name}" ${name === 'depreciation_rate' ? 'type="number" min="0" max="100" step="0.01" value="0"' : (name.includes('amount') || name.includes('price') ? 'type="number" min="0" step="1000"' : 'type="text"')} class="mt-1 w-full rounded border bg-white px-3 py-2"></label>`).join('');
+            const type = document.createElement('label');
+            type.className = 'text-sm font-semibold text-slate-700';
+            type.innerHTML = '<span class="mb-1 block">Loại quản lý</span><select name="management_type" class="w-full rounded border bg-white px-3 py-2"><option value="MATERIAL">Quản lý vật tư</option><option value="ASSET">Quản lý tài sản</option></select>';
+            anchor?.before(type);
+            type.after(wrap);
+            const select = type.querySelector('select');
+            const sync = () => wrap.classList.toggle('hidden', select.value !== 'ASSET');
+            const qty = form.querySelector('input[name="quantity"]');
+            const unit = wrap.querySelector('input[name="unit_price"]');
+            const total = wrap.querySelector('input[name="total_amount"]');
+            const autoTotal = () => {
+                if (!total || Number(total.value || 0) > 0) return;
+                const value = Number(unit?.value || 0) * Number(qty?.value || 0);
+                if (value > 0) total.value = String(Math.round(value));
+            };
+            select.addEventListener('change', sync);
+            unit?.addEventListener('input', autoTotal);
+            qty?.addEventListener('input', () => { if (total) total.value = ''; autoTotal(); });
+            sync();
+        };
+        addPublicAssetFields(document.querySelector('#inventory-panel-single form'), 'button');
+        addPublicAssetFields(document.querySelector('#inventory-panel-bulk form'), '#inventory-add-row');
+    };
+    document.addEventListener('DOMContentLoaded', init);
+    document.addEventListener('turbo:load', init);
+    if (document.readyState !== 'loading') init();
+})();
+</script>
+<script>
+(() => {
+    const init = () => {
+        const panel = document.getElementById('inventory-panel-single');
+        const room = panel?.querySelector('#single-room');
+        const unit = panel?.querySelector('select[name="holding_unit_id"]');
+        const address = panel?.querySelector('#single-address-value');
+        if (!panel || !room || !unit || room.dataset.unitSyncReady === '1') return;
+        room.dataset.unitSyncReady = '1';
+        const sync = () => {
+            const option = room.selectedOptions?.[0];
+            const unitId = option?.dataset?.unit || '';
+            if (address && option?.value) address.value = option.textContent.trim();
+            if (!unitId) return;
+            if (unit.tomselect) unit.tomselect.setValue(String(unitId), true);
+            else unit.value = String(unitId);
+        };
+        room.addEventListener('change', sync);
+        room.tomselect?.on?.('change', sync);
+        setTimeout(sync, 80);
+    };
+    document.addEventListener('DOMContentLoaded', init);
+    document.addEventListener('turbo:load', init);
+    if (document.readyState !== 'loading') init();
+})();
+</script>
+<script>
+(() => {
+    const setReasonOptions = (select, type, placeholder) => {
+        if (!select) return;
+        const current = select.tomselect ? select.tomselect.getValue() : select.value;
+        const items = (window.inventoryReasonOptions || {})[type] || [];
+        const options = items.map(item => ({ value: item[0], text: `${item[0]} - ${item[1]}` }));
+        if (select.tomselect) {
+            select.tomselect.clear(true);
+            select.tomselect.clearOptions();
+            select.tomselect.addOption(options);
+            select.tomselect.refreshOptions(false);
+            if (options.some(option => option.value === current)) select.tomselect.setValue(current, true);
+        } else {
+            select.innerHTML = `<option value="">${placeholder}</option>` + options.map(option => `<option value="${option.value}">${option.text}</option>`).join('');
+            select.value = options.some(option => option.value === current) ? current : '';
+        }
+    };
+    const init = () => {
+        const form = document.querySelector('#inventory-panel-single form');
+        const asset = form?.querySelector('#single-asset');
+        if (!form || !asset || form.dataset.singleMaterialSubmit === '1') return;
+        form.dataset.singleMaterialSubmit = '1';
+        form.addEventListener('submit', () => {
+            const value = asset.tomselect ? asset.tomselect.getValue() : asset.value;
+            if (!String(value).startsWith('material-')) return;
+            let material = form.querySelector('input[name="material_id"]');
+            if (!material) {
+                material = document.createElement('input');
+                material.type = 'hidden';
+                material.name = 'material_id';
+                form.append(material);
+            }
+            material.value = String(value).replace('material-', '');
+            asset.disabled = true;
+        });
+    };
+    document.addEventListener('DOMContentLoaded', init);
+    document.addEventListener('turbo:load', init);
+    if (document.readyState !== 'loading') init();
+})();
+</script>
+<script>
+(() => {
+    const reasonOptions = type => (window.inventoryReasonOptions || {})[type] || [];
+    const optionPayload = (type) => reasonOptions(type).map(item => ({ value: item[0], text: `${item[0]} - ${item[1]}` }));
+    const syncSelect = (select, type, placeholder) => {
+        if (!select) return;
+        const current = select.tomselect ? select.tomselect.getValue() : select.value;
+        const options = optionPayload(type);
+        if (select.tomselect) {
+            select.tomselect.clear(true);
+            select.tomselect.clearOptions();
+            select.tomselect.addOptions(options);
+            select.tomselect.refreshOptions(false);
+            if (options.some(option => option.value === current)) select.tomselect.setValue(current, true);
+        } else {
+            select.innerHTML = `<option value="">${placeholder}</option>` + options.map(option => `<option value="${option.value}">${option.text}</option>`).join('');
+            select.value = options.some(option => option.value === current) ? current : '';
+        }
+    };
+    const init = () => {
+        const bulkType = document.getElementById('inventory-update-type');
+        const bulkReason = document.getElementById('inventory-update-reason');
+        if (bulkType && bulkReason && bulkReason.dataset.reasonFixed !== '1') {
+            bulkReason.dataset.reasonFixed = '1';
+            const refresh = () => syncSelect(bulkReason, bulkType.value || 'IN', 'Chọn lý do');
+            bulkType.addEventListener('change', refresh);
+            setTimeout(refresh, 50);
+            setTimeout(refresh, 250);
+        }
+
+        const single = document.getElementById('inventory-panel-single');
+        const singleType = single?.querySelector('[name="change_type"]');
+        const singleReason = single?.querySelector('#single-reason-choice');
+        const singleOther = single?.querySelector('#single-reason-other');
+        if (singleType && singleReason && singleReason.dataset.reasonFixed !== '1') {
+            singleReason.dataset.reasonFixed = '1';
+            const refresh = () => {
+                syncSelect(singleReason, singleType.value || 'IN', 'Chọn lý do cập nhật');
+                if (singleOther) {
+                    singleOther.classList.add('hidden');
+                    singleOther.required = false;
+                    singleOther.value = '';
+                }
+            };
+            singleType.addEventListener('change', refresh);
+            singleReason.addEventListener('change', () => {
+                if (!singleOther) return;
+                const value = singleReason.tomselect ? singleReason.tomselect.getValue() : singleReason.value;
+                const other = ['T06', 'G08'].includes(value);
+                singleOther.classList.toggle('hidden', !other);
+                singleOther.required = other;
+                if (!other) singleOther.value = window.inventoryReasonText?.(value) || value || '';
+            });
+            setTimeout(refresh, 50);
+            setTimeout(refresh, 250);
+        }
+    };
+    document.addEventListener('DOMContentLoaded', init);
+    document.addEventListener('turbo:load', init);
+    if (document.readyState !== 'loading') init();
+})();
 </script>
