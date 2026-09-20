@@ -129,6 +129,20 @@ class SyncPermissionsAndRoles extends Command
             'standard-hours.hour-exchanges' => ['view', 'manage'],
             'standard-hours.settings' => ['view', 'manage'],
 
+            // Nghiên cứu khoa học
+            'scientific-research' => ['view', 'create', 'edit', 'delete', 'approve', 'export', 'portal'],
+            'scientific-research.announcements' => ['view', 'index', 'show', 'create', 'store', 'edit', 'update', 'delete', 'destroy'],
+            'scientific-research.registrations' => ['view', 'index', 'show', 'create', 'store', 'edit', 'update', 'delete', 'destroy', 'submit', 'unit-approve', 'agency-approve', 'return', 'status', 'sync-standard-hours'],
+            'scientific-research.results' => ['view', 'index', 'show', 'create', 'store', 'edit', 'update', 'delete', 'destroy', 'submit', 'approve', 'status'],
+            'scientific-research.staff' => ['view', 'index', 'show', 'create', 'store', 'edit', 'update', 'delete', 'destroy'],
+            'scientific-research.plans' => ['view', 'index', 'show', 'create', 'store', 'edit', 'update', 'delete', 'destroy'],
+            'scientific-research.councils' => ['view', 'index', 'show', 'create', 'store', 'edit', 'update', 'delete', 'destroy'],
+            'scientific-research.funding' => ['view', 'index', 'show', 'create', 'store', 'edit', 'update', 'delete', 'destroy'],
+            'scientific-research.products' => ['view', 'index', 'show', 'create', 'store', 'edit', 'update', 'delete', 'destroy'],
+            'scientific-research.repository' => ['view', 'index', 'show', 'create', 'store', 'edit', 'update', 'delete', 'destroy'],
+            'scientific-research.reports' => ['view', 'export', 'csv', 'excel', 'word'],
+            'scientific-research.audit' => ['view', 'index'],
+
             // Trash bin (soft-deleted records) — super-admin / manager
             'trash' => ['index', 'show', 'restore', 'delete'],
 

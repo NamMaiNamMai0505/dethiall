@@ -40,6 +40,7 @@ class SystemNotifier
         'teaching-assignments' => 'Phân công giảng dạy',
         'schedule-details' => 'Chi tiết lịch học',
         'standard-hours' => 'Giờ chuẩn GV',
+        'scientific-research' => 'Nghiên cứu khoa học',
         'roles' => 'Vai trò',
         'permissions' => 'Quyền hệ thống',
         'dashboards' => 'Bảng điều khiển',

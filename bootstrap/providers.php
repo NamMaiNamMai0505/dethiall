@@ -33,6 +33,7 @@ return [
     Modules\ExamOrganization\Providers\ExamOrganizationServiceProvider::class,
     Modules\Inventory\Providers\InventoryServiceProvider::class,
     Modules\LeaveManagement\Providers\LeaveManagementServiceProvider::class,
+    Modules\ScientificResearch\Providers\ScientificResearchServiceProvider::class,
 
     // Third-party Service Providers
     Spatie\Permission\PermissionServiceProvider::class,

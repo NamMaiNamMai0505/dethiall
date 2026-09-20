@@ -46,6 +46,10 @@ final class RoleCatalog
 
     private const IMPORT = ApplicationRegistry::ACTION_IMPORT;
 
+    private const ASSIGN = ApplicationRegistry::ACTION_ASSIGN;
+
+    private const COMPLETE = ApplicationRegistry::ACTION_COMPLETE;
+
     private const BANK = ApplicationRegistry::ACTION_BANK;
 
     private const DRAW = ApplicationRegistry::ACTION_DRAW;
@@ -270,6 +274,9 @@ final class RoleCatalog
             'standard-hours.research-records' => self::FULL,
             'standard-hours.external-activities' => self::FULL,
             'standard-hours.reports' => [self::VIEW, self::EXPORT],
+            'scientific-research' => [self::VIEW],
+            'scientific-research.registrations' => [self::VIEW, self::ASSIGN],
+            'scientific-research.results' => [self::VIEW],
             // Lịch đào tạo — khoa gán bài học/giảng viên trên khung PĐT đã xếp
             'training-schedules' => [self::VIEW],
             'schedule-details' => [self::VIEW, self::EDIT],
@@ -406,6 +413,18 @@ final class RoleCatalog
             'standard-hours.calculations' => [self::VIEW],
             'standard-hours.reports' => [self::VIEW, self::EXPORT],
             'standard-hours.settings.research-rules' => [self::VIEW, self::EDIT],
+            'scientific-research' => self::FULL,
+            'scientific-research.announcements' => self::FULL,
+            'scientific-research.registrations' => [self::VIEW, self::EDIT, self::APPROVE, self::ASSIGN, self::COMPLETE],
+            'scientific-research.results' => [self::VIEW, self::EDIT, self::APPROVE],
+            'scientific-research.staff' => self::FULL,
+            'scientific-research.plans' => self::FULL,
+            'scientific-research.councils' => self::FULL,
+            'scientific-research.funding' => self::FULL,
+            'scientific-research.products' => self::FULL,
+            'scientific-research.repository' => self::FULL,
+            'scientific-research.reports' => [self::VIEW, self::EXPORT],
+            'scientific-research.audit' => [self::VIEW],
             'dashboards' => [self::VIEW],
             'instructors' => [self::VIEW],
             'units' => [self::VIEW],
@@ -431,6 +450,12 @@ final class RoleCatalog
             'standard-hours.conversion-records' => self::FULL,
             'standard-hours.research-records' => self::FULL,
             'standard-hours.external-activities' => self::FULL,
+            'scientific-research' => [self::VIEW, self::CREATE],
+            'scientific-research.registrations' => [self::VIEW, self::CREATE, self::SUBMIT],
+            'scientific-research.results' => [self::VIEW, self::CREATE, self::EDIT, self::SUBMIT],
+            'scientific-research.plans' => [self::VIEW],
+            'scientific-research.products' => [self::VIEW, self::CREATE, self::EDIT],
+            'scientific-research.repository' => [self::VIEW, self::CREATE],
             // LMS — dạy khóa được phân công
             'lms' => [self::VIEW, self::EDIT],
             'lms.lessons' => self::FULL,

@@ -29,6 +29,10 @@ final class ApplicationRegistry
 
     public const ACTION_IMPORT = 'import';
 
+    public const ACTION_ASSIGN = 'assign';
+
+    public const ACTION_COMPLETE = 'complete';
+
     public const ACTION_BANK = 'bank';
 
     public const ACTION_DRAW = 'draw';
@@ -86,6 +90,8 @@ final class ApplicationRegistry
             self::ACTION_APPROVE => 'Duyệt',
             self::ACTION_EXPORT => 'Xuất',
             self::ACTION_IMPORT => 'Nhập dữ liệu',
+            self::ACTION_ASSIGN => 'Phân công / duyệt cấp đơn vị',
+            self::ACTION_COMPLETE => 'Hoàn thành / đồng bộ',
         ];
     }
 
@@ -129,6 +135,11 @@ final class ApplicationRegistry
                 'key' => 'standard-hours',
                 'label' => 'Giờ chuẩn GV',
                 'applications' => self::standardHoursApplications(),
+            ],
+            [
+                'key' => 'scientific-research',
+                'label' => 'Nghiên cứu khoa học',
+                'applications' => self::scientificResearchApplications(),
             ],
             [
                 'key' => 'lms',
@@ -244,9 +255,11 @@ final class ApplicationRegistry
                     self::app('inventory.repairs', 'Phân công / sửa chữa vật tư', [
                         self::ACTION_VIEW => ['index', 'show'],
                         self::ACTION_CREATE => ['create'],
+                        self::ACTION_ASSIGN => ['assign'],
+                        self::ACTION_COMPLETE => ['complete'],
                         self::ACTION_EDIT => ['edit'],
                         self::ACTION_DELETE => ['delete'],
-                    ]),
+                    ], 'Phân công = giao người sửa. Hoàn thành = tài khoản được giao chỉ cập nhật kết quả việc của mình.'),
                     self::app('inventory.reports', 'Báo cáo vật tư', [
                         self::ACTION_VIEW => ['index', 'show'],
                         self::ACTION_EXPORT => ['export'],
@@ -464,6 +477,58 @@ final class ApplicationRegistry
             self::app('standard-hours.declarations', 'Hồ sơ kê khai giờ chuẩn', self::CRUD_STANDARD_HOURS + [
                 self::ACTION_APPROVE => ['approve'],
             ]),
+        ];
+    }
+
+    private static function scientificResearchApplications(): array
+    {
+        return [
+            self::app('scientific-research', 'Phân hệ nghiên cứu khoa học', [
+                self::ACTION_VIEW => ['index', 'show', 'view', 'portal'],
+                self::ACTION_CREATE => ['create', 'store'],
+                self::ACTION_EDIT => ['edit', 'update'],
+                self::ACTION_DELETE => ['delete', 'destroy'],
+                self::ACTION_APPROVE => ['approve', 'status'],
+                self::ACTION_EXPORT => ['export'],
+            ], 'Dùng danh mục NCKH từ phân hệ Giờ chuẩn GV.'),
+            self::app('scientific-research.announcements', 'Thông báo NCKH', self::scientificCrudActions()),
+            self::app('scientific-research.registrations', 'Đăng ký NCKH', [
+                self::ACTION_VIEW => ['view', 'index', 'show'],
+                self::ACTION_CREATE => ['create', 'store'],
+                self::ACTION_EDIT => ['edit', 'update'],
+                self::ACTION_DELETE => ['delete', 'destroy'],
+                self::ACTION_SUBMIT => ['submit'],
+                self::ACTION_ASSIGN => ['unit-approve'],
+                self::ACTION_APPROVE => ['agency-approve', 'return', 'status'],
+                self::ACTION_COMPLETE => ['sync-standard-hours'],
+            ]),
+            self::app('scientific-research.results', 'Nộp kết quả NCKH', array_replace(self::scientificCrudActions(), [
+                self::ACTION_SUBMIT => ['submit'],
+                self::ACTION_APPROVE => ['approve', 'status'],
+            ])),
+            self::app('scientific-research.staff', 'Cán bộ NCKH', self::scientificCrudActions()),
+            self::app('scientific-research.plans', 'Kế hoạch NCKH', self::scientificCrudActions()),
+            self::app('scientific-research.councils', 'Hội đồng khoa học', self::scientificCrudActions()),
+            self::app('scientific-research.funding', 'Kinh phí NCKH', self::scientificCrudActions()),
+            self::app('scientific-research.products', 'Sản phẩm khoa học', self::scientificCrudActions()),
+            self::app('scientific-research.repository', 'Kho dữ liệu NCKH', self::scientificCrudActions()),
+            self::app('scientific-research.reports', 'Báo cáo NCKH', [
+                self::ACTION_VIEW => ['view'],
+                self::ACTION_EXPORT => ['export', 'csv', 'excel', 'word'],
+            ]),
+            self::app('scientific-research.audit', 'Nhật ký NCKH', [
+                self::ACTION_VIEW => ['view', 'index'],
+            ]),
+        ];
+    }
+
+    private static function scientificCrudActions(): array
+    {
+        return [
+            self::ACTION_VIEW => ['index', 'show', 'view'],
+            self::ACTION_CREATE => ['create', 'store'],
+            self::ACTION_EDIT => ['edit', 'update'],
+            self::ACTION_DELETE => ['delete', 'destroy'],
         ];
     }
 

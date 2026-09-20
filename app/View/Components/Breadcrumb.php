@@ -143,6 +143,8 @@ class Breadcrumb extends Component
             'danh mục nckh' => 'standard-hours.research-categories.index',
             'kê khai hđ cm' => 'standard-hours.conversion-records.index',
             'kê khai nckh' => 'standard-hours.research-records.index',
+            'nghiên cứu khoa học' => 'scientific-research.index',
+            'nckh' => 'scientific-research.index',
             'tính giờ chuẩn' => 'standard-hours.calculations.index',
             'kết quả của tôi' => 'standard-hours.my-results.index',
             'báo cáo' => 'standard-hours.reports.index',
