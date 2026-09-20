@@ -8,7 +8,7 @@
         <label class="text-sm font-semibold md:col-span-4">Loại nhật ký
             <select name="log_type" id="inventory-log-type" class="mt-1 w-full rounded border p-2">
                 <option value="all" @selected($selectedLogType === 'all')>Tất cả</option>
-                <option value="update" @selected($selectedLogType === 'update')>Cập nhật</option>
+                <option value="update" @selected($selectedLogType === 'update')>Tăng / giảm / điều chỉnh</option>
                 <option value="movement" @selected($selectedLogType === 'movement')>Nhập xuất</option>
                 <option value="broken" @selected($selectedLogType === 'broken')>Hỏng / sửa chữa</option>
                 <option value="transfer" @selected($selectedLogType === 'transfer')>Điều động / thu hồi</option>
@@ -27,13 +27,9 @@
         <label class="log-filter-field text-sm font-semibold" data-log-filter="update">Loại cập nhật
             <select name="update_action" class="mt-1 w-full rounded border p-2">
                 <option value="">Tất cả</option>
-                <option value="CREATE" @selected(request('update_action') === 'CREATE')>Thêm mới</option>
-                <option value="Thu hồi / trả về kho" @selected(request('update_action') === 'Thu hồi / trả về kho')>Thu hồi / trả kho</option>
-                <option value="DECREASE" @selected(request('update_action') === 'DECREASE')>Giảm</option>
-                <option value="INCREASE" @selected(request('update_action') === 'INCREASE')>Tăng</option>
-                <option value="Thanh lý" @selected(request('update_action') === 'Thanh lý')>Thanh lý</option>
-                <option value="UPDATE" @selected(request('update_action') === 'UPDATE')>Cập nhật</option>
-                <option value="TRANSFER" @selected(request('update_action') === 'TRANSFER')>Điều động</option>
+                <option value="INCREASE" @selected(request('update_action') === 'INCREASE')>Tăng số lượng</option>
+                <option value="DECREASE" @selected(request('update_action') === 'DECREASE')>Giảm số lượng</option>
+                <option value="ADJUST" @selected(request('update_action') === 'ADJUST')>Điều chỉnh số lượng</option>
             </select>
         </label>
         <label class="log-filter-field text-sm font-semibold" data-log-filter="movement">Loại nhập xuất

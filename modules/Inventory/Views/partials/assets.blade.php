@@ -1,5 +1,26 @@
 ﻿<div class="space-y-5">
-    <script>document.addEventListener('DOMContentLoaded',()=>{const form=document.querySelector('#inventory-panel-bulk form'),button=form?.querySelector('button:not(#inventory-add-row):last-of-type');if(button)button.textContent='Lưu';form?.addEventListener('submit',()=>{form.querySelectorAll('#inventory-bulk-rows tr').forEach(row=>{const material=row.querySelector('.bulk-material'),selected=material?.selectedOptions?.[0],data=selected?.dataset||{};const set=(name,value)=>{const field=row.querySelector(`[name$="[${name}]"]`);if(field)field.value=value||''};set('material_id',material?.value);set('name',data.name);set('asset_code',data.code);set('install_address',data.address);});});});</script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const form = document.querySelector('#inventory-panel-bulk form');
+            const button = form?.querySelector('button:not(#inventory-add-row):last-of-type');
+            if (button) button.textContent = 'Lưu';
+            form?.addEventListener('submit', () => {
+                form.querySelectorAll('#inventory-bulk-rows tr').forEach(row => {
+                    const material = row.querySelector('.bulk-material');
+                    const selected = material?.selectedOptions?.[0];
+                    const data = selected?.dataset || {};
+                    const set = (name, value, overwrite = true) => {
+                        const field = row.querySelector(`[name$="[${name}]"]`);
+                        if (field && (overwrite || !field.value)) field.value = value || '';
+                    };
+                    set('material_id', data.materialId || material?.value);
+                    set('name', data.name);
+                    set('asset_code', data.code);
+                    set('install_address', data.address, false);
+                });
+            });
+        });
+    </script>
     <script>
         window.inventoryReasonOptions={IN:[['T01','Trên cấp'],['T02','Điều động đến'],['T03','Mua sắm'],['T04','Kiểm kê'],['T05','Phân cấp'],['T06','Khác']],OUT:[['G01','Trả trên'],['G02','Điều động đi'],['G03','Hao hụt'],['G04','Hư hỏng'],['G05','Kiểm kê'],['G06','Thanh lý'],['G07','Phân cấp'],['G08','Khác']]};
         window.inventoryReasonText=function(code){for(const group of Object.values(window.inventoryReasonOptions||{})){const found=group.find(item=>item[0]===code);if(found)return found[0]+' - '+found[1];}return code||''};
@@ -13,17 +34,57 @@
         document.addEventListener('DOMContentLoaded',()=>{setTimeout(()=>{document.querySelectorAll('#inventory-bulk-rows select[name$="[grade]"]').forEach(select=>{const labels={1:'Cấp 1 — Rất bền',2:'Cấp 2 — Bền',3:'Cấp 3 — Khá bền',4:'Cấp 4 — Trung bình',5:'Cấp 5 — Kém bền'};Object.entries(labels).forEach(([value,text])=>{const option=select.querySelector(`option[value="${value}"]`);if(option)option.textContent=text});const value=select.value||'1';if(select.tomselect){select.tomselect.updateOption(value,{value,text:labels[value]});select.tomselect.refreshOptions(false)}else{select.value=value}select.nextElementSibling?.querySelector('.item')?.replaceChildren(document.createTextNode(labels[value]||labels[1]));});},300)});
     </script>
     <script>document.addEventListener('DOMContentLoaded',function(){const form=document.querySelector('form[action="{{ route('inventory.assets.bulk.store') }}"]'),labels=['Ngành vật tư','Tòa nhà','Phòng','Đơn vị quản lý'];if(form){form.querySelectorAll(':scope > div:first-of-type > select').forEach((field,index)=>{if(!labels[index]||field.parentElement.tagName==='LABEL')return;const wrap=document.createElement('label');wrap.className='text-sm font-semibold text-slate-700';const title=document.createElement('span');title.className='mb-1 block';title.textContent=labels[index];field.parentNode.insertBefore(wrap,field);wrap.append(title,field)});}});</script>
-    <script>document.addEventListener('DOMContentLoaded',function(){const industries=[@foreach(($industries ?? collect()) as $industry){id:'{{ $industry->id }}',code:'{{ addslashes($industry->code) }}',name:'{{ addslashes($industry->name) }}'},@endforeach];document.querySelectorAll('form[action="{{ route('inventory.import') }}"] select[name="category_id"], form[action="{{ route('inventory.assets.bulk.store') }}"] select[name="category_id"]').forEach(s=>{const selected=s.value;s.innerHTML='<option value="">Chọn ngành vật tư</option>'+industries.map(i=>`<option value="${i.id}">${i.code} — ${i.name}</option>`).join('');s.value=selected});});</script>
+    <script>document.addEventListener('DOMContentLoaded',function(){const industries=[@foreach(($industries ?? collect()) as $industry){id:'{{ $industry->id }}',code:'{{ addslashes($industry->code) }}',name:'{{ addslashes($industry->name) }}'},@endforeach];document.querySelectorAll('form[action="{{ route('inventory.assets.bulk.store') }}"] select[name="category_id"]').forEach(s=>{const selected=s.value;s.innerHTML='<option value="">Chọn ngành vật tư</option>'+industries.map(i=>`<option value="${i.id}">${i.code} — ${i.name}</option>`).join('');s.value=selected});});</script>
     <div class="rounded-2xl border border-blue-100 bg-blue-50/60 px-5 py-4">
         <div class="flex flex-wrap items-center justify-between gap-3">
             <div><h1 class="text-xl font-extrabold text-slate-900">Cập nhật vật tư</h1><p class="mt-1 text-sm text-slate-600">Chọn đúng biểu mẫu theo cách nhập dữ liệu trong sổ vật tư.</p></div>
-            <div class="flex flex-wrap gap-2">
-                <a href="{{ route('inventory.import.template', ['type' => 'material']) }}" class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700">Tải mẫu Excel (.xlsx)</a>
-                <a href="{{ route('inventory.import.template.word', ['type' => 'material']) }}" class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700">Tải mẫu DOCX (.docx)</a>
-            </div>
         </div>
         @php
             $inventoryRows = ($materials ?? collect())->values();
+            $singleMaterialOptions = ($allAssets ?? collect())
+                ->filter(fn ($asset) => $asset->material_id && (int) $asset->quantity > 0 && $asset->material)
+                ->groupBy(fn ($asset) => $asset->material_id.'|'.((int) ($asset->grade ?: 1)))
+                ->map(function ($items) {
+                    $asset = $items->first();
+                    $material = $asset->material;
+                    $grade = (int) ($asset->grade ?: 1);
+                    $rooms = $items->pluck('classroom.name')->filter()->unique()->values();
+
+                    return [
+                        'value' => 'material-'.$material->id.'-grade-'.$grade,
+                        'material_id' => $material->id,
+                        'category_id' => $material->category_id,
+                        'code' => $material->code,
+                        'name' => $material->name,
+                        'address' => $rooms->implode(', ') ?: $material->location,
+                        'quantity' => (int) $items->sum('quantity'),
+                        'grade' => $grade,
+                        'management_type' => '',
+                        'text' => trim(($material->inventory_display_name ?: ($material->code.' — '.$material->name)).' — Cấp '.$grade),
+                    ];
+                })
+                ->values();
+            $materialIdsWithGradeOptions = $singleMaterialOptions->pluck('material_id')->unique();
+            $singleMaterialOptions = $singleMaterialOptions
+                ->concat(
+                    $inventoryRows
+                        ->where('quantity', '>', 0)
+                        ->reject(fn ($material) => $materialIdsWithGradeOptions->contains($material->id))
+                        ->map(fn ($material) => [
+                            'value' => 'material-'.$material->id.'-grade-1',
+                            'material_id' => $material->id,
+                            'category_id' => $material->category_id,
+                            'code' => $material->code,
+                            'name' => $material->name,
+                            'address' => $material->location,
+                            'quantity' => (int) $material->quantity,
+                            'grade' => 1,
+                            'management_type' => '',
+                            'text' => trim(($material->inventory_display_name ?: ($material->code.' — '.$material->name)).' — Cấp 1'),
+                        ])
+                )
+                ->sortBy([['name', 'asc'], ['grade', 'asc']])
+                ->values();
         @endphp
         <div class="mt-4 grid gap-3 sm:grid-cols-3">
             <div class="rounded-xl border border-blue-100 bg-gradient-to-br from-blue-600 to-blue-700 p-4 text-white shadow-sm"><p class="text-xs text-blue-100">Tổng số vật tư</p><p class="mt-2 text-2xl font-extrabold">{{ $inventoryRows->count() }}</p><p class="mt-1 text-xs text-blue-100">Bản ghi trong danh mục</p></div>
@@ -67,20 +128,20 @@
         document.addEventListener('DOMContentLoaded',()=>{const form=document.querySelector('form[action="{{ route('inventory.import') }}"]');if(form&&!form.querySelector('input[name="_token"]')){const input=document.createElement('input');input.type='hidden';input.name='_token';input.value='{{ csrf_token() }}';form.prepend(input);}});
      </script>
      <script>
-         (()=>{const bind=()=>{document.querySelectorAll('.inventory-update-tab').forEach(tab=>{if(tab.dataset.bound==='1')return;tab.dataset.bound='1';tab.addEventListener('click',()=>{const active=tab.dataset.panel;document.querySelectorAll('.inventory-update-tab').forEach(item=>{const on=item===tab;item.classList.toggle('bg-slate-900',on);item.classList.toggle('text-white',on);item.classList.toggle('text-slate-600',!on)});[['bulk','inventory-panel-bulk'],['single','inventory-panel-single'],['import','inventory-panel-import']].forEach(([name,id])=>document.getElementById(id)?.classList.toggle('hidden',name!==active));});});};document.addEventListener('turbo:load',bind);bind();})();
+         (()=>{const bind=()=>{document.querySelectorAll('.inventory-update-tab').forEach(tab=>{if(tab.dataset.bound==='1')return;tab.dataset.bound='1';tab.addEventListener('click',()=>{const active=tab.dataset.panel;document.querySelectorAll('.inventory-update-tab').forEach(item=>{const on=item===tab;item.classList.toggle('bg-slate-900',on);item.classList.toggle('text-white',on);item.classList.toggle('text-slate-600',!on)});[['bulk','inventory-panel-bulk'],['single','inventory-panel-single'],['adjust','inventory-panel-adjust'],['import-update','inventory-panel-import-update'],['import','inventory-panel-import']].forEach(([name,id])=>document.getElementById(id)?.classList.toggle('hidden',name!==active));});});};document.addEventListener('turbo:load',bind);bind();})();
      </script>
      <script>
-         (()=>{const sync=()=>{const active=document.querySelector('.inventory-update-tab.bg-slate-900')?.dataset.panel||'bulk';document.getElementById('inventory-update-meta')?.classList.toggle('hidden',active==='import')};document.addEventListener('click',event=>{if(event.target.closest('.inventory-update-tab'))setTimeout(sync,0)});document.addEventListener('DOMContentLoaded',sync);document.addEventListener('turbo:load',sync);if(document.readyState!=='loading')sync();})();
+         (()=>{const sync=()=>{const active=document.querySelector('.inventory-update-tab.bg-slate-900')?.dataset.panel||'bulk';document.getElementById('inventory-update-meta')?.classList.toggle('hidden',['adjust','import','import-update'].includes(active))};document.addEventListener('click',event=>{if(event.target.closest('.inventory-update-tab'))setTimeout(sync,0)});document.addEventListener('DOMContentLoaded',sync);document.addEventListener('turbo:load',sync);if(document.readyState!=='loading')sync();})();
      </script>
      <div class="rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
-        <div class="flex flex-wrap gap-2" role="tablist"><button type="button" class="inventory-update-tab rounded-lg bg-slate-900 px-4 py-2 text-sm font-bold text-white" data-panel="bulk">▧ Form ngành (nhiều dòng)</button><button type="button" class="inventory-update-tab rounded-lg px-4 py-2 text-sm font-bold text-slate-600" data-panel="single">✎ Nhập từng VT</button><button type="button" class="inventory-update-tab rounded-lg px-4 py-2 text-sm font-bold text-slate-600" data-panel="adjust">⚙ Điều chỉnh</button><button type="button" class="inventory-update-tab rounded-lg px-4 py-2 text-sm font-bold text-slate-600" data-panel="import">⇧ Import VT</button></div>
-        <script>document.addEventListener('DOMContentLoaded',()=>{document.querySelectorAll('.inventory-update-tab').forEach(tab=>tab.addEventListener('click',()=>{const panel=tab.dataset.panel;['bulk','single','adjust','import'].forEach(name=>document.getElementById('inventory-panel-'+name)?.classList.toggle('hidden',name!==panel));}));});</script>
+        <div class="flex flex-wrap gap-2" role="tablist"><button type="button" class="inventory-update-tab rounded-lg bg-slate-900 px-4 py-2 text-sm font-bold text-white" data-panel="bulk">▧ Form ngành (nhiều dòng)</button><button type="button" class="inventory-update-tab rounded-lg px-4 py-2 text-sm font-bold text-slate-600" data-panel="single">✎ Nhập từng VT</button><button type="button" class="inventory-update-tab rounded-lg px-4 py-2 text-sm font-bold text-slate-600" data-panel="adjust">↺ Điều chỉnh</button><button type="button" class="inventory-update-tab rounded-lg px-4 py-2 text-sm font-bold text-slate-600" data-panel="import-update">⇧ Import cập nhật VT</button><button type="button" class="inventory-update-tab rounded-lg px-4 py-2 text-sm font-bold text-slate-600" data-panel="import">⇧ Import VT</button></div>
+        <script>document.addEventListener('DOMContentLoaded',()=>{document.querySelectorAll('.inventory-update-tab').forEach(tab=>tab.addEventListener('click',()=>{const panel=tab.dataset.panel;['bulk','single','adjust','import-update','import'].forEach(name=>document.getElementById('inventory-panel-'+name)?.classList.toggle('hidden',name!==panel));}));});</script>
     <section id="inventory-panel-single" data-static-form="1" class="inventory-update-panel hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
         <h2 class="mb-4 text-lg font-bold text-slate-900">Nhập từng vật tư</h2>
         <form method="POST" action="{{ route('inventory.assets.change') }}" class="grid gap-4 md:grid-cols-4">@csrf
             <label class="text-sm font-semibold">Ngành vật tư<select id="single-industry" class="mt-1 w-full rounded-lg border px-3 py-2.5"><option value="">Chọn ngành vật tư</option>@foreach(($industries ?? collect()) as $item)<option value="{{ $item->id }}">{{ $item->code }} — {{ $item->name }}</option>@endforeach</select></label>
             <label class="text-sm font-semibold">Loại vật tư<select id="single-category" class="mt-1 w-full rounded-lg border px-3 py-2.5"><option value="">Chọn loại vật tư</option>@foreach(($categories ?? collect()) as $item)<option value="{{ $item->id }}" data-parent="{{ $item->parent_id }}">{{ $item->code }} — {{ $item->name }}</option>@endforeach</select></label>
-            <label class="text-sm font-semibold md:col-span-2">Vật tư<select id="single-asset" name="asset_id" required class="mt-1 w-full rounded-lg border px-3 py-2.5"><option value="">Chọn vật tư</option>@foreach(($materials ?? collect())->where('quantity', '>', 0) as $item)@php $itemGrade = (int) data_get($item, 'grade', 1); @endphp<option value="material-{{ $item->id }}" data-code="{{ $item->code }}" data-name="{{ $item->name }}" data-quantity="{{ (int) $item->quantity }}" data-grade="{{ $itemGrade ?: 1 }}" data-category="{{ $item->category_id }}" data-address="{{ $item->location }}">{{ $item->inventory_display_name }} — Cấp {{ $itemGrade ?: 1 }}</option>@endforeach</select></label>
+            <label class="text-sm font-semibold md:col-span-2">Vật tư<select id="single-asset" name="asset_id" required class="mt-1 w-full rounded-lg border px-3 py-2.5"><option value="">Chọn vật tư</option>@foreach($singleMaterialOptions as $item)<option value="{{ $item['value'] }}" data-material-id="{{ $item['material_id'] }}" data-code="{{ $item['code'] }}" data-name="{{ $item['name'] }}" data-quantity="{{ $item['quantity'] }}" data-grade="{{ $item['grade'] }}" data-category="{{ $item['category_id'] }}" data-address="{{ $item['address'] }}" data-management-type="{{ $item['management_type'] }}">{{ $item['text'] }} — SL {{ number_format((int) $item['quantity'], 0, ',', '.') }}</option>@endforeach</select></label>
             <label class="text-sm font-semibold">Mã vật tư<input id="single-selected-code" name="asset_code" readonly class="mt-1 w-full rounded-lg border bg-slate-50 px-3 py-2.5"></label>
             <label class="text-sm font-semibold">Tên vật tư<input id="single-selected-name" name="name" readonly class="mt-1 w-full rounded-lg border bg-slate-50 px-3 py-2.5"></label>
             <label class="text-sm font-semibold">Số lượng trước cập nhật<input id="single-before-quantity" readonly class="mt-1 w-full rounded-lg border bg-slate-50 px-3 py-2.5"></label>
@@ -99,30 +160,167 @@
             <button class="rounded-lg bg-slate-900 px-5 py-3 font-bold text-white md:col-span-4">Lưu cập nhật</button>
         </form>
     </section>
-    <section id="inventory-panel-adjust" class="inventory-update-panel hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 class="mb-4 text-lg font-bold text-slate-900">Điều chỉnh vật tư</h2>
-        <form method="POST" action="{{ route('inventory.assets.material-adjust') }}" class="grid gap-4 md:grid-cols-4">@csrf
-            <label class="text-sm font-semibold">Ngành vật tư<select id="adjust-industry" class="mt-1 w-full rounded-lg border px-3 py-2.5"><option value="">Chọn ngành vật tư</option>@foreach(($industries ?? collect()) as $item)<option value="{{ $item->id }}">{{ $item->code }} — {{ $item->name }}</option>@endforeach</select></label>
-            <label class="text-sm font-semibold">Loại vật tư<select id="adjust-category" class="mt-1 w-full rounded-lg border px-3 py-2.5"><option value="">Chọn loại vật tư</option>@foreach(($categories ?? collect()) as $item)<option value="{{ $item->id }}" data-parent="{{ $item->parent_id }}">{{ $item->code }} — {{ $item->name }}</option>@endforeach</select></label>
-            <label class="text-sm font-semibold md:col-span-2">Vật tư<select id="adjust-material" name="material_id" required class="mt-1 w-full rounded-lg border px-3 py-2.5"><option value="">Chọn vật tư</option>@foreach(($materials ?? collect()) as $item)<option value="{{ $item->id }}" data-category="{{ $item->category_id }}" data-quantity="{{ (int) $item->quantity }}">{{ $item->inventory_display_name }}</option>@endforeach</select></label>
-            <label class="text-sm font-semibold">Số lượng trước cập nhật<input id="adjust-before" readonly class="mt-1 w-full rounded-lg border bg-slate-50 px-3 py-2.5"></label>
-            <label class="text-sm font-semibold">Số lượng sau cập nhật<input id="adjust-after" name="quantity" type="number" min="0" step="1" required class="mt-1 w-full rounded-lg border px-3 py-2.5"></label>
-            <label class="text-sm font-semibold md:col-span-2">Lý do điều chỉnh<input name="reason" required placeholder="Nhập lý do điều chỉnh" class="mt-1 w-full rounded-lg border px-3 py-2.5"></label>
-            <label class="text-sm font-semibold">Ngày quyết định<input name="decision_date" type="date" class="mt-1 w-full rounded-lg border px-3 py-2.5"></label>
-            <label class="text-sm font-semibold">Số quyết định<input name="decision_number" class="mt-1 w-full rounded-lg border px-3 py-2.5"></label>
-            <label class="text-sm font-semibold">Người ký<input name="signer" class="mt-1 w-full rounded-lg border px-3 py-2.5"></label>
-            <label class="text-sm font-semibold md:col-span-3">Ghi chú<textarea name="note" rows="2" class="mt-1 w-full rounded-lg border px-3 py-2.5"></textarea></label>
-            <button class="rounded-lg bg-slate-900 px-5 py-3 font-bold text-white md:col-span-4">Lưu điều chỉnh</button>
-        </form>
-    </section>
-    <script>
-        document.addEventListener('DOMContentLoaded',()=>{const i=document.getElementById('adjust-industry'),c=document.getElementById('adjust-category'),m=document.getElementById('adjust-material'),before=document.getElementById('adjust-before'),after=document.getElementById('adjust-after');if(!i||!c||!m)return;const categories=[...c.options].slice(1).map(o=>o.cloneNode(true)),materials=[...m.options].slice(1).map(o=>o.cloneNode(true));const refresh=()=>{const industry=i.value;c.innerHTML='<option value="">Chọn loại vật tư</option>';categories.filter(o=>!industry||o.dataset.parent===industry).forEach(o=>{o.hidden=false;c.append(o)});m.innerHTML='<option value="">Chọn vật tư</option>';materials.filter(o=>c.value&&o.dataset.category===c.value).forEach(o=>{o.hidden=false;m.append(o)});before.value='';after.value=''};const sync=()=>{const q=parseInt(m.selectedOptions[0]?.dataset.quantity||'0',10);before.value=q;after.value=q};i.addEventListener('change',()=>{c.value='';refresh()});c.addEventListener('change',refresh);m.addEventListener('change',sync);refresh()});
-    </script>
     <script>
         (()=>{document.getElementById('single-reason-choice')?.setAttribute('data-native-select','');})();
     </script>
     <script>
-        (()=>{const init=()=>{const p=document.getElementById('inventory-panel-single');if(!p||p.dataset.staticForm!=='1'||p.dataset.cascadeBound==='1')return;p.dataset.cascadeBound='1';const i=p.querySelector('#single-industry'),c=p.querySelector('#single-category'),a=p.querySelector('#single-asset'),f=a.form,all=[...a.options].slice(1),categories=[...c.options].slice(1),type=p.querySelector('[name="change_type"]'),qty=p.querySelector('#single-change-quantity'),before=p.querySelector('#single-before-quantity'),after=p.querySelector('#single-after-quantity'),code=p.querySelector('#single-selected-code'),name=p.querySelector('#single-selected-name'),grade=p.querySelector('#single-selected-grade'),reasonChoice=p.querySelector('#single-reason-choice'),reasonOther=p.querySelector('#single-reason-other'),building=p.querySelector('#single-building'),room=p.querySelector('#single-room'),address=p.querySelector('#single-address-value');const refreshReasons=()=>{const items=(window.inventoryReasonOptions||{})[type.value]||[];reasonChoice.innerHTML='<option value="">Chọn lý do cập nhật</option>'+items.map(item=>`<option value="${item[0]}">${item[0]} - ${item[1]}</option>`).join('');reasonOther.classList.add('hidden');reasonOther.required=false;reasonOther.value='';};const filterRooms=()=>{if(!building||!room)return;const current=room.value;[...room.options].forEach((o,index)=>{if(index===0)return;const allowed=!building.value||String(o.dataset.building)===String(building.value);o.hidden=!allowed;o.disabled=!allowed;});if(current&&room.selectedOptions[0]?.disabled)room.value='';address.value=room.selectedOptions[0]?.textContent||'';};const filter=()=>{const industry=i.value,category=c.value;categories.forEach(o=>{const allowed=!industry||String(o.dataset.parent)===String(industry);o.hidden=!allowed;o.disabled=!allowed;});all.forEach(o=>{const allowed=!!category&&String(o.dataset.category)===String(category);o.hidden=!allowed;o.disabled=!allowed;});};const resetAsset=()=>{a.value='';code.value='';name.value='';before.value='';after.value='';grade.value='';const h=f.querySelector('[name=material_id]');if(h)h.remove();};const refreshQuantity=()=>{const current=parseInt(before.value||'0',10),change=parseInt(qty.value||'0',10);after.value=type.value==='OUT'?Math.max(0,current-change):current+change;};i.addEventListener('change',()=>{c.value='';resetAsset();filter();});c.addEventListener('change',()=>{resetAsset();filter();});building?.addEventListener('change',filterRooms);room?.addEventListener('change',filterRooms);a.addEventListener('change',()=>{const o=a.selectedOptions[0];code.value=o?.dataset.code||'';name.value=o?.dataset.name||'';before.value=parseInt(o?.dataset.quantity||'0',10);grade.value=o?.dataset.grade||'';refreshQuantity();if(a.value.startsWith('material-')){let h=f.querySelector('[name=material_id]');if(!h){h=document.createElement('input');h.type='hidden';h.name='material_id';f.append(h);}h.value=a.value.replace('material-','');}});type.addEventListener('change',()=>{refreshReasons();refreshQuantity();});qty.addEventListener('input',refreshQuantity);reasonChoice.addEventListener('change',()=>{const other=['T06','G08'].includes(reasonChoice.value);reasonOther.classList.toggle('hidden',!other);reasonOther.required=other;if(!other)reasonOther.value=window.inventoryReasonText(reasonChoice.value);});f.addEventListener('submit',()=>{if(a.value.startsWith('material-'))a.disabled=true;let rc=f.querySelector('[name=reason_code]');if(!rc){rc=document.createElement('input');rc.type='hidden';rc.name='reason_code';f.append(rc);}rc.value=reasonChoice.value;if(!['T06','G08'].includes(reasonChoice.value))reasonOther.value=window.inventoryReasonText(reasonChoice.value);filterRooms();});refreshReasons();filter();filterRooms();};document.addEventListener('DOMContentLoaded',init);document.addEventListener('turbo:load',init);if(document.readyState!=='loading')init();})();
+        (() => {
+            const init = () => {
+                const p = document.getElementById('inventory-panel-single');
+                if (!p || p.dataset.staticForm !== '1' || p.dataset.cascadeBound === '1') return;
+                p.dataset.cascadeBound = '1';
+                const i = p.querySelector('#single-industry');
+                const c = p.querySelector('#single-category');
+                const a = p.querySelector('#single-asset');
+                const f = a.form;
+                const all = [...a.options].slice(1);
+                const categories = [...c.options].slice(1);
+                const type = p.querySelector('[name="change_type"]');
+                const qty = p.querySelector('#single-change-quantity');
+                const before = p.querySelector('#single-before-quantity');
+                const after = p.querySelector('#single-after-quantity');
+                const code = p.querySelector('#single-selected-code');
+                const name = p.querySelector('#single-selected-name');
+                const grade = p.querySelector('#single-selected-grade');
+                const reasonChoice = p.querySelector('#single-reason-choice');
+                const reasonOther = p.querySelector('#single-reason-other');
+                const building = p.querySelector('#single-building');
+                const room = p.querySelector('#single-room');
+                const address = p.querySelector('#single-address-value');
+                const refreshTotal = () => {
+                    const unitPrice = Number(p.querySelector('input[name="unit_price"]')?.value || 0);
+                    const change = Number(qty.value || 0);
+                    const total = p.querySelector('input[name="total_amount"]');
+                    if (total) total.value = unitPrice > 0 && change > 0 ? String(Math.round(unitPrice * change)) : '';
+                };
+                const refreshReasons = () => {
+                    const items = (window.inventoryReasonOptions || {})[type.value] || [];
+                    reasonChoice.innerHTML = '<option value="">Chọn lý do cập nhật</option>' + items.map(item => `<option value="${item[0]}">${item[0]} - ${item[1]}</option>`).join('');
+                    reasonOther.classList.add('hidden');
+                    reasonOther.required = false;
+                    reasonOther.value = '';
+                };
+                const filterRooms = () => {
+                    if (!building || !room) return;
+                    const current = room.value;
+                    [...room.options].forEach((o, index) => {
+                        if (index === 0) return;
+                        const allowed = !building.value || String(o.dataset.building) === String(building.value);
+                        o.hidden = !allowed;
+                        o.disabled = !allowed;
+                    });
+                    if (current && room.selectedOptions[0]?.disabled) room.value = '';
+                    address.value = room.selectedOptions[0]?.textContent || '';
+                };
+                const filter = () => {
+                    const industry = i.value;
+                    const category = c.value;
+                    categories.forEach(o => {
+                        const allowed = !industry || String(o.dataset.parent) === String(industry);
+                        o.hidden = !allowed;
+                        o.disabled = !allowed;
+                    });
+                    all.forEach(o => {
+                        const allowed = !!category && String(o.dataset.category) === String(category);
+                        o.hidden = !allowed;
+                        o.disabled = !allowed;
+                    });
+                };
+                const resetAsset = () => {
+                    a.value = '';
+                    code.value = '';
+                    name.value = '';
+                    before.value = '';
+                    after.value = '';
+                    grade.value = '';
+                    const h = f.querySelector('[name=material_id]');
+                    if (h) h.remove();
+                    refreshTotal();
+                };
+                const refreshQuantity = () => {
+                    const current = parseInt(before.value || '0', 10);
+                    const change = parseInt(qty.value || '0', 10);
+                    after.value = type.value === 'OUT' ? Math.max(0, current - change) : current + change;
+                    refreshTotal();
+                };
+                i.addEventListener('change', () => { c.value = ''; resetAsset(); filter(); });
+                c.addEventListener('change', () => { resetAsset(); filter(); });
+                building?.addEventListener('change', filterRooms);
+                room?.addEventListener('change', filterRooms);
+                a.addEventListener('change', () => {
+                    const o = a.selectedOptions[0];
+                    code.value = o?.dataset.code || '';
+                    name.value = o?.dataset.name || '';
+                    before.value = parseInt(o?.dataset.quantity || '0', 10);
+                    grade.value = o?.dataset.grade || '';
+                    refreshQuantity();
+                    let h = f.querySelector('[name=material_id]');
+                    if (o?.dataset.materialId) {
+                        if (!h) {
+                            h = document.createElement('input');
+                            h.type = 'hidden';
+                            h.name = 'material_id';
+                            f.append(h);
+                        }
+                        h.value = o.dataset.materialId;
+                    } else if (h) {
+                        h.remove();
+                    }
+                });
+                type.addEventListener('change', () => { refreshReasons(); refreshQuantity(); });
+                qty.addEventListener('input', refreshQuantity);
+                p.addEventListener('input', event => {
+                    if (event.target.matches('input[name="unit_price"]')) refreshTotal();
+                });
+                reasonChoice.addEventListener('change', () => {
+                    const other = ['T06', 'G08'].includes(reasonChoice.value);
+                    reasonOther.classList.toggle('hidden', !other);
+                    reasonOther.required = other;
+                    if (!other) reasonOther.value = window.inventoryReasonText(reasonChoice.value);
+                });
+                f.addEventListener('submit', () => {
+                    if (a.value.startsWith('material-')) a.disabled = true;
+                    const ensureHidden = (name, value) => {
+                        let input = f.querySelector(`[name="${name}"]`);
+                        if (!input) {
+                            input = document.createElement('input');
+                            input.type = 'hidden';
+                            input.name = name;
+                            f.append(input);
+                        }
+                        input.value = value || '';
+                    };
+                    let rc = f.querySelector('[name=reason_code]');
+                    if (!rc) {
+                        rc = document.createElement('input');
+                        rc.type = 'hidden';
+                        rc.name = 'reason_code';
+                        f.append(rc);
+                    }
+                    rc.value = reasonChoice.value;
+                    if (['T05', 'G07'].includes(reasonChoice.value)) {
+                        const currentGrade = parseInt(grade.value || '1', 10);
+                        const sourceGrade = type.value === 'OUT' ? currentGrade : currentGrade + 1;
+                        const targetGrade = type.value === 'OUT' ? currentGrade + 1 : currentGrade;
+                        ensureHidden('source_grade', sourceGrade);
+                        ensureHidden('target_grade', targetGrade);
+                    } else {
+                        f.querySelector('[name="source_grade"]')?.remove();
+                        f.querySelector('[name="target_grade"]')?.remove();
+                    }
+                    if (!['T06', 'G08'].includes(reasonChoice.value)) reasonOther.value = window.inventoryReasonText(reasonChoice.value);
+                    refreshQuantity();
+                    filterRooms();
+                });
+                refreshReasons();
+                filter();
+                filterRooms();
+                refreshTotal();
+            };
+            document.addEventListener('DOMContentLoaded', init);
+            document.addEventListener('turbo:load', init);
+            if (document.readyState !== 'loading') init();
+        })();
  </script>
     <script>
         (()=>{const init=()=>{const p=document.getElementById('inventory-panel-single');if(!p)return;['single-industry','single-category','single-asset','single-building','single-room'].forEach(id=>{const el=p.querySelector('#'+id);if(!el)return;el.setAttribute('data-native-select','');if(el.tomselect&&typeof window.destroyTomSelect==='function')window.destroyTomSelect(el);});};document.addEventListener('DOMContentLoaded',init);document.addEventListener('turbo:load',init);init();})();
@@ -131,31 +329,310 @@
         (()=>{const init=()=>{const p=document.getElementById('inventory-panel-single');if(!p||p.dataset.strictCascade==='1')return;p.dataset.strictCascade='1';const i=p.querySelector('#single-industry'),c=p.querySelector('#single-category'),a=p.querySelector('#single-asset');const categoryOptions=[...c.options].slice(1).map(o=>o.cloneNode(true)),assetOptions=[...a.options].slice(1).map(o=>o.cloneNode(true));const rebuildCategories=()=>{const current=c.value;c.innerHTML='<option value="">Chọn loại vật tư</option>';categoryOptions.filter(o=>!i.value||String(o.dataset.parent)===String(i.value)).forEach(o=>{o.hidden=false;o.disabled=false;c.append(o)});if([...c.options].some(o=>o.value===current))c.value=current;else c.value='';rebuildAssets();};const rebuildAssets=()=>{const current=a.value;a.innerHTML='<option value="">Chọn vật tư</option>';assetOptions.filter(o=>c.value&&String(o.dataset.category)===String(c.value)).forEach(o=>{o.hidden=false;o.disabled=false;a.append(o)});if([...a.options].some(o=>o.value===current))a.value=current;else a.value='';};i.addEventListener('change',()=>{c.value='';rebuildCategories();});c.addEventListener('change',rebuildAssets);rebuildCategories();};document.addEventListener('DOMContentLoaded',init);document.addEventListener('turbo:load',init);if(document.readyState!=='loading')init();})();
     </script>
     @php
-        $singleMaterialData = ($materials ?? collect())->mapWithKeys(fn ($material) => [
-            'material-'.$material->id => [
-                'code' => $material->code,
-                'name' => $material->name,
-                'address' => $material->location,
-                'quantity' => (int) $material->quantity,
-                'grade' => (int) data_get($material, 'grade', 1) ?: 1,
+        $singleMaterialData = ($singleMaterialOptions ?? collect())->mapWithKeys(fn ($item) => [
+            $item['value'] => [
+                'material_id' => $item['material_id'],
+                'code' => $item['code'],
+                'name' => $item['name'],
+                'address' => $item['address'],
+                'quantity' => (int) $item['quantity'],
+                'grade' => (int) $item['grade'],
+                'management_type' => $item['management_type'],
             ],
         ]);
         $singleAssetData = collect();
     @endphp
     <script>
-        (()=>{const init=()=>{const p=document.getElementById('inventory-panel-single');if(!p||p.dataset.backendIdentity==='1')return;p.dataset.backendIdentity='1';const a=p.querySelector('#single-asset'),code=p.querySelector('#single-selected-code'),name=p.querySelector('#single-selected-name'),hidden=p.querySelector('#single-address-value'),before=p.querySelector('#single-before-quantity'),grade=p.querySelector('#single-selected-grade'),items={...@json($singleMaterialData),...@json($singleAssetData)};const sync=()=>{const item=items[a.value]||{};code.value=item.code||'';name.value=item.name||'';before.value=item.quantity??'';if(item.grade)grade.value=item.grade;if(!hidden.value)hidden.value=item.address||''};a.addEventListener('change',sync);sync();};document.addEventListener('DOMContentLoaded',init);document.addEventListener('turbo:load',init);if(document.readyState!=='loading')init();})();
+        (()=>{const init=()=>{const p=document.getElementById('inventory-panel-single');if(!p||p.dataset.backendIdentity==='1')return;p.dataset.backendIdentity='1';const a=p.querySelector('#single-asset'),code=p.querySelector('#single-selected-code'),name=p.querySelector('#single-selected-name'),hidden=p.querySelector('#single-address-value'),before=p.querySelector('#single-before-quantity'),grade=p.querySelector('#single-selected-grade'),items={...@json($singleMaterialData),...@json($singleAssetData)};const sync=()=>{const item=items[a.value]||{};code.value=item.code||'';name.value=item.name||'';before.value=item.quantity??'';if(item.grade)grade.value=item.grade;if(!hidden.value)hidden.value=item.address||'';const management=p.querySelector('select[name="management_type"]');if(management&&item.management_type)management.value=item.management_type};a.addEventListener('change',sync);sync();};document.addEventListener('DOMContentLoaded',init);document.addEventListener('turbo:load',init);if(document.readyState!=='loading')init();})();
     </script>
     </div>
-    <section id="inventory-panel-import" class="inventory-update-panel hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><div class="flex flex-wrap items-center justify-between gap-3"><div><h2 class="font-bold text-slate-900">Import vật tư</h2><p class="mt-1 text-sm text-slate-500">File vật tư chỉ cần Mã loại vật tư, Tên vật tư và Đơn vị tính; mã vật tư tự sinh theo loại.</p></div><div class="flex flex-wrap gap-2"><a href="{{ route('inventory.import.template', ['type' => 'material']) }}" class="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:bg-emerald-700"><i class="bi bi-file-earmark-excel"></i> Tải mẫu Excel (.xlsx)</a><a href="{{ route('inventory.import.template.word', ['type' => 'material']) }}" class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:bg-blue-700"><i class="bi bi-file-earmark-word"></i> Tải mẫu DOCX (.docx)</a></div></div><form method="POST" action="{{ route('inventory.import') }}" enctype="multipart/form-data" class="mt-4 grid gap-4 md:grid-cols-4">@csrf<input type="hidden" name="import_type" value="material"><label class="text-sm font-semibold text-slate-700 md:col-span-3">Tệp import <span class="text-rose-500">*</span><input type="file" name="file" accept=".xlsx,.xls,.csv,.txt,.docx" required class="mt-1 w-full rounded-lg border px-3 py-2"></label><div class="flex items-end"><button class="w-full rounded-lg bg-slate-900 px-4 py-2.5 font-bold text-white">Import vật tư</button></div></form></section>
+    <section id="inventory-panel-adjust" class="inventory-update-panel hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div class="mb-4">
+            <h2 class="text-lg font-bold text-slate-900">Điều chỉnh vật tư</h2>
+        </div>
+        <form method="POST" action="{{ route('inventory.assets.material-adjust') }}" class="grid gap-4 md:grid-cols-3">@csrf
+            <label class="text-sm font-semibold text-slate-700">Ngành vật tư
+                <select id="adjust-industry" class="mt-1 w-full rounded-lg border px-3 py-2.5">
+                    <option value="">Chọn ngành vật tư</option>
+                    @foreach(($industries ?? collect()) as $industry)
+                        <option value="{{ $industry->id }}">{{ $industry->code }} — {{ $industry->name }}</option>
+                    @endforeach
+                </select>
+            </label>
+            <label class="text-sm font-semibold text-slate-700">Loại vật tư
+                <select id="adjust-category" class="mt-1 w-full rounded-lg border px-3 py-2.5">
+                    <option value="">Chọn loại vật tư</option>
+                    @foreach(($categories ?? collect()) as $category)
+                        <option value="{{ $category->id }}" data-parent="{{ $category->parent_id }}">{{ $category->code }} — {{ $category->name }}</option>
+                    @endforeach
+                </select>
+            </label>
+            <label class="text-sm font-semibold text-slate-700">Vật tư
+                <select id="adjust-material" name="material_id" required class="mt-1 w-full rounded-lg border px-3 py-2.5">
+                    <option value="">Chọn vật tư</option>
+                    @foreach(($materials ?? collect()) as $material)
+                        <option value="{{ $material->id }}" data-category="{{ $material->category_id }}" data-code="{{ e($material->code) }}" data-name="{{ e($material->name) }}" data-quantity="{{ (int) $material->quantity }}" data-unit="{{ e($material->unit ?: 'cái') }}">{{ $material->code }} — {{ $material->name }}</option>
+                    @endforeach
+                </select>
+            </label>
+            <label class="text-sm font-semibold text-slate-700">Số lượng trước cập nhật
+                <input id="adjust-before-quantity" readonly class="mt-1 w-full rounded-lg border bg-slate-50 px-3 py-2.5">
+            </label>
+            <label class="text-sm font-semibold text-slate-700">Số lượng sau cập nhật
+                <input id="adjust-after-quantity" name="quantity" type="number" min="0" step="1" required class="mt-1 w-full rounded-lg border px-3 py-2.5">
+            </label>
+            <label class="text-sm font-semibold text-slate-700">Lý do điều chỉnh
+                <input name="reason" required placeholder="Nhập lý do điều chỉnh" class="mt-1 w-full rounded-lg border px-3 py-2.5">
+            </label>
+            <label class="text-sm font-semibold text-slate-700">Ngày quyết định
+                <input name="decision_date" type="date" class="mt-1 w-full rounded-lg border px-3 py-2.5">
+            </label>
+            <label class="text-sm font-semibold text-slate-700">Số quyết định
+                <input name="decision_number" placeholder="Nhập số quyết định" class="mt-1 w-full rounded-lg border px-3 py-2.5">
+            </label>
+            <label class="text-sm font-semibold text-slate-700">Người ký
+                <input name="signer" placeholder="Nhập người ký" class="mt-1 w-full rounded-lg border px-3 py-2.5">
+            </label>
+            <label class="text-sm font-semibold text-slate-700 md:col-span-3">Ghi chú
+                <textarea name="note" rows="2" class="mt-1 w-full rounded-lg border px-3 py-2.5"></textarea>
+            </label>
+            <button class="rounded-lg bg-slate-900 px-5 py-3 font-bold text-white md:col-span-3">Lưu điều chỉnh</button>
+        </form>
+    </section>
+    <script>
+        (()=>{const init=()=>{const panel=document.getElementById('inventory-panel-adjust');if(!panel||panel.dataset.adjustReady==='1')return;panel.dataset.adjustReady='1';const industry=panel.querySelector('#adjust-industry'),category=panel.querySelector('#adjust-category'),material=panel.querySelector('#adjust-material'),before=panel.querySelector('#adjust-before-quantity'),after=panel.querySelector('#adjust-after-quantity');const categoryOptions=[...category.options].slice(1).map(option=>option.cloneNode(true));const materialOptions=[...material.options].slice(1).map(option=>option.cloneNode(true));const resetMaterial=()=>{material.value='';before.value='';after.value='';};const rebuildCategories=()=>{const current=category.value;category.innerHTML='<option value="">Chọn loại vật tư</option>';categoryOptions.filter(option=>!industry.value||String(option.dataset.parent)===String(industry.value)).forEach(option=>category.append(option.cloneNode(true)));category.value=[...category.options].some(option=>option.value===current)?current:'';rebuildMaterials();};const rebuildMaterials=()=>{const current=material.value;material.innerHTML='<option value="">Chọn vật tư</option>';materialOptions.filter(option=>category.value&&String(option.dataset.category)===String(category.value)).forEach(option=>material.append(option.cloneNode(true)));material.value=[...material.options].some(option=>option.value===current)?current:'';syncQuantity();};const syncQuantity=()=>{const option=material.selectedOptions?.[0];const quantity=option?.dataset?.quantity||'';before.value=quantity;after.value=quantity;};industry.addEventListener('change',()=>{category.value='';resetMaterial();rebuildCategories();});category.addEventListener('change',()=>{resetMaterial();rebuildMaterials();});material.addEventListener('change',syncQuantity);rebuildCategories();};document.addEventListener('DOMContentLoaded',init);document.addEventListener('turbo:load',init);if(document.readyState!=='loading')init();})();
+    </script>
+    <section id="inventory-panel-import-update" class="inventory-update-panel hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+                <h2 class="font-bold text-slate-900">Import cập nhật vật tư</h2>
+                <p class="mt-1 text-sm text-slate-500">Dùng để cập nhật hàng loạt tăng, giảm hoặc điều chỉnh số lượng vật tư và tự ghi nhật ký.</p>
+            </div>
+            <a href="data:text/csv;charset=utf-8,%EF%BB%BFM%C3%A3%20v%E1%BA%ADt%20t%C6%B0%2CLo%E1%BA%A1i%20c%E1%BA%ADp%20nh%E1%BA%ADt%2CS%E1%BB%91%20l%C6%B0%E1%BB%A3ng%20c%E1%BA%ADp%20nh%E1%BA%ADt%2CS%E1%BB%91%20l%C6%B0%E1%BB%A3ng%20sau%20c%E1%BA%ADp%20nh%E1%BA%ADt%2CL%C3%BD%20do%2CNg%C3%A0y%20quy%E1%BA%BFt%20%C4%91%E1%BB%8Bnh%2CS%E1%BB%91%20quy%E1%BA%BFt%20%C4%91%E1%BB%8Bnh%2CNg%C6%B0%E1%BB%9Di%20k%C3%BD%2CGhi%20ch%C3%BA%0AVT001%2CT%C4%83ng%2C1%2C%2CMua%20s%E1%BA%AFm%2C2026-09-20%2CQD01%2CNguy%E1%BB%85n%20V%C4%83n%20A%2C%0AVT002%2C%C4%90i%E1%BB%81u%20ch%E1%BB%89nh%2C%2C10%2CKi%E1%BB%83m%20k%C3%AA%2C2026-09-20%2CQD02%2CNguy%E1%BB%85n%20V%C4%83n%20A%2C" download="mau-import-cap-nhat-vat-tu.csv" class="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:bg-emerald-700"><i class="bi bi-filetype-csv"></i> Tải mẫu CSV</a>
+        </div>
+        <form method="POST" action="{{ route('inventory.assets.update-import') }}" enctype="multipart/form-data" class="mt-4 grid gap-4 md:grid-cols-4">
+            @csrf
+            <label class="text-sm font-semibold text-slate-700">Loại cập nhật mặc định
+                <select name="default_update_type" class="mt-1 w-full rounded-lg border px-3 py-2.5">
+                    <option value="IN">Tăng</option>
+                    <option value="OUT">Giảm</option>
+                    <option value="ADJUST">Điều chỉnh số lượng tồn</option>
+                </select>
+            </label>
+            <label class="text-sm font-semibold text-slate-700 md:col-span-2">Lý do mặc định
+                <input name="default_reason" value="Import cập nhật vật tư" class="mt-1 w-full rounded-lg border px-3 py-2.5">
+            </label>
+            <label class="text-sm font-semibold text-slate-700 md:col-span-3">Tệp import <span class="text-rose-500">*</span>
+                <input type="file" name="file" accept=".xlsx,.xls,.csv,.txt" required class="mt-1 w-full rounded-lg border px-3 py-2">
+            </label>
+            <div class="flex items-end">
+                <button class="w-full rounded-lg bg-slate-900 px-4 py-2.5 font-bold text-white"><i class="bi bi-upload"></i> Import cập nhật</button>
+            </div>
+        </form>
+        <div class="mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-slate-50">
+            <table class="w-full min-w-[760px] text-sm">
+                <thead class="text-left text-xs uppercase text-slate-500"><tr><th class="px-4 py-3">Cột</th><th class="px-4 py-3">Bắt buộc</th><th class="px-4 py-3">Ghi chú</th></tr></thead>
+                <tbody class="divide-y divide-slate-200 bg-white">
+                    <tr><td class="px-4 py-3 font-semibold">Mã vật tư</td><td class="px-4 py-3">Có</td><td class="px-4 py-3">Mã đang có trong danh mục vật tư.</td></tr>
+                    <tr><td class="px-4 py-3 font-semibold">Loại cập nhật</td><td class="px-4 py-3">Không</td><td class="px-4 py-3">Tăng, Giảm, Điều chỉnh. Bỏ trống sẽ dùng loại mặc định.</td></tr>
+                    <tr><td class="px-4 py-3 font-semibold">Số lượng cập nhật</td><td class="px-4 py-3">Có khi Tăng/Giảm</td><td class="px-4 py-3">Số lượng tăng hoặc giảm.</td></tr>
+                    <tr><td class="px-4 py-3 font-semibold">Số lượng sau cập nhật</td><td class="px-4 py-3">Có khi Điều chỉnh</td><td class="px-4 py-3">Số lượng tồn cuối cùng sau kiểm kê.</td></tr>
+                    <tr><td class="px-4 py-3 font-semibold">Lý do, Ngày quyết định, Số quyết định, Người ký, Ghi chú</td><td class="px-4 py-3">Không</td><td class="px-4 py-3">Được lưu vào nhật ký cập nhật vật tư.</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+    <section id="inventory-panel-import" class="inventory-update-panel hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+            <div>
+                <h2 class="font-bold text-slate-900">Import dữ liệu vật tư</h2>
+                <p class="mt-1 text-sm text-slate-500">Chọn đúng cấp import: Loại nằm trong Ngành, Vật tư nằm trong Loại.</p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <a id="inventory-import-template-xlsx" href="{{ route('inventory.import.template', ['type' => 'material', 'scoped' => 1]) }}" class="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:bg-emerald-700"><i class="bi bi-file-earmark-excel"></i> Tải mẫu Excel (.xlsx)</a>
+                <a id="inventory-import-template-docx" href="{{ route('inventory.import.template.word', ['type' => 'material', 'scoped' => 1]) }}" class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:bg-blue-700"><i class="bi bi-file-earmark-word"></i> Tải mẫu DOCX (.docx)</a>
+            </div>
+        </div>
+        <form id="inventory-central-import-form" method="POST" action="{{ route('inventory.import') }}" enctype="multipart/form-data" class="mt-4 grid gap-4 md:grid-cols-4">
+            @csrf
+            <label class="text-sm font-semibold text-slate-700">Import vào đâu <span class="text-rose-500">*</span>
+                <select id="inventory-import-type" name="import_type" required class="mt-1 w-full rounded-lg border px-3 py-2.5">
+                    <option value="material">Vật tư</option>
+                    <option value="category">Loại vật tư</option>
+                    <option value="industry">Ngành vật tư</option>
+                </select>
+            </label>
+            <label id="inventory-import-industry-wrap" class="text-sm font-semibold text-slate-700">Ngành vật tư
+                <select id="inventory-import-industry" name="industry_id" class="mt-1 w-full rounded-lg border px-3 py-2.5">
+                    <option value="">Chọn ngành vật tư</option>
+                    @foreach(($industries ?? collect()) as $industry)
+                        <option value="{{ $industry->id }}">{{ $industry->code }} — {{ $industry->name }}</option>
+                    @endforeach
+                </select>
+            </label>
+            <label id="inventory-import-category-wrap" class="text-sm font-semibold text-slate-700">Loại vật tư
+                <select id="inventory-import-category" name="category_id" class="mt-1 w-full rounded-lg border px-3 py-2.5">
+                    <option value="">Chọn loại vật tư</option>
+                    @foreach(($categories ?? collect()) as $category)
+                        <option value="{{ $category->id }}" data-parent="{{ $category->parent_id }}">{{ $category->code }} — {{ $category->name }}</option>
+                    @endforeach
+                </select>
+            </label>
+            <label class="text-sm font-semibold text-slate-700 md:col-span-3">Tệp import <span class="text-rose-500">*</span>
+                <input type="file" name="file" accept=".xlsx,.xls,.csv,.txt,.docx" required class="mt-1 w-full rounded-lg border px-3 py-2">
+            </label>
+            <div class="flex items-end">
+                <button class="w-full rounded-lg bg-slate-900 px-4 py-2.5 font-bold text-white">Import</button>
+            </div>
+        </form>
+    </section>
+    <script>
+        (()=>{const init=()=>{const panel=document.getElementById('inventory-panel-import');if(!panel||panel.dataset.importReady==='1')return;panel.dataset.importReady='1';const type=panel.querySelector('#inventory-import-type'),industry=panel.querySelector('#inventory-import-industry'),category=panel.querySelector('#inventory-import-category'),industryWrap=panel.querySelector('#inventory-import-industry-wrap'),categoryWrap=panel.querySelector('#inventory-import-category-wrap'),xlsx=panel.querySelector('#inventory-import-template-xlsx'),docx=panel.querySelector('#inventory-import-template-docx'),form=panel.querySelector('#inventory-central-import-form');const categoryOptions=[...category.options].slice(1).map(option=>option.cloneNode(true));const templateUrl=(base)=>{const params=new URLSearchParams({type:type.value});if(type.value==='material')params.set('scoped','1');return base+'?'+params.toString();};const rebuildCategories=()=>{const current=category.value;category.innerHTML='<option value="">Chọn loại vật tư</option>';categoryOptions.filter(option=>!industry.value||String(option.dataset.parent)===String(industry.value)).forEach(option=>category.append(option.cloneNode(true)));category.value=[...category.options].some(option=>option.value===current)?current:'';};const sync=()=>{const target=type.value;const needsIndustry=target==='category'||target==='material';const needsCategory=target==='material';industryWrap.classList.toggle('hidden',!needsIndustry);categoryWrap.classList.toggle('hidden',!needsCategory);industry.disabled=!needsIndustry;category.disabled=!needsCategory;industry.required=needsIndustry;category.required=needsCategory;if(!needsIndustry)industry.value='';rebuildCategories();xlsx.href=templateUrl(@json(route('inventory.import.template')));docx.href=templateUrl(@json(route('inventory.import.template.word')));};type.addEventListener('change',sync);industry.addEventListener('change',()=>{category.value='';rebuildCategories();});form.addEventListener('submit',(event)=>{if(type.value==='category'&&!industry.value){event.preventDefault();industry.focus();return;}if(type.value==='material'&&!category.value){event.preventDefault();category.focus();}});sync();};document.addEventListener('DOMContentLoaded',init);document.addEventListener('turbo:load',init);if(document.readyState!=='loading')init();})();
+    </script>
     <section id="inventory-panel-bulk" class="inventory-update-panel rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"><form method="POST" action="{{ route('inventory.assets.bulk.store') }}">@csrf<div class="grid items-end gap-3 md:grid-cols-5"><select name="category_id" class="rounded-lg border px-3 py-2.5"><option value="">Chọn ngành</option>@foreach(($categories ?? collect()) as $category)<option value="{{ $category->id }}">{{ $category->code }} — {{ $category->name }}</option>@endforeach</select><select name="building_id" class="rounded-lg border px-3 py-2.5"><option value="">Chọn tòa nhà</option>@foreach(($buildings ?? collect()) as $building)<option value="{{ $building->id }}">{{ $building->name }}</option>@endforeach</select><select name="classroom_id" class="rounded-lg border px-3 py-2.5"><option value="">Chọn phòng</option>@foreach(($classrooms ?? collect()) as $room)<option value="{{ $room->id }}">{{ $room->name }}</option>@endforeach</select><select name="holding_unit_id" class="rounded-lg border px-3 py-2.5"><option value="">Đơn vị quản lý</option>@foreach(($units ?? collect()) as $unit)<option value="{{ $unit->id }}">{{ $unit->name }}</option>@endforeach</select><button type="button" id="inventory-add-row" class="inventory-bulk-actions h-[46px] min-h-[46px] whitespace-nowrap rounded-lg border border-slate-300 px-4 py-2.5 font-bold">+ Thêm dòng</button></div><div class="inventory-bulk-table-wrap mt-4"><table class="w-full min-w-[1500px] text-sm"><thead class="bg-slate-50"><tr><th class="p-2 text-left">#</th><th class="p-2 text-left">Loại</th><th class="p-2 text-left">Tên thiết bị</th><th class="p-2">Năm SX</th><th class="p-2">Năm SD</th><th class="p-2">Ngày thực hiện</th><th class="p-2">Địa chỉ lắp đặt</th><th class="p-2">Số lượng</th><th class="p-2">Phân cấp</th><th class="p-2">Số quyết định</th></tr></thead><tbody id="inventory-bulk-rows"></tbody></table></div><div class="mt-4 flex justify-end"><button class="sticky bottom-2 rounded-lg bg-slate-900 px-5 py-2.5 font-bold text-white">Lưu tăng (nhiều dòng)</button></div></form></section>
     <script>
-     (()=>{const tabs=[...document.querySelectorAll('.inventory-update-tab')],panels={bulk:document.getElementById('inventory-panel-bulk'),single:document.getElementById('inventory-panel-single'),import:document.getElementById('inventory-panel-import')};tabs.forEach(t=>t.addEventListener('click',()=>{tabs.forEach(x=>{const on=x===t;x.classList.toggle('bg-slate-900',on);x.classList.toggle('text-white',on);x.classList.toggle('text-slate-600',!on)});Object.entries(panels).forEach(([k,p])=>p?.classList.toggle('hidden',k!==t.dataset.panel));}));const body=document.getElementById('inventory-bulk-rows'),categoryOptions=`@foreach(($categories ?? collect()) as $category)<option value="{{ $category->id }}">{{ $category->code }} — {{ $category->name }}</option>@endforeach`,materialOptions=`@foreach(($materials ?? collect()) as $material)@php $materialGrade = (int) data_get($material, 'grade', 1); @endphp<option value="{{ $material->id }}" data-category="{{ $material->category_id }}" data-code="{{ e($material->code) }}" data-name="{{ e($material->name) }}" data-address="{{ e($material->location) }}" data-quantity="{{ (int) $material->quantity }}" data-grade="{{ $materialGrade ?: 1 }}">{{ $material->inventory_display_name }} — Cấp {{ $materialGrade ?: 1 }}</option>@endforeach`;const add=()=>{const i=body.children.length;body.insertAdjacentHTML('beforeend',`<tr class="border-t"><td class="p-2">${i+1}</td><td class="p-2"><select name="items[${i}][category_id]" required class="w-40 rounded border px-2 py-2"><option value="">Chọn loại vật tư</option>${categoryOptions}</select></td><td class="p-2"><select name="items[${i}][material_id]" required class="bulk-material w-56 rounded border px-2 py-2"><option value="">Chọn vật tư</option>${materialOptions}</select><input type="hidden" name="items[${i}][name]"><input type="hidden" name="items[${i}][asset_code]"><input type="hidden" name="items[${i}][install_address]"></td><td class="p-2"><input name="items[${i}][manufacture_year]" value="2000" class="w-20 rounded border px-2 py-2"></td><td class="p-2"><input name="items[${i}][usage_year]" value="2000" class="w-20 rounded border px-2 py-2"></td><td class="inventory-bulk-date-cell p-2"><input name="items[${i}][purchase_date]" type="date" class="inventory-bulk-date w-full rounded border px-2 py-2"></td><td class="p-2"><span class="bulk-address text-sm text-slate-600">Tự động theo vật tư</span></td><td class="p-2"><input name="items[${i}][quantity]" type="number" min=".01" step=".01" value="1" required class="w-20 rounded border px-2 py-2"></td><td class="p-2"><select name="items[${i}][grade]" class="w-28 rounded border px-2 py-2"><option value="1">1 — Rất tốt</option><option value="2">2 — Tốt</option><option value="3">3 — Khá</option><option value="4">4 — Trung bình</option><option value="5">5 — Kém</option></select></td><td class="p-2"><input name="items[${i}][decision_number]" class="w-28 rounded border px-2 py-2"></td></tr>`);const row=body.lastElementChild,category=row.querySelector('[name$="[category_id]"]'),material=row.querySelector('.bulk-material'),sync=()=>{const selected=material.selectedOptions[0];[...material.options].forEach(o=>{o.hidden=!!category.value&&o.dataset.category!==category.value;o.disabled=o.hidden});const item=selected?.value?selected.dataset:null;row.querySelector('[name$="[name]"]').value=item?.name||'';row.querySelector('[name$="[asset_code]"]').value=item?.code||'';row.querySelector('[name$="[install_address]"]').value=item?.address||'';row.querySelector('[name$="[grade]"]').value=item?.grade||'1';row.querySelector('.bulk-address').textContent=item?.address||'Tự động theo vật tư'};category.addEventListener('change',()=>{material.value='';sync()});material.addEventListener('change',sync);sync();setTimeout(()=>{if(typeof window.initDateInputs==='function')window.initDateInputs(row)},50)};add();document.getElementById('inventory-add-row')?.addEventListener('click',add)})();
+     (()=>{const tabs=[...document.querySelectorAll('.inventory-update-tab')],panels={bulk:document.getElementById('inventory-panel-bulk'),single:document.getElementById('inventory-panel-single'),adjust:document.getElementById('inventory-panel-adjust'),'import-update':document.getElementById('inventory-panel-import-update'),import:document.getElementById('inventory-panel-import')};tabs.forEach(t=>t.addEventListener('click',()=>{tabs.forEach(x=>{const on=x===t;x.classList.toggle('bg-slate-900',on);x.classList.toggle('text-white',on);x.classList.toggle('text-slate-600',!on)});Object.entries(panels).forEach(([k,p])=>p?.classList.toggle('hidden',k!==t.dataset.panel));}));const body=document.getElementById('inventory-bulk-rows'),categoryOptions=`@foreach(($categories ?? collect()) as $category)<option value="{{ $category->id }}">{{ $category->code }} — {{ $category->name }}</option>@endforeach`,materialOptions=`@foreach($singleMaterialOptions as $item)<option value="{{ $item['value'] }}" data-material-id="{{ $item['material_id'] }}" data-category="{{ $item['category_id'] }}" data-code="{{ e($item['code']) }}" data-name="{{ e($item['name']) }}" data-address="{{ e($item['address']) }}" data-quantity="{{ (int) $item['quantity'] }}" data-grade="{{ $item['grade'] }}" data-management-type="{{ $item['management_type'] }}">{{ e($item['text']) }} — SL {{ number_format((int) $item['quantity'], 0, ',', '.') }}</option>@endforeach`;const add=()=>{const i=body.children.length;body.insertAdjacentHTML('beforeend',`<tr class="border-t"><td class="p-2">${i+1}</td><td class="p-2"><select name="items[${i}][category_id]" required class="w-40 rounded border px-2 py-2"><option value="">Chọn loại vật tư</option>${categoryOptions}</select></td><td class="p-2"><select name="items[${i}][material_choice]" required class="bulk-material w-56 rounded border px-2 py-2"><option value="">Chọn vật tư</option>${materialOptions}</select><input type="hidden" name="items[${i}][material_id]"><input type="hidden" name="items[${i}][name]"><input type="hidden" name="items[${i}][asset_code]"><input type="hidden" name="items[${i}][install_address]"></td><td class="p-2"><input name="items[${i}][manufacture_year]" value="2000" class="w-20 rounded border px-2 py-2"></td><td class="p-2"><input name="items[${i}][usage_year]" value="2000" class="w-20 rounded border px-2 py-2"></td><td class="inventory-bulk-date-cell p-2"><input name="items[${i}][purchase_date]" type="date" class="inventory-bulk-date w-full rounded border px-2 py-2"></td><td class="p-2"><span class="bulk-address text-sm text-slate-600">Tự động theo vật tư</span></td><td class="p-2"><input name="items[${i}][quantity]" type="number" min=".01" step=".01" value="1" required class="w-20 rounded border px-2 py-2"></td><td class="p-2"><select name="items[${i}][grade]" class="w-28 rounded border px-2 py-2"><option value="1">1 — Rất tốt</option><option value="2">2 — Tốt</option><option value="3">3 — Khá</option><option value="4">4 — Trung bình</option><option value="5">5 — Kém</option></select></td><td class="p-2"><input name="items[${i}][decision_number]" class="w-28 rounded border px-2 py-2"></td></tr>`);const row=body.lastElementChild,category=row.querySelector('[name$="[category_id]"]'),material=row.querySelector('.bulk-material'),sync=()=>{const selected=material.selectedOptions[0];[...material.options].forEach(o=>{o.hidden=!!category.value&&o.dataset.category!==category.value;o.disabled=o.hidden});const item=selected?.value?selected.dataset:null;row.querySelector('[name$="[material_id]"]').value=item?.materialId||'';row.querySelector('[name$="[name]"]').value=item?.name||'';row.querySelector('[name$="[asset_code]"]').value=item?.code||'';row.querySelector('[name$="[install_address]"]').value=item?.address||'';row.querySelector('[name$="[grade]"]').value=item?.grade||'1';row.querySelector('.bulk-address').textContent=item?.address||'Tự động theo vật tư'};category.addEventListener('change',()=>{material.value='';sync()});material.addEventListener('change',sync);sync();setTimeout(()=>{if(typeof window.initDateInputs==='function')window.initDateInputs(row)},50)};add();document.getElementById('inventory-add-row')?.addEventListener('click',add)})();
      </script>
      <script>
         document.addEventListener('DOMContentLoaded',()=>{const table=document.getElementById('inventory-panel-bulk')?.querySelector('table');if(table){const headers=table.querySelectorAll('thead th');if(headers[1])headers[1].textContent='Loại vật tư';if(headers[2])headers[2].textContent='Vật tư'};});
      </script>
      <script>
+        (() => {
+            const init = () => {
+                const rows = document.getElementById('inventory-bulk-rows');
+                if (!rows || rows.dataset.addressInputReady === '1') return;
+                rows.dataset.addressInputReady = '1';
+                const normalize = () => {
+                    rows.querySelectorAll('tr').forEach(row => {
+                        const span = row.querySelector('.bulk-address');
+                        const hidden = row.querySelector('input[type="hidden"][name$="[install_address]"]');
+                        if (!span || !hidden) return;
+                        const input = document.createElement('input');
+                        input.name = hidden.name;
+                        input.value = hidden.value || '';
+                        input.placeholder = 'Nhập địa chỉ lắp đặt';
+                        input.className = 'w-48 rounded border px-2 py-2';
+                        input.addEventListener('input', () => {
+                            input.dataset.userEdited = '1';
+                            input.dataset.userValue = input.value;
+                        });
+                        row.querySelectorAll('select[name$="[category_id]"], .bulk-material').forEach(select => {
+                            select.addEventListener('change', () => setTimeout(() => {
+                                if (input.dataset.userEdited === '1') input.value = input.dataset.userValue || '';
+                            }, 0));
+                        });
+                        span.replaceWith(input);
+                        hidden.remove();
+                    });
+                };
+                normalize();
+                new MutationObserver(normalize).observe(rows, { childList: true, subtree: true });
+            };
+            document.addEventListener('DOMContentLoaded', init);
+            document.addEventListener('turbo:load', init);
+            if (document.readyState !== 'loading') init();
+        })();
+     </script>
+     <script>
          document.addEventListener('DOMContentLoaded',()=>{const rows=document.getElementById('inventory-bulk-rows'),type=()=>document.getElementById('inventory-update-type')?.value||'IN';if(!rows)return;const getItem=(material)=>{const value=String(material.tomselect?material.tomselect.getValue():material.value||'');const option=value?material.querySelector(`option[value="${CSS.escape(value)}"]`):material.selectedOptions[0];const data=option?.dataset||{};return data.quantity?data:(window.inventoryBulkMaterialData?.[value]||data);};const enhance=()=>rows.querySelectorAll('tr').forEach(row=>{if(row.dataset.quantityReady==='1')return;const material=row.querySelector('.bulk-material'),cell=row.querySelector('input[name$="[quantity]"]')?.closest('td');if(!material||!cell)return;const index=cell.querySelector('input').name.match(/items\[(\d+)\]/)?.[1]||'0';cell.innerHTML=`<div class="text-xs text-slate-500">Ban đầu: <b class="bulk-before">0</b></div><input name="items[${index}][quantity]" type="number" min="1" step="1" value="1" required class="w-20 rounded border px-2 py-2"><div class="text-xs text-slate-500">Sau cập nhật: <b class="bulk-after">0</b></div>`;const input=cell.querySelector('input'),before=cell.querySelector('.bulk-before'),after=cell.querySelector('.bulk-after'),sync=()=>{const item=getItem(material),current=parseInt(item.quantity||'0',10),delta=parseInt(input.value||'0',10);before.textContent=current;after.textContent=type()==='OUT'?Math.max(0,current-delta):current+delta};material.addEventListener('change',sync);material.tomselect?.on?.('change',sync);input.addEventListener('input',sync);document.getElementById('inventory-update-type')?.addEventListener('change',sync);row.dataset.quantityReady='1';row.inventorySyncQuantity=sync;sync()});new MutationObserver(enhance).observe(rows,{childList:true});enhance();});
+     </script>
+     <script>
+        (() => {
+            const init = () => {
+                const form = document.querySelector('#inventory-panel-bulk form');
+                const rows = document.getElementById('inventory-bulk-rows');
+                const addRowButton = document.getElementById('inventory-add-row');
+                const table = document.querySelector('#inventory-panel-bulk table');
+                if (!form || !rows || !addRowButton || !table || form.dataset.publicAssetRowsReady === '1') return;
+                form.dataset.publicAssetRowsReady = '1';
+
+                const management = document.createElement('label');
+                management.className = 'text-sm font-semibold text-slate-700';
+                management.innerHTML = '<span class="mb-1 block">Loại quản lý</span><select name="management_type" class="w-full rounded border bg-white px-3 py-2.5"><option value="MATERIAL">Quản lý vật tư</option><option value="ASSET">Quản lý tài sản</option></select>';
+                addRowButton.before(management);
+
+                const headRow = table.querySelector('thead tr');
+                const actionHead = document.createElement('th');
+                actionHead.className = 'bulk-public-asset-cell p-2 text-center';
+                actionHead.textContent = 'Tài sản công';
+                headRow.append(actionHead);
+                table.classList.remove('min-w-[2050px]');
+                table.classList.add('min-w-[1580px]');
+
+                const select = management.querySelector('select');
+                const syncVisibility = () => {
+                    const isAsset = select.value === 'ASSET';
+                    table.querySelectorAll('.bulk-public-asset-cell').forEach(cell => cell.classList.toggle('hidden', !isAsset));
+                    rows.querySelectorAll('.bulk-public-asset-cell input').forEach(input => input.disabled = !isAsset);
+                    if (isAsset) {
+                        rows.querySelectorAll('input[name$="[unit_price]"]').forEach(input => {
+                            if (Number(input.value || 0) < 10000000) input.value = '10000000';
+                            syncTotal(input.closest('tr'));
+                        });
+                    }
+                    rows.querySelectorAll('[data-public-asset-dialog]').forEach(dialog => {
+                        if (!isAsset) dialog.classList.add('hidden');
+                    });
+                };
+                const syncTotal = row => {
+                    const quantity = Number(row.querySelector('input[name$="[quantity]"]')?.value || 0);
+                    const unitPrice = Number(row.querySelector('input[name$="[unit_price]"]')?.value || 0);
+                    const total = row.querySelector('input[name$="[total_amount]"]');
+                    if (total) total.value = unitPrice > 0 && quantity > 0 ? String(Math.round(unitPrice * quantity)) : '';
+                };
+                const enhanceRow = row => {
+                    if (row.dataset.publicAssetFields === '1') return;
+                    const quantityInput = row.querySelector('input[name$="[quantity]"]');
+                    const match = quantityInput?.name.match(/items\[(\d+)\]/);
+                    if (!match) return;
+                    const index = match[1];
+                    row.dataset.publicAssetFields = '1';
+                    row.insertAdjacentHTML('beforeend', `
+                        <td class="bulk-public-asset-cell p-2 text-center" style="vertical-align: middle;">
+                            <button type="button" class="inline-flex min-h-[42px] items-center justify-center whitespace-nowrap rounded border px-3 py-2 text-xs font-bold text-blue-700" data-open-public-asset-dialog>Tài sản công</button>
+                            <div class="fixed inset-0 z-50 hidden flex items-center justify-center bg-slate-900/40 p-4" data-public-asset-dialog>
+                                <div class="w-full max-w-md rounded-lg bg-white p-4 text-left shadow-xl">
+                                    <div class="mb-3 flex items-center justify-between gap-3">
+                                        <h3 class="font-bold text-slate-900">Thông tin tài sản công - dòng ${Number(index) + 1}</h3>
+                                        <button type="button" class="rounded border px-2 py-1 text-sm font-bold text-slate-600" data-close-public-asset-dialog>Đóng</button>
+                                    </div>
+                                    <div class="grid gap-3 sm:grid-cols-2">
+                                        <label class="text-xs font-semibold">Đơn giá<input name="items[${index}][unit_price]" type="number" min="10000000" step="1000" value="10000000" class="mt-1 w-full rounded border bg-white px-2 py-1.5"></label>
+                                        <label class="text-xs font-semibold">Thành tiền<input name="items[${index}][total_amount]" type="number" readonly class="mt-1 w-full rounded border bg-slate-100 px-2 py-1.5 text-slate-700"></label>
+                                        <label class="text-xs font-semibold sm:col-span-2">Số hợp đồng/Hóa đơn<input name="items[${index}][contract_invoice_number]" class="mt-1 w-full rounded border bg-white px-2 py-1.5"></label>
+                                        <label class="text-xs font-semibold sm:col-span-2">Đơn vị cung cấp<input name="items[${index}][supplier]" class="mt-1 w-full rounded border bg-white px-2 py-1.5"></label>
+                                        <label class="text-xs font-semibold">Khấu hao (%)<input name="items[${index}][depreciation_rate]" type="number" min="0" max="100" step="0.01" value="0" class="mt-1 w-full rounded border bg-white px-2 py-1.5"></label>
+                                    </div>
+                                    <div class="mt-4 flex justify-end">
+                                        <button type="button" class="rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white" data-close-public-asset-dialog>Lưu thông tin</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </td>
+                    `);
+                    const dialog = row.querySelector('[data-public-asset-dialog]');
+                    row.querySelector('[data-open-public-asset-dialog]')?.addEventListener('click', () => dialog?.classList.remove('hidden'));
+                    row.querySelectorAll('[data-close-public-asset-dialog]').forEach(button => button.addEventListener('click', () => dialog?.classList.add('hidden')));
+                    dialog?.addEventListener('click', event => {
+                        if (event.target === dialog) dialog.classList.add('hidden');
+                    });
+                    row.addEventListener('input', event => {
+                        if (event.target.matches('input[name$="[quantity]"], input[name$="[unit_price]"]')) syncTotal(row);
+                    });
+                    syncTotal(row);
+                    syncVisibility();
+                };
+                const enhanceRows = () => rows.querySelectorAll('tr').forEach(enhanceRow);
+
+                select.addEventListener('change', syncVisibility);
+                new MutationObserver(enhanceRows).observe(rows, { childList: true });
+                enhanceRows();
+                syncVisibility();
+            };
+            document.addEventListener('DOMContentLoaded', init);
+            document.addEventListener('turbo:load', init);
+            if (document.readyState !== 'loading') init();
+        })();
      </script>
      <script>
          document.addEventListener('turbo:load',()=>{
@@ -230,7 +707,7 @@
         document.addEventListener('DOMContentLoaded',()=>{
             const industries=[@foreach(($industries ?? collect()) as $industry){id:'{{ $industry->id }}',code:'{{ addslashes($industry->code) }}',name:'{{ addslashes($industry->name) }}'},@endforeach];
             const replaceOptions=(select,items,empty)=>{const current=select.value;const options=items.map(i=>({value:String(i.id),text:`${i.code} — ${i.name}`}));if(select.tomselect){select.tomselect.clear(true);select.tomselect.clearOptions();select.tomselect.addOptions(options);select.tomselect.refreshOptions(false);if(options.some(o=>o.value===current))select.tomselect.setValue(current,true)}else{select.innerHTML=`<option value="">${empty}</option>`+items.map(i=>`<option value="${i.id}">${i.code} — ${i.name}</option>`).join('');select.value=current}};
-            document.querySelectorAll('#inventory-panel-bulk select[name="category_id"],#inventory-panel-import select[name="category_id"]').forEach(select=>replaceOptions(select,industries,'Chọn ngành vật tư'));
+            document.querySelectorAll('#inventory-panel-bulk select[name="category_id"]').forEach(select=>replaceOptions(select,industries,'Chọn ngành vật tư'));
             const rows=document.getElementById('inventory-bulk-rows');
             const types=[@foreach(($categories ?? collect()) as $type){id:'{{ $type->id }}',code:'{{ addslashes($type->code) }}',name:'{{ addslashes($type->name) }}'},@endforeach];
             const replaceTypeFields=()=>rows?.querySelectorAll('input[name$="[category]"]').forEach(old=>{const select=document.createElement('select');select.name=old.name.replace('[category]','[category_id]');select.className='w-36 rounded border px-2 py-2';select.innerHTML='<option value="">Chọn loại vật tư</option>'+types.map(t=>`<option value="${t.id}">${t.code} — ${t.name}</option>`).join('');old.replaceWith(select)});
@@ -298,14 +775,14 @@
             const industry=form.querySelector('select[name="category_id"]'),building=form.querySelector('select[name="building_id"]'),room=form.querySelector('select[name="classroom_id"]');
             const types=[@foreach(($categories ?? collect()) as $type){id:'{{ $type->id }}',parent:'{{ $type->parent_id }}',code:'{{ addslashes($type->code) }}',name:'{{ addslashes($type->name) }}'},@endforeach];
             const rooms=[@foreach(($classrooms ?? collect()) as $item){id:'{{ $item->id }}',building:'{{ $item->building_id }}',name:'{{ addslashes($item->name) }}'},@endforeach];
-             const materials=[@foreach(($materials ?? collect()) as $item)@php $rowGrade = (int) data_get($item, 'grade', 1); @endphp {id:'{{ $item->id }}',category:'{{ $item->category_id }}',code:'{{ addslashes($item->code) }}',name:'{{ addslashes($item->name) }}',text:'{{ addslashes($item->inventory_display_name) }} — Cấp {{ $rowGrade ?: 1 }}',address:'{{ addslashes($item->location ?? '') }}',quantity:'{{ (int) $item->quantity }}',grade:'{{ $rowGrade ?: 1 }}'},@endforeach];
+             const materials=[@foreach($singleMaterialOptions as $item){id:'{{ $item['value'] }}',materialId:'{{ $item['material_id'] }}',category:'{{ $item['category_id'] }}',code:'{{ addslashes($item['code']) }}',name:'{{ addslashes($item['name']) }}',text:'{{ addslashes($item['text']) }} — SL {{ number_format((int) $item['quantity'], 0, ',', '.') }}',address:'{{ addslashes($item['address'] ?? '') }}',quantity:'{{ (int) $item['quantity'] }}',grade:'{{ $item['grade'] }}',managementType:'{{ $item['management_type'] }}'},@endforeach];
             window.inventoryBulkMaterialData=Object.fromEntries(materials.map(item=>[String(item.id),item]));
             const assets=[@foreach(($allAssets ?? collect()) as $item){id:'a{{ $item->id }}',category:'{{ $item->material?->category_id ?: $item->category }}',code:'{{ addslashes($item->asset_code) }}',name:'{{ addslashes($item->name) }}',text:'{{ addslashes($item->inventory_display_name) }}',quantity:'{{ (int) $item->quantity }}',grade:'{{ $item->grade }}'},@endforeach];
             const items=assets.length?assets:materials;
             const setOptions=(select,options,empty)=>{const current=select.value,attr=(data)=>Object.entries(data||{}).map(([key,value])=>` data-${key}="${String(value??'').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}"`).join('');select.innerHTML=`<option value="">${empty}</option>`+options.map(option=>`<option value="${option.value}"${attr(option.data)}>${option.text}</option>`).join('');if(select.tomselect){select.tomselect.clear(true);select.tomselect.clearOptions();select.tomselect.addOptions(options);select.tomselect.refreshOptions(false);if(options.some(option=>String(option.value)===String(current)))select.tomselect.setValue(current,true);else select.tomselect.clear(true);}else{select.value=options.some(option=>String(option.value)===String(current))?current:'';}};
             const syncRooms=()=>{if(!building||!room)return;const options=rooms.filter(item=>String(item.building)===String(building.value)).map(item=>({value:String(item.id),text:item.name}));setOptions(room,options,'Chọn phòng thuộc tòa nhà');};
             const rowTypeOptions=()=>types.filter(item=>String(item.parent)===String(industry?.value||'')).map(item=>({value:String(item.id),text:`${item.code} — ${item.name}`}));
-             const syncRowMaterials=(row)=>{const type=row?.querySelector('select[name$="[category_id]"]'),material=row?.querySelector('.bulk-material');if(!type||!material)return;const current=material.tomselect?material.tomselect.getValue():material.value,options=materials.filter(item=>String(item.category)===String(type.value)).map(item=>({value:String(item.id),text:item.text,data:{category:item.category,code:item.code,name:item.name,address:item.address,quantity:item.quantity,grade:item.grade}}));setOptions(material,options,'Chọn vật tư thuộc loại đã chọn');const item=materials.find(item=>String(item.id)===String((material.tomselect?material.tomselect.getValue():material.value)||current));const address=row.querySelector('.bulk-address'),hidden=row.querySelector('input[name$="[install_address]"]');if(address)address.textContent=item?.address||'Chưa có địa chỉ trong dữ liệu vật tư';if(hidden)hidden.value=item?.address||'';row.inventorySyncQuantity?.();};
+             const syncRowMaterials=(row)=>{const type=row?.querySelector('select[name$="[category_id]"]'),material=row?.querySelector('.bulk-material');if(!type||!material)return;const options=materials.filter(item=>String(item.category)===String(type.value)).map(item=>({value:String(item.id),text:item.text,data:{materialId:item.materialId,category:item.category,code:item.code,name:item.name,address:item.address,quantity:item.quantity,grade:item.grade}}));setOptions(material,options,'Chọn vật tư thuộc loại đã chọn');const selectedValue=material.tomselect?material.tomselect.getValue():material.value,item=materials.find(item=>String(item.id)===String(selectedValue));const hidden=row.querySelector('input[name$="[material_id]"]');if(hidden)hidden.value=item?.materialId||'';const address=row.querySelector('input[name$="[install_address]"]');if(address&&!address.dataset.userEdited&&!address.value)address.value=item?.address||'';const grade=row.querySelector('select[name$="[grade]"]');if(grade&&item?.grade)grade.value=item.grade;row.inventorySyncQuantity?.();};
             const syncRows=()=>{rows.querySelectorAll('tr').forEach(row=>{const type=row.querySelector('select[name$="[category_id]"]');if(type){setOptions(type,rowTypeOptions(),'Chọn loại vật tư');syncRowMaterials(row);}});if(typeof window.initTomSelects==='function')window.initTomSelects(rows);};
              building?.addEventListener('change',syncRooms);industry?.addEventListener('change',syncRows);rows.addEventListener('change',event=>{if(event.target.matches('select[name$="[category_id]"],.bulk-material'))syncRowMaterials(event.target.closest('tr'));});
             let rowStructure='';
@@ -331,11 +808,11 @@
     </script>
     <div class="inventory-assets-list hidden">
         <div class="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between"><div><h2 class="text-lg font-bold text-slate-900">Danh sách tài sản</h2><p class="text-sm text-slate-500">Theo dõi và cập nhật tài sản đang sử dụng.</p></div><div class="flex items-center gap-2"><span class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">{{ $assets->total() }} bản ghi</span></div></div>
-        <div class="overflow-x-auto"><table class="w-full min-w-[900px] text-left text-sm"><thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th class="px-5 py-3">Mã</th><th class="px-5 py-3">Tên tài sản</th><th class="px-5 py-3">Phòng</th><th class="px-5 py-3">Số lượng</th><th class="px-5 py-3">Trạng thái</th><th class="px-5 py-3 text-right">Thao tác</th></tr></thead><tbody class="divide-y divide-slate-100">@forelse($assets as $asset)<tr class="transition hover:bg-blue-50/40"><td class="px-5 py-4 font-mono text-xs font-semibold text-blue-700">{{ $asset->asset_code }}</td><td class="px-5 py-4"><p class="font-semibold text-slate-800">{{ $asset->name }}</p><p class="mt-1 text-xs text-slate-400">{{ $asset->unit ?: 'cái' }}</p></td><td class="px-5 py-4 text-slate-600">{{ $asset->classroom?->name ?: 'Chưa gán phòng' }}</td><td class="px-5 py-4 font-semibold text-slate-700">{{ $asset->quantity }} <span class="font-normal text-slate-400">/ hỏng {{ $asset->broken_quantity }}</span></td><td class="px-5 py-4"><span class="rounded-full px-2.5 py-1 text-xs font-semibold {{ $asset->status === 'NORMAL' ? 'bg-emerald-100 text-emerald-700' : ($asset->status === 'BROKEN' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700') }}">{{ $asset->status === 'NORMAL' ? 'Bình thường' : ($asset->status === 'BROKEN' ? 'Hỏng' : ($asset->status === 'REPAIRING' ? 'Đang sửa' : 'Đã thanh lý')) }}</span></td><td class="px-5 py-4 text-right"><details class="relative inline-block text-left"><summary class="cursor-pointer rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-blue-300 hover:text-blue-700">Quản lý</summary><div class="absolute right-0 z-10 mt-2 w-72 rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl"><form method="POST" action="{{ route('inventory.assets.update',$asset) }}" class="grid gap-2">@csrf @method('PATCH')<input name="asset_code" value="{{ $asset->asset_code }}" required class="rounded-lg border px-2 py-1.5 text-sm"><input name="name" value="{{ $asset->name }}" required class="rounded-lg border px-2 py-1.5 text-sm"><select name="classroom_id" class="rounded-lg border px-2 py-1.5 text-sm"><option value="">Không gán phòng</option>@foreach($classrooms as $room)<option value="{{ $room->id }}" @selected($asset->classroom_id===$room->id)>{{ $room->name }}</option>@endforeach</select><input name="quantity" value="{{ $asset->quantity }}" type="number" min=".01" step=".01" class="rounded-lg border px-2 py-1.5 text-sm"><input name="broken_quantity" value="{{ $asset->broken_quantity }}" type="number" min="0" step=".01" class="rounded-lg border px-2 py-1.5 text-sm"><input name="grade" value="{{ $asset->grade }}" type="number" min="1" max="5" class="rounded-lg border px-2 py-1.5 text-sm"><select name="status" class="rounded-lg border px-2 py-1.5 text-sm"><option value="NORMAL" @selected($asset->status==='NORMAL')>Bình thường</option><option value="BROKEN" @selected($asset->status==='BROKEN')>Hỏng</option><option value="REPAIRING" @selected($asset->status==='REPAIRING')>Đang sửa</option><option value="LIQUIDATED" @selected($asset->status==='LIQUIDATED')>Đã thanh lý</option></select><input name="unit" value="{{ $asset->unit }}" class="rounded-lg border px-2 py-1.5 text-sm"><button class="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white">Lưu thay đổi</button></form><form method="POST" action="{{ route('inventory.assets.delete',$asset) }}" class="mt-2">@csrf @method('DELETE')<button class="rounded bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white">Xóa tài sản</button></form></div></details></td></tr>@empty<tr><td colspan="6" class="px-5 py-12 text-center"><div class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-blue-600"><i class="bi bi-box-seam text-xl"></i></div><p class="font-semibold text-slate-700">Chưa có tài sản</p><p class="mt-1 text-sm text-slate-400">Thêm tài sản mới bằng biểu mẫu phía trên.</p></td></tr>@endforelse</tbody></table></div><div class="border-t border-slate-100 px-5 py-3">{{ $assets->links() }}</div>
+        <div class="overflow-x-auto"><table class="w-full min-w-[900px] text-left text-sm"><thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th class="px-5 py-3">Mã</th><th class="px-5 py-3">Tên tài sản</th><th class="px-5 py-3">Phòng</th><th class="px-5 py-3">Số lượng</th><th class="px-5 py-3">Trạng thái</th><th class="px-5 py-3 text-right">Thao tác</th></tr></thead><tbody class="divide-y divide-slate-100">@forelse($assets as $asset)<tr class="transition hover:bg-blue-50/40"><td class="px-5 py-4 font-mono text-xs font-semibold text-blue-700">{{ $asset->asset_code }}</td><td class="px-5 py-4"><p class="font-semibold text-slate-800">{{ $asset->name }}</p><p class="mt-1 text-xs text-slate-400">{{ $asset->unit ?: 'cái' }}</p></td><td class="px-5 py-4 text-slate-600">{{ $asset->classroom?->name ?: 'Chưa gán phòng' }}</td><td class="px-5 py-4 font-semibold text-slate-700">{{ $asset->quantity }} <span class="font-normal text-slate-400">/ hỏng {{ $asset->broken_quantity }}</span></td><td class="px-5 py-4"><span class="rounded-full px-2.5 py-1 text-xs font-semibold {{ $asset->status === 'NORMAL' ? 'bg-emerald-100 text-emerald-700' : ($asset->status === 'BROKEN' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700') }}">{{ $asset->status === 'NORMAL' ? 'Bình thường' : ($asset->status === 'BROKEN' ? 'Hỏng' : ($asset->status === 'REPAIRING' ? 'Đang sửa' : 'Đã thanh lý')) }}</span></td><td class="px-5 py-4 text-right"><details class="relative inline-block text-left"><summary class="cursor-pointer rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-blue-300 hover:text-blue-700">Quản lý</summary><div class="absolute right-0 z-10 mt-2 w-80 rounded-xl border border-slate-200 bg-white p-3 text-left shadow-xl"><form method="POST" action="{{ route('inventory.assets.update',$asset) }}" class="grid gap-2">@csrf @method('PATCH')<label class="text-xs font-semibold text-slate-600">Mã vật tư<input name="asset_code" value="{{ $asset->asset_code }}" required placeholder="Nhập mã vật tư" class="mt-1 w-full rounded-lg border px-2 py-1.5 text-sm"></label><label class="text-xs font-semibold text-slate-600">Tên vật tư<input name="name" value="{{ $asset->name }}" required placeholder="Nhập tên vật tư" class="mt-1 w-full rounded-lg border px-2 py-1.5 text-sm"></label><label class="text-xs font-semibold text-slate-600">Phòng sử dụng<select name="classroom_id" class="mt-1 w-full rounded-lg border px-2 py-1.5 text-sm"><option value="">Không gán phòng</option>@foreach($classrooms as $room)<option value="{{ $room->id }}" @selected($asset->classroom_id===$room->id)>{{ $room->name }}</option>@endforeach</select></label><label class="text-xs font-semibold text-slate-600">Số lượng<input name="quantity" value="{{ $asset->quantity }}" type="number" min=".01" step=".01" placeholder="Số lượng hiện có" class="mt-1 w-full rounded-lg border px-2 py-1.5 text-sm"></label><label class="text-xs font-semibold text-slate-600">Số lượng hỏng<input name="broken_quantity" value="{{ $asset->broken_quantity }}" type="number" min="0" step=".01" placeholder="Số lượng hỏng" class="mt-1 w-full rounded-lg border px-2 py-1.5 text-sm"></label><label class="text-xs font-semibold text-slate-600">Phân cấp<input name="grade" value="{{ $asset->grade }}" type="number" min="1" max="5" placeholder="Từ 1 đến 5" class="mt-1 w-full rounded-lg border px-2 py-1.5 text-sm"></label><label class="text-xs font-semibold text-slate-600">Trạng thái<select name="status" class="mt-1 w-full rounded-lg border px-2 py-1.5 text-sm"><option value="NORMAL" @selected($asset->status==='NORMAL')>Bình thường</option><option value="BROKEN" @selected($asset->status==='BROKEN')>Hỏng</option><option value="REPAIRING" @selected($asset->status==='REPAIRING')>Đang sửa</option><option value="LIQUIDATED" @selected($asset->status==='LIQUIDATED')>Đã thanh lý</option></select></label><label class="text-xs font-semibold text-slate-600">Đơn vị tính<input name="unit" value="{{ $asset->unit }}" placeholder="Ví dụ: cái, bộ, hộp" class="mt-1 w-full rounded-lg border px-2 py-1.5 text-sm"></label><button class="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white">Lưu thay đổi</button></form><form method="POST" action="{{ route('inventory.assets.delete',$asset) }}" class="mt-2">@csrf @method('DELETE')<button class="rounded bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white">Xóa tài sản</button></form></div></details></td></tr>@empty<tr><td colspan="6" class="px-5 py-12 text-center"><div class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-blue-600"><i class="bi bi-box-seam text-xl"></i></div><p class="font-semibold text-slate-700">Chưa có tài sản</p><p class="mt-1 text-sm text-slate-400">Thêm tài sản mới bằng biểu mẫu phía trên.</p></td></tr>@endforelse</tbody></table></div><div class="border-t border-slate-100 px-5 py-3">{{ $assets->links() }}</div>
     </div>
     <section class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div class="border-b border-slate-100 px-5 py-4"><h2 class="text-lg font-bold text-slate-900">Nhật ký cập nhật vật tư</h2><p class="text-sm text-slate-500">Theo dõi các lần tăng, giảm và điều chỉnh vật tư.</p></div>
-        <div class="overflow-x-auto"><table class="w-full min-w-[1100px] text-left text-sm"><thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th class="px-5 py-3">Thời gian</th><th class="px-5 py-3">Mã vật tư</th><th class="px-5 py-3">Tên vật tư</th><th class="px-5 py-3">Loại biến động</th><th class="px-5 py-3">Số lượng</th><th class="px-5 py-3">Trước → Sau</th><th class="px-5 py-3">Lý do</th><th class="px-5 py-3">Người thực hiện</th></tr></thead><tbody class="divide-y divide-slate-100">@forelse(($auditLogs ?? collect()) as $log)<tr><td class="px-5 py-3">{{ $log->created_at?->format('d/m/Y H:i') }}</td><td class="px-5 py-3 font-mono text-xs">{{ data_get($log->details,'asset_code',data_get($log->details,'code','—')) }}</td><td class="px-5 py-3">{{ data_get($log->details,'name','—') }}</td><td class="px-5 py-3">{{ ['INCREASE'=>'Tăng','DECREASE'=>'Giảm','ADJUST'=>'Điều chỉnh','TRANSFER'=>'Điều động','RECALL'=>'Thu hồi'][$log->action] ?? $log->action }}</td><td class="px-5 py-3">{{ (int) data_get($log->details,'quantity',abs((int) data_get($log->details,'change',0))) }}</td><td class="px-5 py-3">{{ data_get($log->details,'before','—') }} → {{ data_get($log->details,'after','—') }}</td><td class="px-5 py-3">{{ data_get($log->details,'reason',data_get($log->details,'note','—')) }}</td><td class="px-5 py-3">{{ $log->user?->name ?: '—' }}</td></tr>@empty<tr><td colspan="8" class="px-5 py-10 text-center text-slate-500">Chưa có nhật ký cập nhật vật tư.</td></tr>@endforelse</tbody></table></div>
+        <div class="border-b border-slate-100 px-5 py-4"><h2 class="text-lg font-bold text-slate-900">Nhật ký tăng / giảm / điều chỉnh vật tư</h2><p class="text-sm text-slate-500">Theo dõi các lần tăng, giảm số lượng và điều chỉnh phân cấp vật tư.</p></div>
+        <div class="overflow-x-auto"><table class="w-full min-w-[1100px] text-left text-sm"><thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th class="px-5 py-3">Thời gian</th><th class="px-5 py-3">Mã vật tư</th><th class="px-5 py-3">Tên vật tư</th><th class="px-5 py-3">Loại biến động</th><th class="px-5 py-3">Số lượng</th><th class="px-5 py-3">Trước → Sau</th><th class="px-5 py-3">Lý do</th><th class="px-5 py-3">Người thực hiện</th></tr></thead><tbody class="divide-y divide-slate-100">@forelse(($auditLogs ?? collect()) as $log)@php($actionLabel = ['INCREASE'=>'Tăng','DECREASE'=>'Giảm','ADJUST'=>'Điều chỉnh'][$log->action] ?? $log->action)@php($isGradeTransfer = data_get($log->details,'source') === 'grade_transfer')<tr><td class="px-5 py-3">{{ $log->created_at?->format('d/m/Y H:i') }}</td><td class="px-5 py-3 font-mono text-xs">{{ data_get($log->details,'asset_code',data_get($log->details,'code','—')) }}</td><td class="px-5 py-3">{{ data_get($log->details,'name','—') }}</td><td class="px-5 py-3">{{ $actionLabel }}</td><td class="px-5 py-3">{{ (int) data_get($log->details,'quantity',abs((int) data_get($log->details,'change',0))) }}</td><td class="px-5 py-3">@if($isGradeTransfer)<div>Cấp {{ data_get($log->details,'source_grade','—') }}: {{ data_get($log->details,'source_before','—') }} → {{ data_get($log->details,'source_after','—') }}</div><div>Cấp {{ data_get($log->details,'target_grade','—') }}: {{ data_get($log->details,'target_before','—') }} → {{ data_get($log->details,'target_after','—') }}</div>@else{{ data_get($log->details,'before','—') }} → {{ data_get($log->details,'after','—') }}@endif</td><td class="px-5 py-3">{{ data_get($log->details,'reason',data_get($log->details,'note','—')) }}</td><td class="px-5 py-3">{{ $log->user?->name ?: '—' }}</td></tr>@empty<tr><td colspan="8" class="px-5 py-10 text-center text-slate-500">Chưa có nhật ký tăng / giảm / điều chỉnh vật tư.</td></tr>@endforelse</tbody></table></div>
     </section>
     <script>
         document.addEventListener('turbo:load',()=>{
@@ -369,29 +846,41 @@
             const anchor = form.querySelector(anchorSelector) || form.lastElementChild;
             const wrap = document.createElement('div');
             wrap.className = 'public-asset-fields grid gap-3 rounded-lg border bg-slate-50 p-3 md:col-span-4 md:grid-cols-5';
-            wrap.innerHTML = Object.entries(labels).map(([name, label]) => `<label class="text-sm font-semibold text-slate-700">${label}<input name="${name}" ${name === 'depreciation_rate' ? 'type="number" min="0" max="100" step="0.01" value="0"' : (name.includes('amount') || name.includes('price') ? 'type="number" min="0" step="1000"' : 'type="text"')} class="mt-1 w-full rounded border bg-white px-3 py-2"></label>`).join('');
+            wrap.innerHTML = Object.entries(labels).map(([name, label]) => `<label class="text-sm font-semibold text-slate-700">${label}<input name="${name}" ${name === 'depreciation_rate' ? 'type="number" min="0" max="100" step="0.01" value="0"' : (name === 'unit_price' ? 'type="number" min="10000000" step="1000" value="10000000"' : (name === 'total_amount' ? 'type="number" min="0" step="1000"' : 'type="text"'))} ${name === 'total_amount' ? 'readonly title="Tự động tính bằng đơn giá nhân số lượng cập nhật"' : ''} class="mt-1 w-full rounded border ${name === 'total_amount' ? 'bg-slate-100 text-slate-700' : 'bg-white'} px-3 py-2"></label>`).join('');
             const type = document.createElement('label');
             type.className = 'text-sm font-semibold text-slate-700';
             type.innerHTML = '<span class="mb-1 block">Loại quản lý</span><select name="management_type" class="w-full rounded border bg-white px-3 py-2"><option value="MATERIAL">Quản lý vật tư</option><option value="ASSET">Quản lý tài sản</option></select>';
             anchor?.before(type);
             type.after(wrap);
             const select = type.querySelector('select');
-            const sync = () => wrap.classList.toggle('hidden', select.value !== 'ASSET');
+            const asset = form.querySelector('#single-asset');
+            const syncManagementFromAsset = () => {
+                const option = asset?.selectedOptions?.[0];
+                const managementType = option?.dataset?.managementType;
+                if (managementType) select.value = managementType;
+                sync();
+            };
+            const sync = () => {
+                const isAsset = select.value === 'ASSET';
+                wrap.classList.toggle('hidden', !isAsset);
+                if (isAsset && unit && Number(unit.value || 0) < 10000000) unit.value = '10000000';
+                autoTotal();
+            };
             const qty = form.querySelector('input[name="quantity"]');
             const unit = wrap.querySelector('input[name="unit_price"]');
             const total = wrap.querySelector('input[name="total_amount"]');
             const autoTotal = () => {
-                if (!total || Number(total.value || 0) > 0) return;
+                if (!total) return;
                 const value = Number(unit?.value || 0) * Number(qty?.value || 0);
-                if (value > 0) total.value = String(Math.round(value));
+                total.value = value > 0 ? String(Math.round(value)) : '';
             };
             select.addEventListener('change', sync);
+            asset?.addEventListener('change', syncManagementFromAsset);
             unit?.addEventListener('input', autoTotal);
-            qty?.addEventListener('input', () => { if (total) total.value = ''; autoTotal(); });
-            sync();
+            qty?.addEventListener('input', autoTotal);
+            syncManagementFromAsset();
         };
         addPublicAssetFields(document.querySelector('#inventory-panel-single form'), 'button');
-        addPublicAssetFields(document.querySelector('#inventory-panel-bulk form'), '#inventory-add-row');
     };
     document.addEventListener('DOMContentLoaded', init);
     document.addEventListener('turbo:load', init);
@@ -449,6 +938,7 @@
         form.dataset.singleMaterialSubmit = '1';
         form.addEventListener('submit', () => {
             const value = asset.tomselect ? asset.tomselect.getValue() : asset.value;
+            const selected = asset.selectedOptions?.[0];
             if (!String(value).startsWith('material-')) return;
             let material = form.querySelector('input[name="material_id"]');
             if (!material) {
@@ -457,7 +947,7 @@
                 material.name = 'material_id';
                 form.append(material);
             }
-            material.value = String(value).replace('material-', '');
+            material.value = selected?.dataset.materialId || String(value).replace(/^material-/, '').replace(/-grade-\d+$/, '');
             asset.disabled = true;
         });
     };

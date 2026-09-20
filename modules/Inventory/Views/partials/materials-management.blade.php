@@ -23,27 +23,6 @@
         <a href="{{ route('inventory.materials') }}" class="rounded border px-4 py-2">Xóa lọc</a>
     </form>
 
-    <section class="rounded border bg-white p-4">
-        <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <div>
-                <h2 class="font-semibold">Import vật tư</h2>
-                <p class="mt-1 text-sm text-slate-500">File vật tư chỉ cần Mã loại vật tư, Tên vật tư và Đơn vị tính; mã vật tư tự sinh theo loại.</p>
-            </div>
-            <div class="flex flex-wrap gap-2">
-                <a href="{{ route('inventory.import.template', ['type' => 'material']) }}" class="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:bg-emerald-700"><i class="bi bi-file-earmark-excel"></i> Tải mẫu Excel (.xlsx)</a>
-                <a href="{{ route('inventory.import.template.word', ['type' => 'material']) }}" class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:bg-blue-700"><i class="bi bi-file-earmark-word"></i> Tải mẫu DOCX (.docx)</a>
-            </div>
-        </div>
-        <form method="POST" action="{{ route('inventory.import') }}" enctype="multipart/form-data" class="grid gap-3 md:grid-cols-4">
-            @csrf
-            <input type="hidden" name="import_type" value="material">
-            <label class="text-sm font-semibold text-slate-700 md:col-span-3">Tệp import vật tư <b class="text-red-500">*</b>
-                <input name="file" type="file" accept=".xlsx,.xls,.csv,.txt,.docx" required class="mt-1 w-full rounded border p-2">
-            </label>
-            <div class="flex items-end"><button class="w-full rounded bg-slate-700 px-4 py-2 text-white">Import vật tư</button></div>
-        </form>
-    </section>
-
     <form method="POST" action="{{ route('inventory.store') }}" class="grid gap-3 rounded border bg-white p-4 md:grid-cols-4">
         @csrf
         <h2 class="font-semibold md:col-span-4">Thêm vật tư</h2>

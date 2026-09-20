@@ -12,6 +12,13 @@ class InventoryReportTemplateController extends ModuleBaseController
     private const POSITION_FIXED_WIDTHS_5 = [900, 3000, 430, 480, 720];
     private const POSITION_FIXED_WIDTHS_4 = [900, 3300, 430, 720];
     private const POSITION_TABLE_WIDTH = 15400;
+    private const EXCEL_ONLY_REPORT_TYPES = [
+        'xlsx-public-depreciation-detail',
+        'xlsx-public-assets-current',
+        'xlsx-public-assets-change',
+        'xlsx-public-assets-by-unit',
+        'xlsx-public-assets-change-detail',
+    ];
 
     public function download(Request $request)
     {
@@ -29,6 +36,7 @@ class InventoryReportTemplateController extends ModuleBaseController
             'recall' => 'bao-cao-quyet-dinh-thu-hoi-tra-ve.docx',
             'repair' => 'bao-cao-vat-tu-dang-hu-hai-va-sua-chua.docx',
             'update-log' => 'bao-cao-cap-nhat-vat-tu.docx',
+            'public-assets' => 'bao-cao-danh-sach-tai-san-cong.docx',
         ];
 
         $type = match ((string) $request->input('report_type', 'position')) {
@@ -38,6 +46,12 @@ class InventoryReportTemplateController extends ModuleBaseController
             'unit' => 'unit',
             default => (string) $request->input('report_type', 'position'),
         };
+        if ($request->input('format') === 'xlsx') {
+            abort_unless(isset($files[$type]) || in_array($type, self::EXCEL_ONLY_REPORT_TYPES, true), 422, 'Loại báo cáo Excel không hợp lệ.');
+
+            return $this->fillExcelReport($request, $type);
+        }
+
         abort_unless(isset($files[$type]), 422, 'Loại báo cáo không hợp lệ.');
 
         [$path, $filename] = $this->resolveTemplate($request, $files[$type], $type);
@@ -71,6 +85,11 @@ class InventoryReportTemplateController extends ModuleBaseController
         $defaultPath = resource_path('inventory-report-templates/'.$defaultFilename);
         if (is_file($defaultPath)) {
             return [$defaultPath, $defaultFilename];
+        }
+        if ($type === 'public-assets') {
+            $generatedPath = storage_path('app/'.$defaultFilename);
+            $this->createPublicAssetReportTemplate($generatedPath);
+            return [$generatedPath, $defaultFilename];
         }
 
         abort(404, 'Chưa có mẫu báo cáo Word đang dùng cho loại báo cáo này.');
@@ -108,14 +127,17 @@ class InventoryReportTemplateController extends ModuleBaseController
             'update-log' => 'Báo cáo cập nhật vật tư',
             'using-position' => 'Báo cáo vật tư đang sử dụng theo vị trí',
             'using-total' => 'Báo cáo vật tư đang sử dụng tổng thể',
+            'public-assets' => 'Danh sách tài sản công',
         ];
         $stableAssets = $assets->whereNotIn('status', ['BROKEN', 'REPAIRING'])->values();
         $brokenAssets = $assets->whereIn('status', ['BROKEN', 'REPAIRING'])->values();
+        $reportYear = (int) $request->integer('year', now()->year);
         $processor->setValues([
             'ngay_bao_cao' => $today->format('d/m/Y'),
             'ngay' => $today->format('d'),
             'thang' => $today->format('m'),
             'nam' => $today->format('Y'),
+            'nam_thong_ke' => (string) $reportYear,
             'tu_ngay' => $request->filled('from') ? date('d/m/Y', strtotime($request->input('from'))) : '',
             'den_ngay' => $request->filled('to') ? date('d/m/Y', strtotime($request->input('to'))) : $today->format('d/m/Y'),
             'tieu_de' => $titles[$type] ?? 'Báo cáo vật tư',
@@ -135,6 +157,10 @@ class InventoryReportTemplateController extends ModuleBaseController
             'so_luong_vat_tu_hu_hong' => (string) $brokenAssets->sum('quantity'),
             'so_dong_hu_hai' => (string) $brokenAssets->count(),
             'so_dong_hu_hong' => (string) $brokenAssets->count(),
+            'tong_tai_san' => (string) $rowsData->count(),
+            'tong_thanh_tien' => $this->formatMoney($rowsData->sum(fn ($asset) => $asset instanceof InventoryAsset ? $this->publicAssetInitialValue($asset) : 0)),
+            'tong_tien_khau_hao' => $this->formatMoney($rowsData->sum(fn ($asset) => $asset instanceof InventoryAsset ? $this->publicAssetYearValues($asset, $reportYear)['amount'] : 0)),
+            'tong_gia_tri_con_lai' => $this->formatMoney($rowsData->sum(fn ($asset) => $asset instanceof InventoryAsset ? $this->publicAssetYearValues($asset, $reportYear)['remaining_value'] : 0)),
         ]);
 
         $rows = $rowsData->values()->map(fn ($record, $index) => $this->variableRowValues($record, $type, $index + 1))->all();
@@ -183,7 +209,8 @@ class InventoryReportTemplateController extends ModuleBaseController
 
     private function loadReportRows(Request $request, string $type): array
     {
-        $assets = InventoryAsset::with(['classroom.building', 'classroom.managingUnit', 'material.category.parent', 'holdingUnit'])
+        $assets = InventoryAsset::with(['classroom.building', 'classroom.managingUnit', 'material.category.parent', 'categoryRelation.parent', 'holdingUnit', 'depreciationYears'])
+            ->when(in_array($type, ['public-assets', 'xlsx-public-depreciation-detail', 'xlsx-public-assets-current', 'xlsx-public-assets-by-unit'], true), fn ($q) => $q->where('management_type', 'ASSET'))
             ->when($request->filled('building_id'), fn ($q) => $q->whereHas('classroom', fn ($room) => $room->where('building_id', $request->integer('building_id'))))
             ->when($request->filled('classroom_id'), fn ($q) => $q->where('classroom_id', $request->integer('classroom_id')))
             ->when($request->filled('unit_id'), fn ($q) => $q->whereHas('classroom', fn ($room) => $room->where('managing_unit_id', $request->integer('unit_id'))))
@@ -201,7 +228,7 @@ class InventoryReportTemplateController extends ModuleBaseController
             $rowsData = $assets->whereIn('status', ['BROKEN', 'REPAIRING'])->values();
         } elseif (in_array($type, ['transfer', 'recall'], true)) {
             $rowsData = InventoryTransfer::with(['asset', 'material', 'fromClassroom.managingUnit', 'toClassroom.managingUnit'])->where('type', $type === 'recall' ? 'RECALL' : 'TRANSFER')->latest()->get();
-        } elseif (in_array($type, ['increase-decrease', 'update-log'], true)) {
+        } elseif (in_array($type, ['increase-decrease', 'update-log', 'xlsx-public-assets-change', 'xlsx-public-assets-change-detail'], true)) {
             $rowsData = InventoryAuditLog::with('user')->whereIn('action', ['INCREASE', 'DECREASE', 'ADJUST'])
                 ->whereIn('entity_type', ['material', 'asset'])
                 ->when($request->filled('from'), fn ($q) => $q->whereDate('created_at', '>=', $request->input('from')))
@@ -219,7 +246,8 @@ class InventoryReportTemplateController extends ModuleBaseController
 
     private function fillReportTemplate(Request $request, string $template, string $filename, string $type): mixed
     {
-        $assets = InventoryAsset::with(['classroom.building', 'classroom.managingUnit', 'material.category.parent', 'holdingUnit'])
+        $assets = InventoryAsset::with(['classroom.building', 'classroom.managingUnit', 'material.category.parent', 'categoryRelation.parent', 'holdingUnit', 'depreciationYears'])
+            ->when($type === 'public-assets', fn ($q) => $q->where('management_type', 'ASSET'))
             ->when($request->filled('building_id'), fn ($q) => $q->whereHas('classroom', fn ($room) => $room->where('building_id', $request->integer('building_id'))))
             ->when($request->filled('classroom_id'), fn ($q) => $q->where('classroom_id', $request->integer('classroom_id')))
             ->when($request->filled('unit_id'), fn ($q) => $q->whereHas('classroom', fn ($room) => $room->where('managing_unit_id', $request->integer('unit_id'))))
@@ -300,6 +328,15 @@ class InventoryReportTemplateController extends ModuleBaseController
                 $this->setTemplateRow($xml, $templateRow->cloneNode(true), $values, $table);
             }
             if ($totalRow) {
+                if ($type === 'public-assets') {
+                    $reportYear = (int) $request->integer('year', now()->year);
+                    $totalQuantity = $source->sum(fn ($item) => (float) ($item->quantity ?? 0));
+                    $totalAmount = $source->sum(fn ($item) => $item instanceof InventoryAsset ? $this->publicAssetInitialValue($item) : 0);
+                    $depreciationAmount = $source->sum(fn ($item) => $item instanceof InventoryAsset ? $this->publicAssetYearValues($item, $reportYear)['amount'] : 0);
+                    $remainingValue = $source->sum(fn ($item) => $item instanceof InventoryAsset ? $this->publicAssetYearValues($item, $reportYear)['remaining_value'] : 0);
+                    $this->setTemplateRow($xml, $totalRow, ['', 'TỔNG CỘNG', '', '', '', '', $totalQuantity, '', '', $this->formatMoney($totalAmount), '', '', '', '', '', '', $this->formatMoney($depreciationAmount), $this->formatMoney($remainingValue), '', ''], $table);
+                    continue;
+                }
                 $total = $source->sum(fn ($item) => (float) ($item instanceof InventoryAsset
                     ? $item->quantity
                     : ($item instanceof InventoryAuditLog
@@ -321,6 +358,482 @@ class InventoryReportTemplateController extends ModuleBaseController
         $documentXml = $xml->saveXML();
         $zip->close();
         return $this->writeReportZip($template, $documentXml, $filename);
+    }
+
+    private function fillExcelReport(Request $request, string $type): mixed
+    {
+        abort_unless(class_exists(\PhpOffice\PhpSpreadsheet\Spreadsheet::class), 500, 'Chưa cài thư viện xuất Excel.');
+
+        [$rowsData, $assets] = $this->loadReportRows($request, $type);
+        if (in_array($type, ['transfer', 'recall'], true)) {
+            abort_if($rowsData->isEmpty(), 422, $type === 'transfer'
+                ? 'Chưa có phiếu điều động để xuất quyết định.'
+                : 'Chưa có phiếu thu hồi để xuất quyết định.');
+        }
+
+        $spreadsheet = $this->makeExcelWorkbook($request, $type);
+        $depreciationYears = $type === 'xlsx-public-depreciation-detail' ? $this->excelDepreciationYears($request, $rowsData) : [];
+        if ($depreciationYears) {
+            $this->configureExcelDepreciationYearColumns($spreadsheet, $depreciationYears);
+        }
+        $rowValues = $rowsData->values()->map(function ($record, $index) use ($type, $depreciationYears) {
+            $values = $this->variableRowValues($record, $type, $index + 1);
+            if ($depreciationYears && $record instanceof InventoryAsset) {
+                foreach ($depreciationYears as $year) {
+                    $depreciation = $this->publicAssetYearValues($record, $year);
+                    $values['khau_hao_'.$year] = $depreciation['rate'] > 0 ? rtrim(rtrim(number_format($depreciation['rate'], 2, ',', '.'), '0'), ',').'%' : '';
+                }
+            }
+            return $values;
+        })->values();
+        if ($this->fillExcelVariableTemplate($spreadsheet, $request, $type, $rowValues)) {
+            $filename = $this->safeDownloadName($this->excelReportTitle($type)).'-'.now()->format('YmdHis').'.xlsx';
+            $output = storage_path('app/'.$filename);
+            (new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet))->save($output);
+
+            return response()->download($output, $filename)->deleteFileAfterSend(true);
+        }
+
+        $sheet = $spreadsheet->getSheetCount() === 1 && $spreadsheet->getActiveSheet()->getCell('A1')->getValue() === null
+            ? $spreadsheet->getActiveSheet()
+            : $spreadsheet->createSheet();
+        $title = $this->excelReportTitle($type);
+        $columns = $this->excelReportColumns($type);
+
+        $sheet->setTitle(mb_substr($this->safeSheetTitle($title), 0, 31));
+        $sheet->setCellValue('A1', $title);
+        $sheet->setCellValue('A2', 'Ngày xuất: '.now()->format('d/m/Y H:i'));
+        if ($request->filled('from') || $request->filled('to')) {
+            $sheet->setCellValue('A3', 'Từ ngày: '.($request->filled('from') ? date('d/m/Y', strtotime($request->input('from'))) : '').' - Đến ngày: '.($request->filled('to') ? date('d/m/Y', strtotime($request->input('to'))) : now()->format('d/m/Y')));
+        } elseif (in_array($type, ['public-assets', 'xlsx-public-depreciation-detail', 'xlsx-public-assets-current', 'xlsx-public-assets-by-unit'], true)) {
+            $sheet->setCellValue('A3', 'Năm thống kê: '.$request->integer('year', now()->year));
+        }
+
+        $headerRow = 5;
+        $columnIndex = 1;
+        foreach (array_keys($columns) as $label) {
+            $sheet->setCellValue($this->excelCell($columnIndex, $headerRow), $label);
+            $columnIndex++;
+        }
+
+        $rowIndex = $headerRow + 1;
+        foreach ($rowValues as $values) {
+            $columnIndex = 1;
+            foreach ($columns as $key) {
+                $sheet->setCellValue($this->excelCell($columnIndex, $rowIndex), $values[$key] ?? '');
+                $columnIndex++;
+            }
+            $rowIndex++;
+        }
+
+        $lastColumn = count($columns);
+        if ($lastColumn > 0) {
+            $titleRange = 'A1:'.$this->excelCell($lastColumn, 1);
+            $tableRange = 'A'.$headerRow.':'.$this->excelCell($lastColumn, max($headerRow, $rowIndex - 1));
+            $sheet->mergeCells($titleRange);
+            $sheet->getStyle($titleRange)->getFont()->setBold(true)->setSize(14);
+            $sheet->getStyle('A'.$headerRow.':'.$this->excelCell($lastColumn, $headerRow))->getFont()->setBold(true);
+            $sheet->getStyle($tableRange)
+                ->getBorders()->getAllBorders()->setBorderStyle(\PhpOffice\PhpSpreadsheet\Style\Border::BORDER_THIN);
+            for ($column = 1; $column <= $lastColumn; $column++) {
+                $sheet->getColumnDimensionByColumn($column)->setAutoSize(true);
+            }
+            $sheet->freezePane('A'.($headerRow + 1));
+            $sheet->setAutoFilter($tableRange);
+        }
+
+        $filename = $this->safeDownloadName($title).'-'.now()->format('YmdHis').'.xlsx';
+        $output = storage_path('app/'.$filename);
+        (new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet))->save($output);
+
+        return response()->download($output, $filename)->deleteFileAfterSend(true);
+    }
+
+    private function makeExcelWorkbook(Request $request, string $type): \PhpOffice\PhpSpreadsheet\Spreadsheet
+    {
+        if (! $this->hasUploadedTemplate($request)) {
+            return new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+        }
+
+        $template = InventoryReportTemplate::whereKey($request->integer('template_id'))
+            ->where('active', true)
+            ->where('report_type', $type)
+            ->first();
+        $path = $template?->absolutePath();
+        if (! $template || $template->format() !== 'xlsx' || ! $path || ! is_file($path)) {
+            return new \PhpOffice\PhpSpreadsheet\Spreadsheet();
+        }
+
+        return \PhpOffice\PhpSpreadsheet\IOFactory::load($path);
+    }
+
+    private function fillExcelVariableTemplate(\PhpOffice\PhpSpreadsheet\Spreadsheet $spreadsheet, Request $request, string $type, \Illuminate\Support\Collection $rows): bool
+    {
+        $usedPlaceholders = false;
+        $scalarValues = $this->excelScalarValues($request, $type, $rows);
+        $rowKeys = array_keys($this->emptyVariableRow());
+
+        foreach ($spreadsheet->getWorksheetIterator() as $sheet) {
+            $templateRow = null;
+            $highestRow = $sheet->getHighestRow();
+            $highestColumnIndex = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::columnIndexFromString($sheet->getHighestColumn());
+
+            for ($row = 1; $row <= $highestRow; $row++) {
+                $rowPlaceholders = [];
+                for ($column = 1; $column <= $highestColumnIndex; $column++) {
+                    $coordinate = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($column).$row;
+                    $value = $sheet->getCell($coordinate)->getValue();
+                    if (! is_string($value) || ! str_contains($value, '${')) {
+                        continue;
+                    }
+                    if (preg_match_all('/\$\{([A-Za-z0-9_]+)\}/', $value, $matches)) {
+                        $rowPlaceholders = array_merge($rowPlaceholders, $matches[1]);
+                    }
+                }
+                if (count(array_intersect($rowPlaceholders, $rowKeys)) >= 2
+                    && count(array_intersect($rowPlaceholders, ['stt', 'ten_tai_san', 'ten_vat_tu', 'ma_tai_san', 'ma_vat_tu'])) > 0) {
+                    $templateRow = $row;
+                    break;
+                }
+            }
+
+            if ($templateRow !== null) {
+                $usedPlaceholders = true;
+                $rowCount = max(1, $rows->count());
+                if ($rowCount > 1) {
+                    $sheet->insertNewRowBefore($templateRow + 1, $rowCount - 1);
+                    for ($offset = 1; $offset < $rowCount; $offset++) {
+                        $this->copyExcelRowStyle($sheet, $templateRow, $templateRow + $offset, $highestColumnIndex);
+                    }
+                }
+
+                $templateValues = [];
+                for ($column = 1; $column <= $highestColumnIndex; $column++) {
+                    $templateValues[$column] = $sheet->getCell(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($column).$templateRow)->getValue();
+                }
+
+                for ($offset = 0; $offset < $rowCount; $offset++) {
+                    $values = $rows->get($offset, $this->emptyVariableRow());
+                    for ($column = 1; $column <= $highestColumnIndex; $column++) {
+                        $value = $templateValues[$column] ?? null;
+                        if (is_string($value) && str_contains($value, '${')) {
+                            $coordinate = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($column).($templateRow + $offset);
+                            $sheet->getCell($coordinate)->setValueExplicit($this->replaceExcelPlaceholders($value, $values + $scalarValues), \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
+                        }
+                    }
+                }
+            }
+
+            $highestRow = $sheet->getHighestRow();
+            $highestColumnIndex = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::columnIndexFromString($sheet->getHighestColumn());
+            for ($row = 1; $row <= $highestRow; $row++) {
+                for ($column = 1; $column <= $highestColumnIndex; $column++) {
+                    $cell = $sheet->getCell(\PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($column).$row);
+                    $value = $cell->getValue();
+                    if (is_string($value) && str_contains($value, '${')) {
+                        $usedPlaceholders = true;
+                        $cell->setValueExplicit($this->replaceExcelPlaceholders($value, $scalarValues), \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
+                    }
+                }
+            }
+        }
+
+        return $usedPlaceholders;
+    }
+
+    private function excelDepreciationYears(Request $request, \Illuminate\Support\Collection $rowsData): array
+    {
+        if ($request->filled('depreciation_from_year') || $request->filled('depreciation_to_year')) {
+            $from = (int) ($request->input('depreciation_from_year') ?: $request->input('depreciation_to_year') ?: now()->year);
+            $to = (int) ($request->input('depreciation_to_year') ?: $from);
+            if ($from > $to) {
+                [$from, $to] = [$to, $from];
+            }
+            $to = min($to, $from + 30);
+            return range($from, $to);
+        }
+
+        $years = $rowsData
+            ->filter(fn ($record) => $record instanceof InventoryAsset)
+            ->flatMap(fn (InventoryAsset $asset) => $asset->depreciationYears?->pluck('year') ?? collect())
+            ->map(fn ($year) => (int) $year)
+            ->filter(fn ($year) => $year > 0)
+            ->unique()
+            ->sort()
+            ->values()
+            ->all();
+
+        return $years ?: [(int) now()->year];
+    }
+
+    private function configureExcelDepreciationYearColumns(\PhpOffice\PhpSpreadsheet\Spreadsheet $spreadsheet, array $years): void
+    {
+        $sheet = $spreadsheet->getSheet(0);
+        $startColumn = 8; // H
+        $reservedColumns = 6; // H:M in the source template, including the two "..." columns.
+        $years = array_slice($years, 0, $reservedColumns);
+        $yearCount = max(1, count($years));
+
+        $lastYearColumn = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($startColumn + $yearCount - 1);
+        $sheet->setCellValue('H8', 'Tỷ lệ % khấu hao tài sản qua các năm');
+
+        for ($offset = 0; $offset < $reservedColumns; $offset++) {
+            $column = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($startColumn + $offset);
+            $sheet->getColumnDimension($column)->setVisible($offset < $yearCount);
+            if (isset($years[$offset])) {
+                $year = $years[$offset];
+                $sheet->setCellValue($column.'9', (string) $year);
+                $sheet->setCellValue($column.'12', '${khau_hao_'.$year.'}');
+            } else {
+                $sheet->setCellValue($column.'9', '');
+                $sheet->setCellValue($column.'12', '');
+            }
+        }
+    }
+
+    private function copyExcelRowStyle(\PhpOffice\PhpSpreadsheet\Worksheet\Worksheet $sheet, int $sourceRow, int $targetRow, int $highestColumnIndex): void
+    {
+        $sheet->getRowDimension($targetRow)->setRowHeight($sheet->getRowDimension($sourceRow)->getRowHeight());
+        for ($column = 1; $column <= $highestColumnIndex; $column++) {
+            $source = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($column).$sourceRow;
+            $target = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($column).$targetRow;
+            $sheet->duplicateStyle($sheet->getStyle($source), $target);
+        }
+    }
+
+    private function replaceExcelPlaceholders(string $value, array $values): string
+    {
+        return preg_replace_callback('/\$\{([A-Za-z0-9_]+)\}/', fn ($match) => (string) ($values[$match[1]] ?? ''), $value) ?? $value;
+    }
+
+    private function excelScalarValues(Request $request, string $type, \Illuminate\Support\Collection $rows): array
+    {
+        $today = now();
+        $year = (int) $request->integer('year', $today->year);
+        $firstRow = (array) ($rows->first() ?: []);
+
+        return [
+            'ngay_bao_cao' => $today->format('d/m/Y'),
+            'ngay' => $today->format('d'),
+            'thang' => $today->format('m'),
+            'nam' => $today->format('Y'),
+            'nam_thong_ke' => (string) $year,
+            'nam_thong_ke_1' => (string) ($year + 1),
+            'nam_thong_ke_2' => (string) ($year + 2),
+            'nam_thong_ke_3' => (string) ($year + 3),
+            'tu_ngay' => $request->filled('from') ? date('d/m/Y', strtotime($request->input('from'))) : '',
+            'den_ngay' => $request->filled('to') ? date('d/m/Y', strtotime($request->input('to'))) : $today->format('d/m/Y'),
+            'tieu_de' => $this->excelReportTitle($type),
+            'loai_bao_cao' => $type,
+            'tong_so' => (string) $rows->count(),
+            'tong_so_luong' => (string) $rows->sum(fn ($row) => (float) str_replace(',', '.', (string) ($row['so_luong'] ?? 0))),
+            'tong_tai_san' => (string) $rows->count(),
+            'nganh' => (string) ($firstRow['nganh'] ?? ''),
+            'loai_tai_san' => (string) ($firstRow['loai_tai_san'] ?? ''),
+            'don_vi_quan_ly' => (string) ($firstRow['don_vi_quan_ly'] ?? ''),
+        ];
+    }
+
+    private function excelReportTitle(string $type): string
+    {
+        return [
+            'position' => 'Thống kê thực lực hiện có theo vị trí',
+            'total-position' => 'Thống kê thực lực hiện có tổng hợp',
+            'unit' => 'Thống kê thực lực vật tư theo đơn vị',
+            'period' => 'Báo cáo tổng hợp theo kỳ',
+            'increase-decrease' => 'Thống kê tăng giảm thực lực vật tư',
+            'using-position' => 'Báo cáo vật tư đang sử dụng theo vị trí',
+            'using-total' => 'Báo cáo vật tư đang sử dụng tổng hợp',
+            'warehouse' => 'Báo cáo kho',
+            'system-warehouse' => 'Báo cáo kho vật tư',
+            'transfer' => 'Quyết định điều động',
+            'recall' => 'Quyết định thu hồi',
+            'repair' => 'Vật tư đang hư hại và sửa chữa',
+            'update-log' => 'Cập nhật vật tư',
+            'public-assets' => 'Danh sách tài sản công',
+            'xlsx-public-depreciation-detail' => 'Chi tiết khấu hao vật tư trang bị thuộc tài sản công',
+            'xlsx-public-assets-current' => 'Thống kê thực lực vật tư trang bị thuộc tài sản cố định hiện có',
+            'xlsx-public-assets-change' => 'Tăng giảm vật tư trang bị thuộc tài sản công',
+            'xlsx-public-assets-by-unit' => 'Thống kê vật tư trang bị thuộc tài sản cố định hiện có tại các đơn vị',
+            'xlsx-public-assets-change-detail' => 'Chi tiết tăng giảm vật tư trang bị thuộc tài sản cố định',
+        ][$type] ?? 'Báo cáo vật tư';
+    }
+
+    private function excelReportColumns(string $type): array
+    {
+        return match ($type) {
+            'increase-decrease' => [
+                'Tên vật tư' => 'ten_vat_tu',
+                'ĐVT' => 'don_vi_tinh',
+                'Phân cấp' => 'phan_cap',
+                'SL tăng' => 'so_luong_tang',
+                'SL giảm' => 'so_luong_giam',
+                'Trên cấp' => 'tren_cap',
+                'Điều động đến' => 'dieu_dong_den',
+                'Mua sắm' => 'mua_sam',
+                'Kiểm kê tăng' => 'kiem_ke_tang',
+                'Tăng phân cấp' => 'tang_phan_cap',
+                'Tăng khác' => 'tang_khac',
+                'Trả trên' => 'tra_tren',
+                'Điều động đi' => 'dieu_dong_di',
+                'Hao hụt' => 'hao_hut',
+                'Hư hỏng' => 'hu_hong',
+                'Kiểm kê giảm' => 'kiem_ke_giam',
+                'Thanh lý' => 'thanh_ly',
+                'Giảm phân cấp' => 'giam_phan_cap',
+                'Giảm khác' => 'giam_khac',
+            ],
+            'period' => [
+                'STT' => 'stt',
+                'Ngày dữ liệu' => 'ngay_du_lieu',
+                'Loại biến động' => 'loai_bien_dong',
+                'Tên vật tư' => 'ten_vat_tu',
+                'Số lượng' => 'so_luong',
+                'Ghi chú' => 'ghi_chu',
+            ],
+            'system-warehouse' => [
+                'STT' => 'stt',
+                'Mã vật tư' => 'ma_vat_tu',
+                'Tên vật tư' => 'ten_vat_tu',
+                'ĐVT' => 'don_vi_tinh',
+                'Số lượng' => 'so_luong',
+                'Kho' => 'kho',
+                'Vị trí' => 'vi_tri',
+                'Tồn tối thiểu' => 'ton_toi_thieu',
+                'Ghi chú' => 'ghi_chu',
+            ],
+            'update-log' => [
+                'STT' => 'stt',
+                'Ngày dữ liệu' => 'ngay_du_lieu',
+                'Loại biến động' => 'loai_bien_dong',
+                'Tên vật tư' => 'ten_vat_tu',
+                'Số lượng' => 'so_luong',
+                'Trước' => 'truoc',
+                'Sau' => 'sau',
+                'Vị trí' => 'vi_tri',
+                'Người thực hiện' => 'nguoi_thuc_hien',
+                'Lý do' => 'ly_do',
+            ],
+            'public-assets', 'xlsx-public-depreciation-detail' => [
+                'STT' => 'stt',
+                'Mã tài sản' => 'ma_tai_san',
+                'Tên tài sản' => 'ten_tai_san',
+                'Ngành' => 'nganh',
+                'Loại tài sản' => 'loai_tai_san',
+                'Phân cấp' => 'phan_cap',
+                'Số lượng' => 'so_luong',
+                'ĐVT' => 'don_vi_tinh',
+                'Đơn giá' => 'don_gia',
+                'Thành tiền' => 'thanh_tien',
+                'Phòng' => 'phong',
+                'Địa chỉ lắp đặt' => 'dia_chi_lap_dat',
+                'Đơn vị cung cấp' => 'don_vi_cung_cap',
+                'Hợp đồng / hóa đơn' => 'hop_dong_hoa_don',
+                'Năm khấu hao' => 'nam_khau_hao',
+                'Tỷ lệ khấu hao' => 'ty_le_khau_hao',
+                'Tiền khấu hao' => 'tien_khau_hao',
+                'Giá trị còn lại' => 'gia_tri_con_lai',
+                'Trạng thái' => 'trang_thai',
+                'Ghi chú' => 'ghi_chu',
+            ],
+            'xlsx-public-assets-current' => [
+                'STT' => 'stt',
+                'Mã tài sản' => 'ma_tai_san',
+                'Tên tài sản' => 'ten_tai_san',
+                'Ngành' => 'nganh',
+                'Loại tài sản' => 'loai_tai_san',
+                'Phân cấp' => 'phan_cap',
+                'Số lượng' => 'so_luong',
+                'ĐVT' => 'don_vi_tinh',
+                'Thành tiền' => 'thanh_tien',
+                'Hợp đồng / hóa đơn' => 'hop_dong_hoa_don',
+                'Đơn vị cung cấp' => 'don_vi_cung_cap',
+                'Tỷ lệ khấu hao' => 'ty_le_khau_hao',
+                'Tiền khấu hao' => 'tien_khau_hao',
+                'Giá trị còn lại' => 'gia_tri_con_lai',
+                'SL còn sử dụng được' => 'so_luong_su_dung_duoc',
+                'SL hỏng, không sử dụng được' => 'so_luong_hong',
+                'Ghi chú' => 'ghi_chu',
+            ],
+            'xlsx-public-assets-change' => [
+                'Tên vật tư' => 'ten_vat_tu',
+                'ĐVT' => 'don_vi_tinh',
+                'Phân cấp' => 'phan_cap',
+                'Thực lực đầu kỳ' => 'truoc',
+                'Tăng' => 'so_luong_tang',
+                'Giảm' => 'so_luong_giam',
+                'Thực lực cuối kỳ' => 'sau',
+                'Trên cấp' => 'tren_cap',
+                'Mua sắm' => 'mua_sam',
+                'Khác tăng' => 'tang_khac',
+                'Trả trên' => 'tra_tren',
+                'Khấu hao / hư hỏng' => 'hu_hong',
+                'Thanh lý' => 'thanh_ly',
+                'Khác giảm' => 'giam_khac',
+            ],
+            'xlsx-public-assets-by-unit' => [
+                'STT' => 'stt',
+                'Đơn vị' => 'don_vi_quan_ly',
+                'Mã tài sản' => 'ma_tai_san',
+                'Tên tài sản' => 'ten_tai_san',
+                'Ngành' => 'nganh',
+                'Loại tài sản' => 'loai_tai_san',
+                'Phân cấp' => 'phan_cap',
+                'Số lượng hiện có' => 'so_luong',
+                'ĐVT' => 'don_vi_tinh',
+                'Phòng' => 'phong',
+                'Trạng thái' => 'trang_thai',
+                'Ghi chú' => 'ghi_chu',
+            ],
+            'xlsx-public-assets-change-detail' => [
+                'STT' => 'stt',
+                'Ngày dữ liệu' => 'ngay_du_lieu',
+                'Mã vật tư' => 'ma_vat_tu',
+                'Tên vật tư' => 'ten_vat_tu',
+                'ĐVT' => 'don_vi_tinh',
+                'Phân cấp' => 'phan_cap',
+                'Loại biến động' => 'loai_bien_dong',
+                'Số lượng' => 'so_luong',
+                'Trước' => 'truoc',
+                'Sau' => 'sau',
+                'Lý do' => 'ly_do',
+                'Người thực hiện' => 'nguoi_thuc_hien',
+                'Ghi chú' => 'ghi_chu',
+            ],
+            default => [
+                'STT' => 'stt',
+                'Mã vật tư' => 'ma_vat_tu',
+                'Tên vật tư' => 'ten_vat_tu',
+                'Ngành' => 'nganh',
+                'Loại vật tư' => 'loai_vat_tu',
+                'ĐVT' => 'don_vi_tinh',
+                'Số lượng' => 'so_luong',
+                'Phân cấp' => 'phan_cap',
+                'Tòa nhà' => 'toa_nha',
+                'Phòng' => 'phong',
+                'Đơn vị quản lý' => 'don_vi_quan_ly',
+                'Trạng thái' => 'trang_thai',
+                'Ghi chú' => 'ghi_chu',
+            ],
+        };
+    }
+
+    private function safeSheetTitle(string $title): string
+    {
+        return preg_replace('/[\\\\\\/\\?\\*\\[\\]:]+/u', ' ', $title) ?: 'Bao cao';
+    }
+
+    private function safeDownloadName(string $title): string
+    {
+        $name = \Illuminate\Support\Str::ascii($title);
+        $name = strtolower(preg_replace('/[^A-Za-z0-9_-]+/', '-', $name) ?: 'bao-cao-vat-tu');
+
+        return trim($name, '-') ?: 'bao-cao-vat-tu';
+    }
+
+    private function excelCell(int $column, int $row): string
+    {
+        return \PhpOffice\PhpSpreadsheet\Cell\Coordinate::stringFromColumnIndex($column).$row;
     }
 
     private function fillIncreaseDecreaseTable(\DOMDocument $xml, \DOMXPath $xpath, \DOMNode $table, \DOMNodeList $rows, $source): bool
@@ -378,6 +891,8 @@ class InventoryReportTemplateController extends ModuleBaseController
             'phan_cap' => (string) ($details['grade'] ?? ''),
             'so_luong_tang' => $change > 0 ? (string) $change : '',
             'so_luong_giam' => $change < 0 ? (string) abs($change) : '',
+            'truoc' => (string) ($details['before'] ?? ''),
+            'sau' => (string) ($details['after'] ?? ''),
             'tren_cap' => '',
             'dieu_dong_den' => '',
             'mua_sam' => '',
@@ -534,6 +1049,33 @@ class InventoryReportTemplateController extends ModuleBaseController
                 $record->note ?: '',
             ];
         }
+        if ($type === 'public-assets') {
+            $year = (int) request()->integer('year', now()->year);
+            $depreciation = $this->publicAssetYearValues($record, $year);
+            $category = $record->material?->category ?: $record->categoryRelation;
+            return [
+                $number,
+                $record->asset_code ?: $record->material?->code,
+                $record->name ?: $record->material?->name,
+                $category?->parent?->name ?: '',
+                $category?->name ?: (string) ($record->category ?: ''),
+                $record->grade ?: '',
+                $record->quantity,
+                $record->unit ?: $record->material?->unit,
+                $this->formatMoney((float) $record->unit_price),
+                $this->formatMoney($this->publicAssetInitialValue($record)),
+                $record->classroom?->name ?: '',
+                $record->install_address ?: trim(($record->classroom?->building?->name ?: '').' / '.($record->classroom?->name ?: ''), ' /'),
+                $record->supplier ?: '',
+                $record->contract_invoice_number ?: '',
+                $year,
+                $depreciation['rate'] > 0 ? rtrim(rtrim(number_format($depreciation['rate'], 2, ',', '.'), '0'), ',').'%' : '',
+                $this->formatMoney($depreciation['amount']),
+                $this->formatMoney($depreciation['remaining_value']),
+                ['NORMAL' => 'Bình thường', 'BROKEN' => 'Hỏng', 'REPAIRING' => 'Đang sửa', 'LIQUIDATED' => 'Đã thanh lý'][$record->status] ?? (string) $record->status,
+                $record->note ?: '',
+            ];
+        }
         if ($type === 'warehouse') {
             $status = $record->status === 'BROKEN' ? 'Hỏng' : ($record->status === 'REPAIRING' ? 'Đang sửa chữa' : '');
             $base = [
@@ -587,7 +1129,7 @@ class InventoryReportTemplateController extends ModuleBaseController
             return $row;
         }
         if ($record instanceof InventoryAuditLog) {
-            if ($type === 'increase-decrease') {
+            if (in_array($type, ['increase-decrease', 'xlsx-public-assets-change'], true)) {
                 return array_merge($row, $this->increaseDecreaseRow($record));
             }
             $details = (array) $record->details;
@@ -623,6 +1165,26 @@ class InventoryReportTemplateController extends ModuleBaseController
         $row['ten_vat_tu'] = (string) ($record->name ?: $record->material?->name ?: '');
         $row['nganh'] = (string) ($record->material?->category?->parent?->name ?: '');
         $row['loai_vat_tu'] = (string) ($record->material?->category?->name ?: '');
+        if (in_array($type, ['public-assets', 'xlsx-public-depreciation-detail', 'xlsx-public-assets-current', 'xlsx-public-assets-by-unit'], true)) {
+            $year = (int) request()->integer('year', now()->year);
+            $depreciation = $this->publicAssetYearValues($record, $year);
+            $category = $record->material?->category ?: $record->categoryRelation;
+            $row['ma_tai_san'] = (string) ($record->asset_code ?: $record->material?->code ?: '');
+            $row['ten_tai_san'] = (string) ($record->name ?: $record->material?->name ?: '');
+            $row['loai_tai_san'] = (string) ($category?->name ?: $record->category ?: '');
+            $row['nganh'] = (string) ($category?->parent?->name ?: '');
+            $row['don_gia'] = $this->formatMoney((float) $record->unit_price);
+            $row['thanh_tien'] = $this->formatMoney($this->publicAssetInitialValue($record));
+            $row['dia_chi_lap_dat'] = (string) ($record->install_address ?: '');
+            $row['don_vi_cung_cap'] = (string) ($record->supplier ?: '');
+            $row['hop_dong_hoa_don'] = (string) ($record->contract_invoice_number ?: '');
+            $row['nam_khau_hao'] = (string) $year;
+            $row['ty_le_khau_hao'] = $depreciation['rate'] > 0 ? rtrim(rtrim(number_format($depreciation['rate'], 2, ',', '.'), '0'), ',').'%' : '';
+            $row['tien_khau_hao'] = $this->formatMoney($depreciation['amount']);
+            $row['gia_tri_con_lai'] = $this->formatMoney($depreciation['remaining_value']);
+            $row['so_luong_su_dung_duoc'] = in_array($record->status, ['BROKEN', 'LIQUIDATED'], true) ? '' : (string) $record->quantity;
+            $row['so_luong_hong'] = in_array($record->status, ['BROKEN', 'REPAIRING'], true) ? (string) $record->quantity : '';
+        }
         $row['don_vi_tinh'] = (string) ($record->unit ?: $record->material?->unit ?: '');
         $row['so_luong'] = (string) $record->quantity;
         $row['phan_cap'] = (string) ($record->grade ?: '');
@@ -682,8 +1244,96 @@ class InventoryReportTemplateController extends ModuleBaseController
             'ngay_hong' => '',
             'ly_do' => '',
             'ly_do_hong' => '',
+            'ma_tai_san' => '',
+            'ten_tai_san' => '',
+            'loai_tai_san' => '',
+            'don_gia' => '',
+            'thanh_tien' => '',
+            'dia_chi_lap_dat' => '',
+            'don_vi_cung_cap' => '',
+            'hop_dong_hoa_don' => '',
+            'nam_khau_hao' => '',
+            'ty_le_khau_hao' => '',
+            'tien_khau_hao' => '',
+            'gia_tri_con_lai' => '',
+            'so_luong_su_dung_duoc' => '',
+            'so_luong_hong' => '',
             'ghi_chu' => '',
         ];
+    }
+
+    private function publicAssetInitialValue(InventoryAsset $asset): float
+    {
+        $value = (float) $asset->total_amount;
+        if ($value <= 0) {
+            $value = max(10000000, (float) $asset->unit_price) * (float) $asset->quantity;
+        }
+        return $value;
+    }
+
+    private function publicAssetYearValues(InventoryAsset $asset, int $year): array
+    {
+        $initialValue = $this->publicAssetInitialValue($asset);
+        $record = $asset->depreciationYears
+            ?->where('year', '<=', $year)
+            ->sortByDesc('year')
+            ->first();
+        $rate = (float) ($record?->depreciation_rate ?? 0);
+        $amount = min($initialValue, $initialValue * $rate / 100);
+
+        return [
+            'rate' => $rate,
+            'amount' => $amount,
+            'remaining_value' => max(0, $initialValue - $amount),
+        ];
+    }
+
+    private function formatMoney(float $value): string
+    {
+        return $value > 0 ? number_format($value, 0, ',', '.') : '';
+    }
+
+    private function createPublicAssetReportTemplate(string $path): void
+    {
+        if (! is_dir(dirname($path))) {
+            mkdir(dirname($path), 0775, true);
+        }
+
+        $word = new \PhpOffice\PhpWord\PhpWord();
+        $word->setDefaultFontName('Times New Roman');
+        $word->setDefaultFontSize(9);
+        $section = $word->addSection([
+            'orientation' => 'landscape',
+            'pageSizeW' => 23811,
+            'pageSizeH' => 16838,
+            'marginTop' => 650,
+            'marginBottom' => 650,
+            'marginLeft' => 650,
+            'marginRight' => 650,
+        ]);
+        $normal = ['name' => 'Times New Roman', 'size' => 9];
+        $bold = ['name' => 'Times New Roman', 'size' => 9, 'bold' => true];
+        $title = ['name' => 'Times New Roman', 'size' => 14, 'bold' => true];
+        $center = ['alignment' => \PhpOffice\PhpWord\SimpleType\Jc::CENTER];
+        $left = ['alignment' => \PhpOffice\PhpWord\SimpleType\Jc::LEFT];
+
+        $section->addText('TRƯỜNG CAO ĐẲNG HẬU CẦN 2', $bold, $center);
+        $section->addText('DANH SÁCH TÀI SẢN CÔNG', $title, $center);
+        $section->addText('Số liệu đến ngày ${ngay_bao_cao} - Năm thống kê: ${nam_thong_ke}', ['italic' => true] + $normal, $center);
+        $section->addText('Tổng số tài sản: ${tong_tai_san} | Tổng số lượng: ${tong_so_luong} | Tổng thành tiền: ${tong_thanh_tien} | Tổng giá trị còn lại: ${tong_gia_tri_con_lai}', $normal, $left);
+
+        $table = $section->addTable(['borderSize' => 6, 'borderColor' => '222222', 'cellMargin' => 45, 'width' => 100 * 50, 'unit' => 'pct']);
+        $headers = ['STT','Mã TS','Tên tài sản','Ngành','Loại','Cấp','SL','ĐVT','Đơn giá','Thành tiền','Phòng','Địa chỉ lắp đặt','Đơn vị cung cấp','HĐ/Hóa đơn','Năm KH','Tỷ lệ KH','Tiền KH','Giá trị còn lại','Trạng thái','Ghi chú'];
+        $variables = ['${stt}','${ma_tai_san}','${ten_tai_san}','${nganh}','${loai_tai_san}','${phan_cap}','${so_luong}','${don_vi_tinh}','${don_gia}','${thanh_tien}','${phong}','${dia_chi_lap_dat}','${don_vi_cung_cap}','${hop_dong_hoa_don}','${nam_khau_hao}','${ty_le_khau_hao}','${tien_khau_hao}','${gia_tri_con_lai}','${trang_thai}','${ghi_chu}'];
+        $widths = [600,1100,1800,1100,1200,650,650,650,1200,1300,1100,1700,1400,1300,800,900,1200,1300,1000,1500];
+        foreach ([$headers, $variables, ['', 'TỔNG CỘNG', '', '', '', '', '${tong_so_luong}', '', '', '${tong_thanh_tien}', '', '', '', '', '', '', '${tong_tien_khau_hao}', '${tong_gia_tri_con_lai}', '', '']] as $rowIndex => $row) {
+            $table->addRow($rowIndex === 0 ? 500 : 420);
+            foreach ($row as $index => $value) {
+                $table->addCell($widths[$index])->addText($value, $rowIndex === 1 ? $normal : $bold, $index === 1 ? $left : $center);
+            }
+        }
+
+        (new \PhpOffice\PhpWord\Writer\Word2007($word))->save($path);
     }
 
     private function writeReportZip(string $template, string $documentXml, string $filename): mixed
@@ -885,6 +1535,7 @@ class InventoryReportTemplateController extends ModuleBaseController
             'thang' => $today->format('m'),
             'nam' => $today->format('Y'),
             'nam_hien_tai' => $today->format('Y'),
+            'nam_thong_ke' => (string) $request->integer('year', now()->year),
             'tu_ngay' => $from,
             'den_ngay' => $to,
             'pham_vi' => match ($type) {
@@ -916,6 +1567,22 @@ class InventoryReportTemplateController extends ModuleBaseController
                 'so_luong_vat_tu_hu_hong' => $broken->sum('quantity'),
                 'so_dong_hu_hai' => $broken->count(),
                 'so_dong_hu_hong' => $broken->count(),
+            ];
+        } elseif ($type === 'public-assets') {
+            $reportYear = (int) $request->integer('year', now()->year);
+            $assets = InventoryAsset::with(['depreciationYears'])
+                ->where('management_type', 'ASSET')
+                ->when($request->filled('building_id'), fn ($q) => $q->whereHas('classroom', fn ($room) => $room->where('building_id', $request->integer('building_id'))))
+                ->when($request->filled('classroom_id'), fn ($q) => $q->where('classroom_id', $request->integer('classroom_id')))
+                ->when($request->filled('unit_id'), fn ($q) => $q->whereHas('classroom', fn ($room) => $room->where('managing_unit_id', $request->integer('unit_id'))))
+                ->when($request->filled('material_id'), fn ($q) => $q->where('material_id', $request->integer('material_id')))
+                ->get();
+            $values += [
+                'tong_tai_san' => $assets->count(),
+                'tong_so_luong' => $assets->sum('quantity'),
+                'tong_thanh_tien' => $this->formatMoney($assets->sum(fn ($asset) => $this->publicAssetInitialValue($asset))),
+                'tong_tien_khau_hao' => $this->formatMoney($assets->sum(fn ($asset) => $this->publicAssetYearValues($asset, $reportYear)['amount'])),
+                'tong_gia_tri_con_lai' => $this->formatMoney($assets->sum(fn ($asset) => $this->publicAssetYearValues($asset, $reportYear)['remaining_value'])),
             ];
         } elseif ($type === 'system-warehouse') {
             $items = InventoryWarehouseItem::with(['warehouse', 'material'])

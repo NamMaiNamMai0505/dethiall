@@ -17,26 +17,6 @@
             <p class="text-xs text-slate-500 md:col-span-3">Mã được sinh tuần tự theo ngành: {{ $category->code }}01, {{ $category->code }}02...</p>
         </form>
 
-        <form method="POST" action="{{ route('inventory.import') }}" enctype="multipart/form-data" class="rounded border bg-white p-4">
-            @csrf
-            <input type="hidden" name="import_type" value="category">
-            <input type="hidden" name="industry_id" value="{{ $category->id }}">
-            <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                    <h2 class="font-semibold">Import loại vật tư vào {{ $category->code }}</h2>
-                    <p class="mt-1 text-sm text-slate-500">File chỉ cần Mã loại vật tư và Tên loại vật tư.</p>
-                </div>
-                <div class="flex flex-wrap gap-2">
-                    <a href="{{ route('inventory.import.template', ['type' => 'category']) }}" class="rounded border px-4 py-2">Tải mẫu Excel (.xlsx)</a>
-                    <a href="{{ route('inventory.import.template.word', ['type' => 'category']) }}" class="rounded border px-4 py-2">Tải mẫu DOCX (.docx)</a>
-                </div>
-            </div>
-            <div class="grid gap-3 md:grid-cols-4">
-                <input name="file" type="file" accept=".xlsx,.xls,.csv,.txt,.docx" required class="rounded border p-2 md:col-span-3">
-                <button class="rounded bg-slate-700 px-4 py-2 text-white">Import loại vật tư</button>
-            </div>
-        </form>
-
         <div class="overflow-x-auto rounded border bg-white p-4">
             <h2 class="mb-3 font-semibold">Các loại vật tư trong ngành</h2>
             <table class="w-full min-w-[900px] text-left text-sm">
@@ -73,7 +53,7 @@
             </table>
         </div>
     @else
-        <div class="grid gap-4 lg:grid-cols-2">
+        <div class="grid gap-4">
             <form method="POST" action="{{ route('inventory.store') }}" class="grid gap-3 rounded border bg-white p-4 md:grid-cols-2">
                 @csrf
                 <input type="hidden" name="category_id" value="{{ $category->id }}">
@@ -82,20 +62,6 @@
                 <input name="unit" required value="cái" placeholder="Đơn vị tính" class="rounded border p-2">
                 <p class="text-xs text-slate-500 md:col-span-2">Mã vật tư tự sinh theo mã loại {{ $category->code }}.</p>
                 <button class="rounded bg-blue-600 px-4 py-2 text-white md:col-span-2">Thêm vật tư</button>
-            </form>
-
-            <form method="POST" action="{{ route('inventory.import') }}" enctype="multipart/form-data" class="rounded border bg-white p-4">
-                @csrf
-                <input type="hidden" name="import_type" value="material">
-                <input type="hidden" name="category_id" value="{{ $category->id }}">
-                <h2 class="mb-3 font-semibold">Import vật tư vào {{ $category->code }}</h2>
-                <p class="mb-3 text-sm text-slate-500">File chỉ cần Tên vật tư và Đơn vị tính; mã vật tư tự sinh theo loại {{ $category->code }}.</p>
-                <input name="file" type="file" accept=".xlsx,.xls,.csv,.txt,.docx" required class="w-full rounded border p-2">
-                <div class="mt-3 flex flex-wrap gap-2">
-                    <button class="rounded bg-slate-700 px-4 py-2 text-white">Import vật tư</button>
-                    <a href="{{ route('inventory.import.template', ['type' => 'material', 'scoped' => 1]) }}" class="rounded border px-4 py-2">Tải mẫu Excel (.xlsx)</a>
-                    <a href="{{ route('inventory.import.template.word', ['type' => 'material', 'scoped' => 1]) }}" class="rounded border px-4 py-2">Tải mẫu DOCX (.docx)</a>
-                </div>
             </form>
         </div>
 

@@ -18,15 +18,23 @@
                             <form method="POST" action="{{ route('inventory.warehouse.update', $warehouse) }}" class="mt-2 grid gap-2 rounded bg-slate-50 p-3 md:grid-cols-4">
                                 @csrf
                                 @method('PATCH')
-                                <input name="code" required value="{{ $warehouse->code }}" class="rounded border p-2">
-                                <input name="name" required value="{{ $warehouse->name }}" class="rounded border p-2">
-                                <input name="location" value="{{ $warehouse->location }}" placeholder="Vị trí" class="rounded border p-2">
-                                <select name="manager_id" class="rounded border p-2">
-                                    <option value="">Thủ kho</option>
-                                    @foreach(($users ?? collect()) as $user)
-                                        <option value="{{ $user->id }}" @selected($warehouse->manager_id == $user->id)>{{ $user->name }}</option>
-                                    @endforeach
-                                </select>
+                                <label class="text-sm font-semibold text-slate-700">Mã kho <span class="text-red-500">*</span>
+                                    <input name="code" required value="{{ $warehouse->code }}" placeholder="Nhập mã kho" class="mt-1 w-full rounded border p-2">
+                                </label>
+                                <label class="text-sm font-semibold text-slate-700">Tên kho <span class="text-red-500">*</span>
+                                    <input name="name" required value="{{ $warehouse->name }}" placeholder="Nhập tên kho" class="mt-1 w-full rounded border p-2">
+                                </label>
+                                <label class="text-sm font-semibold text-slate-700">Vị trí kho
+                                    <input name="location" value="{{ $warehouse->location }}" placeholder="Nhập vị trí kho" class="mt-1 w-full rounded border p-2">
+                                </label>
+                                <label class="text-sm font-semibold text-slate-700">Thủ kho
+                                    <select name="manager_id" class="mt-1 w-full rounded border p-2">
+                                        <option value="">Chọn thủ kho</option>
+                                        @foreach(($users ?? collect()) as $user)
+                                            <option value="{{ $user->id }}" @selected($warehouse->manager_id == $user->id)>{{ $user->name }}</option>
+                                        @endforeach
+                                    </select>
+                                </label>
                                 <button class="rounded bg-blue-600 px-3 py-2 text-white md:col-span-4">Lưu kho</button>
                             </form>
                         </details>

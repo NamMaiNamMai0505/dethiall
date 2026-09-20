@@ -111,8 +111,16 @@ class InventoryController extends ModuleBaseController
         $this->ensureInventoryMaterialAllowed($material);
         $material->load(['category.parent','building','classroom','assets.classroom','warehouseItems','movements.user']);
         $material->loadCount(['assets','warehouseItems','proposalItems','transfers','movements']);
+        $gradeSummary = $material->assets
+            ->groupBy(fn(InventoryAsset $asset) => (int) ($asset->grade ?: 0))
+            ->map(fn($items) => [
+                'records' => $items->count(),
+                'quantity' => (int) $items->sum('quantity'),
+                'rooms' => $items->pluck('classroom.name')->filter()->unique()->values(),
+                'statuses' => $items->groupBy('status')->map->sum('quantity'),
+            ]);
 
-        return view('inventory::feature', ['section'=>'material-detail','title'=>'Chi tiết '.$material->name,'material'=>$material]);
+        return view('inventory::feature', ['section'=>'material-detail','title'=>'Chi tiết '.$material->name,'material'=>$material,'gradeSummary'=>$gradeSummary]);
     }
     public function importTemplate(Request $request){
         [$title, $headers, $sample] = $this->importTemplateConfig($request->input('type', 'material'), $request->boolean('scoped'));
@@ -176,6 +184,18 @@ class InventoryController extends ModuleBaseController
             'category_id' => 'nullable|exists:inventory_categories,id',
             'file' => 'required|file|mimes:xlsx,xls,csv,txt,docx|max:20480',
         ]);
+        if (! empty($d['industry_id']) && ! InventoryCategory::whereKey($d['industry_id'])->whereNull('parent_id')->exists()) {
+            return back()->withErrors(['industry_id' => 'Ngành vật tư import không hợp lệ.'])->withInput();
+        }
+        if (! empty($d['category_id'])) {
+            $category = InventoryCategory::whereKey($d['category_id'])->whereNotNull('parent_id')->first();
+            if (! $category) {
+                return back()->withErrors(['category_id' => 'Loại vật tư import không hợp lệ.'])->withInput();
+            }
+            if (! empty($d['industry_id']) && (int) $category->parent_id !== (int) $d['industry_id']) {
+                return back()->withErrors(['category_id' => 'Loại vật tư không thuộc ngành vật tư đã chọn.'])->withInput();
+            }
+        }
         [$headers, $rows] = $this->readImportRows($request->file('file'));
         $headers = array_map(fn ($v) => $this->normalizeImportHeader($v), $headers);
 

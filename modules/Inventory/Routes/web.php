@@ -79,6 +79,9 @@ Route::middleware(['web', 'auth', 'permission:inventory.access.index'])
         Route::post('/cap-nhat/tang-giam', [InventoryWorkflowController::class, 'assetChangeDelta'])
             ->middleware('permission:inventory.assets.edit')
             ->name('assets.change');
+        Route::post('/cap-nhat/import-cap-nhat', [InventoryWorkflowController::class, 'assetUpdateImport'])
+            ->middleware('permission:inventory.assets.edit|inventory.assets.import')
+            ->name('assets.update-import');
         Route::post('/cap-nhat/dieu-chinh', [InventoryWorkflowController::class, 'assetAdjust'])
             ->middleware('permission:inventory.assets.edit')
             ->name('assets.adjust');
@@ -95,9 +98,15 @@ Route::middleware(['web', 'auth', 'permission:inventory.access.index'])
         Route::get('/tai-san-cong', [InventoryWorkflowController::class, 'publicAssets'])
             ->middleware('permission:inventory.reports.index')
             ->name('public-assets');
+        Route::patch('/tai-san-cong/{asset}', [InventoryWorkflowController::class, 'publicAssetUpdate'])
+            ->middleware('permission:inventory.assets.edit')
+            ->name('public-assets.update');
         Route::patch('/tai-san-cong/{asset}/khau-hao', [InventoryWorkflowController::class, 'publicAssetDepreciationUpdate'])
             ->middleware('permission:inventory.assets.edit')
             ->name('public-assets.depreciation');
+        Route::delete('/tai-san-cong/{asset}/khau-hao/{year}', [InventoryWorkflowController::class, 'publicAssetDepreciationDelete'])
+            ->middleware('permission:inventory.assets.edit')
+            ->name('public-assets.depreciation.delete');
 
         Route::get('/kho', [InventoryWorkflowController::class, 'warehouse'])
             ->middleware('permission:inventory.warehouses.index')
@@ -244,6 +253,9 @@ Route::middleware(['web', 'auth', 'permission:inventory.access.index'])
         Route::get('/mau-bao-cao', [InventoryWorkflowController::class, 'templates'])
             ->middleware('permission:inventory.templates.index')
             ->name('templates');
+        Route::get('/mau-bao-cao/options', [InventoryWorkflowController::class, 'templateOptions'])
+            ->middleware('permission:inventory.templates.index')
+            ->name('templates.options');
         Route::post('/mau-bao-cao', [InventoryWorkflowController::class, 'templateStore'])
             ->middleware('permission:inventory.templates.create')
             ->name('templates.store');

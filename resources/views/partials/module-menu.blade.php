@@ -28,7 +28,7 @@
                     ['label' => 'Nhật ký vật tư', 'route' => 'inventory.logs', 'icon' => 'bi-clock-history'],
                     ['label' => 'Báo cáo vật tư', 'route' => 'inventory.reports', 'icon' => 'bi-bar-chart'],
                     ['label' => 'Xuất báo cáo', 'route' => 'inventory.movement-report', 'icon' => 'bi-file-earmark-arrow-down'],
-                    ['label' => 'Mẫu báo cáo Word', 'route' => 'inventory.templates', 'icon' => 'bi-file-earmark-word'],
+                    ['label' => 'Mẫu báo cáo', 'route' => 'inventory.templates', 'icon' => 'bi-file-earmark-word'],
                 ]],
             ],
         ],
@@ -86,6 +86,37 @@
                 ]],
             ],
         ],
+        'scientific-research' => [
+            'title' => 'Nghiên cứu khoa học',
+            'subtitle' => 'Đề tài, thông báo, kết quả và báo cáo NCKH',
+            'icon' => 'bi-flask',
+            'groups' => [
+                ['label' => 'Tổng quan', 'items' => [
+                    ['label' => 'Tổng quan', 'route' => 'scientific-research.index', 'icon' => 'bi-grid-1x2'],
+                    ['label' => 'Cổng thông tin', 'route' => 'scientific-research.portal', 'icon' => 'bi-globe'],
+                    ['label' => 'Thông báo', 'route' => 'scientific-research.announcements.index', 'icon' => 'bi-megaphone'],
+                ]],
+                ['label' => 'Nghiệp vụ đề tài', 'items' => [
+                    ['label' => 'Đăng ký đề tài', 'route' => 'scientific-research.registrations.create', 'icon' => 'bi-file-earmark-plus'],
+                    ['label' => 'Quản lý đề tài', 'route' => 'scientific-research.registrations.index', 'icon' => 'bi-kanban'],
+                    ['label' => 'Bổ sung & Gia hạn', 'route' => 'scientific-research.registrations.requests', 'icon' => 'bi-arrow-repeat'],
+                    ['label' => 'Thẩm định đề tài', 'route' => 'scientific-research.registrations.review', 'icon' => 'bi-clipboard-check'],
+                    ['label' => 'Nộp kết quả', 'route' => 'scientific-research.results.index', 'icon' => 'bi-upload'],
+                ]],
+                ['label' => 'Hồ sơ & theo dõi', 'items' => [
+                    ['label' => 'Cán bộ NCKH', 'route' => 'scientific-research.staff.index', 'icon' => 'bi-person-vcard'],
+                    ['label' => 'Kế hoạch & tiến độ', 'route' => 'scientific-research.plans.index', 'icon' => 'bi-calendar3'],
+                    ['label' => 'Hội đồng', 'route' => 'scientific-research.councils.index', 'icon' => 'bi-people'],
+                    ['label' => 'Kinh phí', 'route' => 'scientific-research.funding.index', 'icon' => 'bi-cash-coin'],
+                    ['label' => 'Sản phẩm', 'route' => 'scientific-research.products.index', 'icon' => 'bi-award'],
+                    ['label' => 'Kho dữ liệu', 'route' => 'scientific-research.repository.index', 'icon' => 'bi-database'],
+                ]],
+                ['label' => 'Thống kê', 'items' => [
+                    ['label' => 'Báo cáo NCKH', 'route' => 'scientific-research.reports.index', 'icon' => 'bi-bar-chart'],
+                    ['label' => 'Nhật ký', 'route' => 'scientific-research.audit.index', 'icon' => 'bi-clock-history'],
+                ]],
+            ],
+        ],
     ];
     $config = $menus[$module] ?? $menus['inventory'];
     if ($module === 'exam') {
@@ -139,6 +170,22 @@
         'essay-exams.used' => 'essay-exams.bank.index',
         'essay-exams.draw' => 'essay-exams.draw.index',
         'exam-organization.index' => 'exam-organization.index',
+        'scientific-research.index' => 'scientific-research.view',
+        'scientific-research.portal' => 'scientific-research.view',
+        'scientific-research.announcements.index' => 'scientific-research.announcements.view',
+        'scientific-research.registrations.create' => 'scientific-research.registrations.create',
+        'scientific-research.registrations.index' => 'scientific-research.registrations.view',
+        'scientific-research.registrations.requests' => ['scientific-research.registrations.submit', 'scientific-research.registrations.edit'],
+        'scientific-research.registrations.review' => ['scientific-research.registrations.status', 'scientific-research.registrations.unit-approve', 'scientific-research.registrations.agency-approve', 'scientific-research.registrations.return'],
+        'scientific-research.results.index' => 'scientific-research.results.view',
+        'scientific-research.reports.index' => 'scientific-research.reports.view',
+        'scientific-research.audit.index' => 'scientific-research.audit.view',
+        'scientific-research.staff.index' => 'scientific-research.staff.view',
+        'scientific-research.plans.index' => ['scientific-research.plans.view', 'scientific-research.plans.index'],
+        'scientific-research.councils.index' => 'scientific-research.councils.view',
+        'scientific-research.funding.index' => 'scientific-research.funding.view',
+        'scientific-research.products.index' => 'scientific-research.products.view',
+        'scientific-research.repository.index' => 'scientific-research.repository.view',
     ];
     $config['groups'] = array_values(array_filter(array_map(function (array $group) use ($routePermissions): array {
         $group['items'] = array_values(array_filter($group['items'], function (array $item) use ($routePermissions): bool {
@@ -200,7 +247,6 @@
             <div class="grid grid-cols-2 gap-2 sm:flex"><div class="rounded-xl border border-white/15 bg-white/10 px-4 py-2 backdrop-blur"><p class="text-[10px] uppercase tracking-wider text-blue-200">Trạng thái</p><p class="mt-1 flex items-center gap-1.5 text-sm font-bold"><span class="h-2 w-2 rounded-full bg-emerald-400"></span> Đang hoạt động</p></div><div class="rounded-xl border border-white/15 bg-white/10 px-4 py-2 backdrop-blur"><p class="text-[10px] uppercase tracking-wider text-blue-200">Truy cập</p><p class="mt-1 text-sm font-bold">Toàn hệ thống</p></div></div>
         </div>
     </div>
-    <div class="border-b border-slate-100 bg-slate-50/80 px-4 py-3 sm:px-6"><div class="flex flex-wrap items-center gap-2"><span class="mr-1 text-xs font-bold uppercase tracking-wider text-slate-400">Đi tới</span>@foreach($config['groups'] as $group)<span class="hidden h-4 w-px bg-slate-200 sm:block"></span><span class="mr-1 text-xs font-semibold text-slate-500">{{ $group['label'] }}</span>@foreach($group['items'] as $item) @if(Route::has($item['route'])) @php($active = request()->routeIs($item['route']) || ($item['route'] === 'essay-exams.index' && request()->routeIs('essay-exams.show'))) <a href="{{ route($item['route']) }}" aria-current="{{ $active ? 'page' : 'false' }}" class="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition {{ $active ? 'border-blue-600 bg-blue-600 text-white shadow-md shadow-blue-200' : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700' }}"><i class="bi {{ $item['icon'] }}"></i>{{ $item['label'] }}</a> @endif @endforeach @endforeach</div></div>
     <div class="grid gap-5 p-5 md:grid-cols-2 xl:grid-cols-4">
         @foreach($config['groups'] as $group)
             <div class="rounded-2xl border border-slate-100 bg-white p-3 shadow-sm"><p class="mb-2 px-2 text-[10px] font-extrabold uppercase tracking-[.16em] text-slate-400">{{ $group['label'] }}</p><div class="space-y-1">@foreach($group['items'] as $item) @if(Route::has($item['route'])) @php($active = request()->routeIs($item['route']) || ($item['route'] === 'essay-exams.index' && request()->routeIs('essay-exams.show'))) <a href="{{ route($item['route']) }}" aria-current="{{ $active ? 'page' : 'false' }}" class="group flex items-center justify-between gap-2 rounded-xl px-3 py-2.5 text-sm transition {{ $active ? 'bg-blue-600 font-bold text-white shadow-md shadow-blue-100' : 'text-slate-600 hover:bg-blue-50 hover:text-blue-700' }}"><span class="flex items-center gap-2.5"><i class="bi {{ $item['icon'] }} w-4"></i><span>{{ $item['label'] }}</span></span><i class="bi bi-arrow-up-right text-xs opacity-0 transition group-hover:opacity-100 {{ $active ? 'opacity-100' : '' }}"></i></a> @endif @endforeach</div></div>

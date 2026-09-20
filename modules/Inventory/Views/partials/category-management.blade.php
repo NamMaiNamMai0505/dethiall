@@ -25,24 +25,7 @@
             </div>
         </div>
 
-        <div class="grid gap-4 p-5 lg:grid-cols-3">
-            <form method="POST" action="{{ route('inventory.import') }}" enctype="multipart/form-data" class="rounded-xl border border-blue-100 bg-blue-50/50 p-4">
-                @csrf
-                <input type="hidden" name="import_type" value="industry">
-                <div class="mb-3 flex items-center gap-2">
-                    <span class="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600 text-white"><i class="bi bi-file-earmark-arrow-up"></i></span>
-                    <h3 class="font-bold text-slate-900">Import ngành vật tư</h3>
-                </div>
-                <label class="text-sm font-semibold text-slate-700">File ngành vật tư <span class="text-red-600">*</span>
-                    <input name="file" type="file" accept=".xlsx,.xls,.csv,.txt,.docx" required class="mt-1 w-full rounded-lg border bg-white p-2.5">
-                </label>
-                <div class="mt-3 flex flex-wrap gap-2">
-                    <button class="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 font-bold text-white"><i class="bi bi-upload"></i> Import ngành</button>
-                    <a href="{{ route('inventory.import.template', ['type' => 'industry']) }}" class="inline-flex items-center gap-2 rounded-lg border bg-white px-3 py-2 text-xs font-bold text-slate-700"><i class="bi bi-file-earmark-excel"></i> Mẫu Excel</a>
-                    <a href="{{ route('inventory.import.template.word', ['type' => 'industry']) }}" class="inline-flex items-center gap-2 rounded-lg border bg-white px-3 py-2 text-xs font-bold text-slate-700"><i class="bi bi-file-earmark-word"></i> Mẫu DOCX</a>
-                </div>
-            </form>
-
+        <div class="grid gap-4 p-5 lg:grid-cols-2">
             <form method="POST" action="{{ route('inventory.category.store') }}" class="rounded-xl border border-blue-100 bg-blue-50/50 p-4">
                 @csrf
                 <div class="mb-3 flex items-center gap-2">

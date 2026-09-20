@@ -1,10 +1,10 @@
 @php
-    $inventoryActionLabels = ['CREATE' => 'Thêm mới', 'UPDATE' => 'Cập nhật', 'DELETE' => 'Xóa', 'IMPORT' => 'Import', 'MOVEMENT' => 'Nhập / xuất', 'INCREASE' => 'Tăng', 'DECREASE' => 'Giảm', 'ADJUST' => 'Điều chỉnh', 'APPROVED' => 'Duyệt đề xuất', 'REJECTED' => 'Từ chối đề xuất', 'COMPLETED' => 'Hoàn thành đề xuất'];
+    $inventoryActionLabels = ['INCREASE' => 'Tăng số lượng', 'DECREASE' => 'Giảm số lượng', 'ADJUST' => 'Điều chỉnh số lượng'];
     $canEditInventoryLog = auth()->user()?->isSuperAdmin() || \App\Support\PermissionCheck::can(auth()->user(), 'inventory.logs.edit');
     $canDeleteInventoryLog = auth()->user()?->isSuperAdmin() || \App\Support\PermissionCheck::can(auth()->user(), 'inventory.logs.delete');
 @endphp
 <div class="overflow-x-auto rounded border bg-white p-4">
-    <h2 class="mb-3 font-semibold">Nhật ký cập nhật vật tư</h2>
+    <h2 class="mb-3 font-semibold">Nhật ký tăng / giảm / điều chỉnh vật tư</h2>
     <table class="w-full min-w-[1150px] text-left text-sm">
         <thead class="bg-slate-100">
             <tr>
@@ -26,11 +26,18 @@
                 @php($quantity = (int) data_get($details, 'quantity', abs((int) data_get($details, 'change', data_get($details, 'quantity_processed', 0)))))
                 @php($grade = data_get($details, 'grade', data_get($details, 'classification', '—')))
                 @php($reason = data_get($details, 'reason', data_get($details, 'note', data_get($details, 'decision_note', '—'))))
+                @php($isGradeTransfer = data_get($details, 'source') === 'grade_transfer')
                 <tr class="border-t">
                     <td class="p-3">{{ $item->created_at?->format('d/m/Y H:i') }}</td>
                     <td class="p-3">{{ $assetCode }} — {{ $assetName }}</td>
                     <td class="p-3">{{ $quantity }}</td>
-                    <td class="p-3">{{ $grade === '—' ? '—' : 'Cấp '.$grade }}</td>
+                    <td class="p-3">
+                        @if($isGradeTransfer)
+                            Cấp {{ data_get($details, 'source_grade', '—') }} → Cấp {{ data_get($details, 'target_grade', '—') }}
+                        @else
+                            {{ $grade === '—' ? '—' : 'Cấp '.$grade }}
+                        @endif
+                    </td>
                     <td class="p-3">{{ $inventoryActionLabels[$item->action] ?? $item->action }}</td>
                     <td class="p-3">{{ $reason }}</td>
                     <td class="p-3">{{ $item->user?->name ?: '—' }}</td>
@@ -67,7 +74,7 @@
                     </tr>
                 @endif
             @empty
-                <tr><td colspan="8" class="p-5 text-center text-slate-500">Chưa có nhật ký cập nhật vật tư.</td></tr>
+                <tr><td colspan="8" class="p-5 text-center text-slate-500">Chưa có nhật ký tăng / giảm / điều chỉnh vật tư.</td></tr>
             @endforelse
         </tbody>
     </table>

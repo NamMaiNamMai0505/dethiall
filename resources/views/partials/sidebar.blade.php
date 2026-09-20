@@ -227,10 +227,12 @@
             @if(auth()->check() && \App\Support\PermissionCheck::can(auth()->user(), 'inventory.access.index'))
                 <li><a href="{{ route('inventory.index') }}" class="sidebar-tooltip flex items-center px-4 py-2 text-sm hover:bg-gray-700 {{ request()->routeIs('inventory.*') ? 'bg-blue-600' : '' }}" data-tooltip="Quản lý vật tư"><i class="bi bi-box-seam mr-3 flex-shrink-0"></i><span class="sidebar-text">Quản lý vật tư</span></a></li>
             @endif
+            @if(auth()->check() && \App\Support\PermissionCheck::can(auth()->user(), 'scientific-research.view'))
+                <li><a href="{{ route('scientific-research.index') }}" class="sidebar-tooltip flex items-center px-4 py-2 text-sm hover:bg-gray-700 {{ request()->routeIs('scientific-research.*') ? 'bg-blue-600' : '' }}" data-tooltip="Nghiên cứu khoa học"><i class="bi bi-flask mr-3 flex-shrink-0"></i><span class="sidebar-text">Nghiên cứu khoa học</span></a></li>
+            @endif
             @if(auth()->check() && auth()->user()->can('leave-management.index'))
                 <li><a href="{{ route('leave-management.index') }}" class="sidebar-tooltip flex items-center px-4 py-2 text-sm hover:bg-gray-700 {{ request()->routeIs('leave-management.*') ? 'bg-blue-600' : '' }}" data-tooltip="Quản lý phép"><i class="bi bi-calendar2-week mr-3 flex-shrink-0"></i><span class="sidebar-text">Quản lý phép</span></a></li>
             @endif
-
             @if(auth()->check() && auth()->user()->can('instructor-schedule.index'))
                 <li>
                     <a href="{{ route('instructor-schedule.index') }}"

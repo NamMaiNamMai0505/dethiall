@@ -26,7 +26,7 @@
         ['route'=>'inventory.logs','permission'=>'inventory.logs.index','label'=>'Nhật ký vật tư','desc'=>'Lịch sử thao tác, nhập xuất và hỏng hóc','icon'=>'bi-clock-history'],
         ['route'=>'inventory.reports','permission'=>'inventory.reports.index','label'=>'Báo cáo vật tư','desc'=>'Tổng hợp và xuất báo cáo','icon'=>'bi-bar-chart'],
         ['route'=>'inventory.movement-report','permission'=>'inventory.reports.index','label'=>'Xuất báo cáo','desc'=>'Báo cáo di chuyển và đồng bộ vị trí','icon'=>'bi-file-earmark-arrow-down'],
-        ['route'=>'inventory.templates','permission'=>'inventory.templates.index','label'=>'Mẫu báo cáo Word','desc'=>'Quản lý mẫu và biến báo cáo','icon'=>'bi-file-earmark-word'],
+        ['route'=>'inventory.templates','permission'=>'inventory.templates.index','label'=>'Mẫu báo cáo','desc'=>'Quản lý mẫu và biến báo cáo','icon'=>'bi-file-earmark-word'],
     ] as $item)
         @continue(! \App\Support\PermissionCheck::can(auth()->user(), $item['permission']))
         <a href="{{ route($item['route']) }}" class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-md">
