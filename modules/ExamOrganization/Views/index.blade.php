@@ -86,10 +86,13 @@
 <div class="exam-guide"><span class="text-xl">ℹ️</span><div><strong>Trình tự tổ chức kỳ thi</strong><div class="mt-1 text-sm text-blue-900">Thực hiện lần lượt <b>3.1 lập kế hoạch thi</b>, <b>3.2 xử lý trước khi thi</b>, <b>3.3 xử lý sau thi</b> và <b>3.4 nhập, kiểm dò điểm</b>.</div></div></div>
 <form method="POST" action="{{ route('exam-organization.plans.store') }}" class="exam-card grid md:grid-cols-2 gap-4 mb-6">@csrf
     <div><label class="exam-label">Loại kỳ thi</label><select name="exam_category" id="exam-category" required class="exam-input"><option value="REGULAR">Kiểm tra thường xuyên</option><option value="PERIODIC">Kiểm tra định kỳ</option><option value="FINAL_1">Thi kết thúc môn lần 1</option><option value="FINAL_2">Thi kết thúc môn lần 2</option><option value="OTHER">Khác</option></select></div>
+    <div><label class="exam-label">Lần thi</label><select name="exam_attempt" required class="exam-input"><option value="1">Lần 1</option><option value="2">Lần 2</option><option value="3">Lần 3</option></select></div>
     <div id="custom-exam-wrap" class="hidden"><label class="exam-label">Tên kỳ thi khác</label><input name="custom_exam_name" class="exam-input" placeholder="Nhập tên kỳ thi"></div>
     <input type="hidden" name="name" id="exam-name">
-    <div><label class="exam-label">Môn thi</label><select name="subject_id" required class="exam-input"><option value="">Chọn môn thi</option>@foreach($subjects as $s)<option value="{{ $s->id }}">{{ $s->code }} — {{ $s->name }}</option>@endforeach</select></div>
-    <div><label class="exam-label">Lớp thi</label><select name="class_id" required class="exam-input"><option value="">Chọn lớp thi</option>@foreach($classes as $c)<option value="{{ $c->id }}">{{ $c->code }} — {{ $c->name }}</option>@endforeach</select></div>
+    <div><label class="exam-label">Hệ đào tạo</label><select name="training_system_id" id="exam-training-system" required class="exam-input"><option value="">Chọn hệ đào tạo</option>@foreach($trainingSystems as $system)<option value="{{ $system->id }}">{{ $system->name }}</option>@endforeach</select></div>
+    <div><label class="exam-label">Ngành đào tạo</label><select name="specialization_id" id="exam-specialization" required class="exam-input" data-placeholder="Chọn ngành có đủ lớp và môn" disabled><option value="">Chọn hệ trước</option></select></div>
+    <div><label class="exam-label">Lớp thi</label><select name="class_id" id="exam-class" required class="exam-input" data-placeholder="Chọn lớp thi" disabled><option value="">Chọn ngành trước</option></select></div>
+    <div><label class="exam-label">Môn thi</label><select name="subject_id" id="exam-subject" required class="exam-input" data-placeholder="Chọn môn thi" disabled><option value="">Chọn lớp trước</option></select></div>
     <div><label class="exam-label">Dạng đề</label><select name="exam_type" required class="exam-input"><option>TRẮC NGHIỆM</option><option>THỰC HÀNH</option><option>TỰ LUẬN</option></select></div>
     <div><label class="exam-label">Ngày thi</label><input type="date" name="exam_date" required class="exam-input"></div>
     <div><label class="exam-label">Giờ thi</label><input type="time" name="exam_time" class="exam-input"></div>
@@ -102,12 +105,53 @@
 @if($selectedPlanId)
 @if($section === 'pre_exam')
 <div class="exam-guide"><span class="text-xl">ℹ️</span><div><strong>Trình tự xử lý trước khi thi</strong><div class="mt-1 text-sm text-blue-900">Bạn cần <b>đánh số báo danh</b> trước, sau đó <b>đăng ký phòng thi</b> và cuối cùng thực hiện <b>xếp phòng thi</b>.</div></div></div>
+@php($existingProctors = ($selectedPlan?->proctors ?? collect())->values())
+@php($proctorCount = (int) old('proctor_count', max(1, $existingProctors->count() ?: 1)))
+<form method="POST" action="{{ route('exam-organization.actions.store') }}" class="exam-card mb-5 space-y-4">
+    @csrf
+    <input type="hidden" name="plan_id" value="{{ $selectedPlanId }}">
+    <input type="hidden" name="action_type" value="ASSIGNMENT">
+    <input type="hidden" name="role" value="INVIGILATOR">
+    <input type="hidden" name="name" value="Phân công cán bộ coi thi">
+    <div>
+        <h2 class="font-bold text-lg">Phân công cán bộ coi thi</h2>
+        <p class="exam-help">Chọn cán bộ coi thi và danh mục hoạt động chuyên môn bên Giờ chuẩn để hệ thống lưu số giờ tương ứng.</p>
+    </div>
+    <div class="max-w-xs">
+        <label class="exam-label">Số lượng cán bộ coi thi</label>
+        <input type="number" name="proctor_count" id="exam-proctor-count" min="1" max="10" value="{{ $proctorCount }}" class="exam-input" data-proctor-count>
+    </div>
+    <div class="grid gap-3 md:grid-cols-2" data-proctor-list>
+        @for($i = 0; $i < 10; $i++)
+            @php($existingProctor = $existingProctors->get($i))
+            <div class="rounded-lg border border-slate-200 bg-slate-50 p-3" data-proctor-row="{{ $i + 1 }}">
+                <p class="mb-2 text-sm font-extrabold text-blue-800">Coi thi {{ $i + 1 }}</p>
+                <label class="exam-label">Cán bộ coi thi</label>
+                <select name="proctors[{{ $i }}][instructor_id]" class="exam-input">
+                    <option value="">Chọn cán bộ</option>
+                    @foreach($instructors as $instructor)
+                        <option value="{{ $instructor->id }}" @selected((int) old("proctors.$i.instructor_id", $existingProctor?->instructor_id) === (int) $instructor->id)>{{ $instructor->code }} — {{ $instructor->name }}</option>
+                    @endforeach
+                </select>
+                <label class="exam-label mt-3">Hoạt động chuyên môn</label>
+                <select name="proctors[{{ $i }}][conversion_category_id]" class="exam-input">
+                    <option value="">Chọn danh mục giờ chuẩn</option>
+                    @foreach($conversionCategories as $category)
+                        <option value="{{ $category->id }}" @selected((int) old("proctors.$i.conversion_category_id", $existingProctor?->conversion_category_id) === (int) $category->id)>{{ $category->code }} — {{ $category->name }} ({{ $category->conversion_value_text }})</option>
+                    @endforeach
+                </select>
+            </div>
+        @endfor
+    </div>
+    <textarea name="note" class="exam-input" placeholder="Ghi chú phân công">{{ old('note') }}</textarea>
+    <button class="px-5 py-2 rounded-lg bg-blue-600 text-white font-bold">Lưu cán bộ coi thi</button>
+</form>
 @elseif($section === 'post_exam')
 <div class="exam-guide"><span class="text-xl">ℹ️</span><div><strong>Trình tự xử lý sau thi</strong><div class="mt-1 text-sm text-blue-900">Bạn cần <b>nhập SBD vắng/PQ</b>, sau đó <b>dồn túi</b> và cuối cùng <b>đánh phách</b>.</div></div></div>
 @endif
 <div class="grid md:grid-cols-2 gap-5">
     @if($section === 'pre_exam')
-    <form method="POST" enctype="multipart/form-data" action="{{ route('exam-organization.process') }}" class="exam-card space-y-3">@csrf<input type="hidden" name="plan_id" value="{{ $selectedPlanId }}"><input type="hidden" name="process_type" value="CANDIDATE_NUMBER"><h2 class="font-bold text-lg">Đánh số báo danh</h2><label class="exam-label">Import danh sách học viên</label><input type="file" name="student_file" accept=".txt,.csv,.tsv" class="exam-input"><label class="exam-label">Cách đánh số</label><select name="method" class="exam-input"><option value="NAME_ASC">Theo vần tên</option><option value="CLASS_ASC">Theo thứ tự vần lớp</option><option value="RANDOM">Hoàn toàn ngẫu nhiên</option></select><button class="px-4 py-2 rounded-lg bg-blue-600 text-white font-bold">Tải lên và tạo SBD</button></form>
+    <form method="POST" action="{{ route('exam-organization.process') }}" class="exam-card space-y-3">@csrf<input type="hidden" name="plan_id" value="{{ $selectedPlanId }}"><input type="hidden" name="process_type" value="CANDIDATE_NUMBER"><h2 class="font-bold text-lg">Đánh số báo danh</h2><p class="exam-help">Danh sách học viên được lấy theo đúng lớp của kế hoạch thi đã chọn.</p><div class="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm"><div><b>Kế hoạch:</b> {{ $selectedPlan?->name ?? '—' }}</div><div><b>Lớp:</b> {{ $selectedPlan?->class?->name ?? '—' }}</div><div><b>Môn:</b> {{ $selectedPlan?->subject?->name ?? '—' }}</div></div><label class="exam-label">Cách đánh số</label><select name="method" class="exam-input"><option value="NAME_ASC">Theo vần tên</option><option value="CLASS_ASC">Theo thứ tự vần lớp</option><option value="RANDOM">Hoàn toàn ngẫu nhiên</option></select><button class="px-4 py-2 rounded-lg bg-blue-600 text-white font-bold">Tạo số báo danh theo kế hoạch</button></form>
     <form method="POST" action="{{ route('exam-organization.process') }}" class="exam-card space-y-3">@csrf<input type="hidden" name="plan_id" value="{{ $selectedPlanId }}"><input type="hidden" name="process_type" value="ROOM_ASSIGN"><h2 class="font-bold text-lg">Đăng ký / xếp phòng thi</h2><label class="exam-label">Tên phòng thi</label><input name="room_name" class="exam-input" placeholder="Phòng 01"><label class="exam-label">Kiểu xếp</label><select name="method" class="exam-input"><option value="HORIZONTAL">Theo hàng ngang</option><option value="VERTICAL">Theo hàng dọc</option></select><button class="px-4 py-2 rounded-lg bg-blue-600 text-white font-bold">Xếp phòng và lưu log</button></form>
     @else
     <form method="POST" action="{{ route('exam-organization.process') }}" class="exam-card space-y-3">@csrf<input type="hidden" name="plan_id" value="{{ $selectedPlanId }}"><input type="hidden" name="process_type" value="ABSENT"><h2 class="font-bold text-lg">Nhập SBD vắng / PQ</h2><input name="from_number" required class="exam-input" placeholder="Nhập SBD vắng hoặc PQ"><button class="px-4 py-2 rounded-lg bg-blue-600 text-white font-bold">Lưu danh sách</button></form>
@@ -140,7 +184,7 @@
 @endif
 @endif
 
-<div class="exam-card overflow-auto mt-6"><h2 class="font-bold text-lg mb-3">Danh sách kế hoạch thi</h2><table class="w-full text-sm"><thead><tr class="border-b"><th class="text-left p-2">Kỳ thi</th><th class="text-left p-2">Môn</th><th class="text-left p-2">Lớp</th><th class="text-left p-2">Dạng đề</th><th class="text-left p-2">Ngày thi</th><th class="text-left p-2">Giờ thi</th></tr></thead><tbody>@forelse($plans as $p)<tr class="border-b"><td class="p-2">{{ $p->name }}</td><td class="p-2">{{ $p->subject->name ?? '—' }}</td><td class="p-2">{{ $p->class->name ?? '—' }}</td><td class="p-2">{{ $p->exam_type }}</td><td class="p-2">{{ $p->exam_date?->format('d/m/Y') }}</td><td class="p-2 font-semibold">{{ $p->exam_time ? \Illuminate\Support\Carbon::parse($p->exam_time)->format('H:i') : '—' }}</td></tr>@empty<tr><td colspan="6" class="p-5 text-center">Chưa có kế hoạch.</td></tr>@endforelse</tbody></table></div>
+<div class="exam-card overflow-auto mt-6"><h2 class="font-bold text-lg mb-3">Danh sách kế hoạch thi</h2><table class="w-full min-w-[1100px] text-sm"><thead><tr class="border-b"><th class="text-left p-2">Kỳ thi</th><th class="text-left p-2">Hệ / Ngành</th><th class="text-left p-2">Môn</th><th class="text-left p-2">Lớp</th><th class="text-left p-2">Lần thi</th><th class="text-left p-2">Cán bộ coi thi</th><th class="text-left p-2">Dạng đề</th><th class="text-left p-2">Ngày thi</th><th class="text-left p-2">Giờ thi</th></tr></thead><tbody>@forelse($plans as $p)<tr class="border-b align-top"><td class="p-2">{{ $p->name }}</td><td class="p-2"><div>{{ $p->trainingSystem?->name ?? $p->class?->specialization?->trainingSystem?->name ?? '—' }}</div><div class="text-xs text-slate-500">{{ $p->specialization?->name ?? $p->class?->specialization?->name ?? '—' }}</div></td><td class="p-2">{{ $p->subject->name ?? '—' }}</td><td class="p-2">{{ $p->class->name ?? '—' }}</td><td class="p-2">Lần {{ $p->exam_attempt ?? 1 }}</td><td class="p-2">@forelse($p->proctors as $proctor)<div class="mb-1"><b>{{ $proctor->name }}</b>: {{ $proctor->instructor?->name ?? '—' }} @if($proctor->conversionCategory)<span class="text-xs text-blue-700">· {{ $proctor->conversionCategory->name }} ({{ number_format((float) $proctor->converted_hours, 2) }} giờ)</span>@endif</div>@empty<span class="text-slate-400">Chưa phân công</span>@endforelse</td><td class="p-2">{{ $p->exam_type }}</td><td class="p-2">{{ $p->exam_date?->format('d/m/Y') }}</td><td class="p-2 font-semibold">{{ $p->exam_time ? \Illuminate\Support\Carbon::parse($p->exam_time)->format('H:i') : '—' }}</td></tr>@empty<tr><td colspan="9" class="p-5 text-center">Chưa có kế hoạch.</td></tr>@endforelse</tbody></table></div>
 @if($section === 'grading' && $selectedPlanId)
 <div class="exam-card mt-6">
     <h2 class="text-xl font-bold text-slate-900 mb-1">Bảng nhập điểm</h2>
@@ -174,6 +218,66 @@
 @endif
 @endif
 <script>
+const examSpecializations = @json($examSpecializationOptions ?? []);
+const examClasses = @json($examClassOptions ?? []);
+const examSubjects = @json($examSubjectOptions ?? []);
+function bootExamPlanFilters() {
+    const trainingSystemSelect = document.getElementById('exam-training-system');
+    const specializationSelect = document.getElementById('exam-specialization');
+    const classSelect = document.getElementById('exam-class');
+    const subjectSelect = document.getElementById('exam-subject');
+    if (!trainingSystemSelect || !specializationSelect || !classSelect || !subjectSelect) return;
+    if (typeof window.setTomSelectOptions !== 'function') {
+        setTimeout(bootExamPlanFilters, 50);
+        return;
+    }
+    if (trainingSystemSelect.dataset.examFilterBound === '1') return;
+    trainingSystemSelect.dataset.examFilterBound = '1';
+    const fillSpecializations = (systemId) => {
+        const items = systemId ? examSpecializations.filter(item => String(item.training_system_id) === String(systemId) && item.has_class && item.has_subject) : [];
+        specializationSelect.dataset.placeholder = systemId && items.length === 0 ? 'Hệ này chưa có ngành đủ lớp và môn' : 'Chọn ngành có đủ lớp và môn';
+        window.setTomSelectOptions(specializationSelect, items, { selected: '', enabled: items.length > 0 });
+    };
+    const fillClassesAndSubjects = (specializationId) => {
+        const classes = specializationId ? examClasses.filter(item => String(item.specialization_id) === String(specializationId)) : [];
+        const subjects = specializationId ? examSubjects.filter(item => String(item.specialization_id) === String(specializationId)) : [];
+        window.setTomSelectOptions(classSelect, classes, { selected: '', enabled: classes.length > 0 });
+        window.setTomSelectOptions(subjectSelect, subjects, { selected: '', enabled: subjects.length > 0 });
+    };
+    trainingSystemSelect.addEventListener('change', function () {
+        fillSpecializations(window.getSelectValue ? window.getSelectValue(trainingSystemSelect) : trainingSystemSelect.value);
+        fillClassesAndSubjects('');
+    });
+    specializationSelect.addEventListener('change', function () {
+        fillClassesAndSubjects(window.getSelectValue ? window.getSelectValue(specializationSelect) : specializationSelect.value);
+    });
+    fillSpecializations(window.getSelectValue ? window.getSelectValue(trainingSystemSelect) : trainingSystemSelect.value);
+    fillClassesAndSubjects('');
+}
+bootExamPlanFilters();
+function bootExamProctorCount() {
+    const countInput = document.querySelector('[data-proctor-count]');
+    const rows = Array.from(document.querySelectorAll('[data-proctor-row]'));
+    if (!countInput || rows.length === 0) return;
+    const syncRows = () => {
+        const count = Math.max(1, Math.min(rows.length, Number(countInput.value || 1)));
+        countInput.value = count;
+        rows.forEach((row, index) => {
+            const visible = index < count;
+            row.classList.toggle('hidden', !visible);
+            row.querySelectorAll('select, input, textarea').forEach(field => {
+                field.disabled = !visible;
+            });
+        });
+        if (typeof window.initTomSelects === 'function') {
+            window.initTomSelects(countInput.closest('form'));
+        }
+    };
+    countInput.addEventListener('input', syncRows);
+    countInput.addEventListener('change', syncRows);
+    syncRows();
+}
+bootExamProctorCount();
 const category=document.getElementById('exam-category'), custom=document.getElementById('custom-exam-wrap'), customInput=document.querySelector('[name="custom_exam_name"]');
 document.querySelectorAll('.exam-plan-picker .exam-label').forEach(label => { label.textContent = 'Chọn kế hoạch thi'; });
 if(category){ const sync=()=>{custom?.classList.toggle('hidden',category.value!=='OTHER'); if(customInput)customInput.required=category.value==='OTHER';}; category.addEventListener('change',sync); sync(); }
@@ -259,22 +363,6 @@ const showProcessLog = (processType, anchorForm) => {
    const assignRoomLabel = assignForm.querySelector('label.exam-label'); if (assignRoomLabel) assignRoomLabel.firstChild.textContent = 'Chọn phòng học để đăng ký và xếp';
    const assignProcessType = assignForm.querySelector('input[name="process_type"]'); if (assignProcessType) assignProcessType.value = 'ROOM_REGISTER_ASSIGN';
    const grid = candidateForm.parentElement; grid.classList.add('pre-exam-grid');
-  const classSelect = document.createElement('select');
-  classSelect.name = 'class_id'; classSelect.className = 'exam-input';
-  classSelect.innerHTML = '<option value="">Chọn lớp có sẵn danh sách học viên</option>' + @json($classes->map(fn($class) => ['id'=>$class->id,'label'=>$class->code.' — '.$class->name])->values()).map(item => '<option value="'+item.id+'">'+item.label+'</option>').join('');
-  const classLabel = document.createElement('label'); classLabel.className = 'exam-label'; classLabel.textContent = 'Chọn lớp để lấy danh sách học viên';
-  const classHelp = document.createElement('p'); classHelp.className = 'exam-help'; classHelp.textContent = 'Hệ thống sẽ lấy toàn bộ học viên hiện có trong lớp để đánh số báo danh.';
-  const fileInput = candidateForm.querySelector('input[type="file"]');
-  const fileLabel = Array.from(candidateForm.querySelectorAll('label')).find(label => label.textContent.includes('Import'));
-  if (fileLabel) { fileLabel.before(classHelp); fileLabel.before(classSelect); fileLabel.before(classLabel); }
-  fileInput?.remove(); fileLabel?.remove();
-  classLabel.insertAdjacentElement('afterend', classSelect); classSelect.insertAdjacentElement('afterend', classHelp);
-  const submitButton = candidateForm.querySelector('button[type="submit"], button:not([type])');
-  const syncCandidateSource = () => {
-    const useClass = classSelect.value !== '';
-    if (submitButton) { submitButton.disabled = !useClass; submitButton.textContent = useClass ? 'Lấy danh sách lớp và tạo SBD' : 'Hãy chọn lớp trước'; }
-  };
-  classSelect.addEventListener('change', syncCandidateSource); syncCandidateSource();
   const rooms = @json($registeredRooms ?? []);
   const registerForm = document.createElement('form');
   registerForm.method = 'POST'; registerForm.action = @json(route('exam-organization.process')); registerForm.className = 'exam-card space-y-3';
