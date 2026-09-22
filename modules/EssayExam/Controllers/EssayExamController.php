@@ -242,16 +242,69 @@ class EssayExamController extends Controller
 
     public function bank(Request $request): View
     {
+        $semester = $this->normalizeBankSemester($request->input('semester'));
+        $difficultyValues = $this->bankDifficultyValues($request->input('difficulty'));
+        $examTypeValues = $this->bankExamTypeValues($request->input('exam_type'));
+        $academicYears = EssayExam::query()
+            ->whereNotNull('academic_year')
+            ->where('academic_year', '!=', '')
+            ->distinct()
+            ->orderByDesc('academic_year')
+            ->pluck('academic_year');
+
         $exams = EssayExam::with(['subject.specialization','questions'])->withCount('draws')->where('status','APPROVED')->where('locked',true)->whereHas('questions', fn($q) => $q->where('paper_status','APPROVED'))
             ->when($request->search, fn ($q,$s) => $q->where(fn($x) => $x->where('code','like',"%$s%")->orWhere('title','like',"%$s%")))
             ->when($request->used === 'yes', fn ($q) => $q->has('draws'))
             ->when($request->used === 'no', fn ($q) => $q->doesntHave('draws'))
             ->when($request->academic_year, fn ($q,$v) => $q->where('academic_year',$v))
-            ->when($request->semester, fn ($q,$v) => $q->where('semester',$v))
-            ->when($request->difficulty, fn ($q,$v) => $q->where('difficulty',$v))
-            ->when($request->exam_type, fn ($q,$v) => $q->where('exam_type',$v))
+            ->when($semester, fn ($q,$v) => $q->where('semester',$v))
+            ->when($difficultyValues, fn ($q,$values) => $q->whereIn('difficulty',$values))
+            ->when($examTypeValues, fn ($q,$values) => $q->whereIn('exam_type',$values))
             ->latest('approved_at')->paginate(20)->withQueryString();
-        return view('essay-exam::bank', compact('exams'));
+        return view('essay-exam::bank', [
+            'exams' => $exams,
+            'academicYears' => $academicYears,
+            'selectedSemester' => $semester,
+            'selectedDifficulty' => $request->input('difficulty'),
+            'selectedExamType' => $request->input('exam_type'),
+        ]);
+    }
+
+    private function normalizeBankSemester(?string $value): ?string
+    {
+        $key = mb_strtolower(trim((string) $value));
+        if ($key === '') return null;
+        return match ($key) {
+            'semester_1', '1', 'hk1', 'hoc ky 1', 'học kỳ 1' => 'semester_1',
+            'semester_2', '2', 'hk2', 'hoc ky 2', 'học kỳ 2' => 'semester_2',
+            'semester_3', '3', 'hk3', 'hoc ky 3', 'học kỳ 3' => 'semester_3',
+            'semester_4', '4', 'hk4', 'hoc ky 4', 'học kỳ 4' => 'semester_4',
+            'semester_5', '5', 'hk5', 'hoc ky 5', 'học kỳ 5' => 'semester_5',
+            'semester_6', '6', 'hk6', 'hoc ky 6', 'học kỳ 6' => 'semester_6',
+            'semester_7', '7', 'hk7', 'hoc ky 7', 'học kỳ 7' => 'semester_7',
+            'summer', 'he', 'hè', 'hoc ky he', 'học kỳ hè' => 'summer',
+            default => $value,
+        };
+    }
+
+    private function bankDifficultyValues(?string $value): array
+    {
+        return match (mb_strtolower(trim((string) $value))) {
+            'dễ', 'de', 'easy' => ['Dễ', 'easy', 'de'],
+            'vừa', 'vua', 'medium', 'normal', 'trung bình' => ['Vừa', 'medium', 'normal', 'trung bình'],
+            'khó', 'kho', 'hard' => ['Khó', 'hard', 'kho'],
+            default => trim((string) $value) !== '' ? [trim((string) $value)] : [],
+        };
+    }
+
+    private function bankExamTypeValues(?string $value): array
+    {
+        return match (mb_strtolower(trim((string) $value))) {
+            'tự luận', 'tu luan', 'essay' => ['Tự luận', 'essay'],
+            'trắc nghiệm', 'trac nghiem', 'multiple_choice', 'multiple choice' => ['Trắc nghiệm', 'multiple_choice', 'multiple choice'],
+            'tích hợp', 'tich hop', 'integrated' => ['Tích hợp', 'integrated'],
+            default => trim((string) $value) !== '' ? [trim((string) $value)] : [],
+        };
     }
 
     public function used(Request $request): View
