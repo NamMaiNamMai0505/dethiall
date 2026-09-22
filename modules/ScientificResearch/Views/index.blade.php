@@ -1520,34 +1520,102 @@
             <p class="mt-2 text-2xl font-extrabold text-rose-900">{{ number_format((int) ($extensionSummary['rejected'] ?? 0)) }}</p>
         </div>
     </div>
+    @php
+        $registrationTotal = (int) ($stats['registrations'] ?? 0);
+        $registrationPercentTotal = max(1, $registrationTotal);
+        $extensionDisplayTotal = (int) ($extensionSummary['total'] ?? 0);
+        $extensionPercentTotal = max(1, $extensionDisplayTotal);
+        $statusRows = collect($statuses ?? [])->map(function ($label, $status) use ($statusSummary, $registrationTotal, $registrationPercentTotal) {
+            $count = (int) ($statusSummary[$status] ?? 0);
+            $isExtensionRequested = $status === \Modules\ScientificResearch\Models\ScientificResearchRegistration::STATUS_EXTENSION_REQUESTED;
+
+            return [
+                'label' => $isExtensionRequested ? 'Đang chờ duyệt gia hạn' : $label,
+                'type' => 'Trạng thái hiện tại',
+                'note' => $isExtensionRequested ? 'Không tính các đề tài đã duyệt gia hạn' : null,
+                'count' => $count,
+                'total' => $registrationTotal,
+                'unit' => 'đề tài',
+                'color' => 'bg-blue-500',
+                'percent' => $registrationTotal > 0 ? round($count * 100 / $registrationPercentTotal) : 0,
+            ];
+        });
+        $extensionRows = collect([
+            ['label' => 'Lượt đang chờ duyệt gia hạn', 'count' => (int) ($extensionSummary['pending'] ?? 0), 'color' => 'bg-amber-500'],
+            ['label' => 'Lượt đã duyệt gia hạn', 'count' => (int) ($extensionSummary['approved'] ?? 0), 'color' => 'bg-emerald-500'],
+            ['label' => 'Lượt bị từ chối gia hạn', 'count' => (int) ($extensionSummary['rejected'] ?? 0), 'color' => 'bg-rose-500'],
+        ])->map(function ($row) use ($extensionDisplayTotal, $extensionPercentTotal) {
+            return $row + [
+                'type' => 'Lịch sử gia hạn',
+                'note' => 'Tính theo từng lượt gửi yêu cầu, không phải số đề tài hiện tại',
+                'total' => $extensionDisplayTotal,
+                'unit' => 'lượt',
+                'percent' => $extensionDisplayTotal > 0 ? round($row['count'] * 100 / $extensionPercentTotal) : 0,
+            ];
+        });
+    @endphp
     <div class="rounded-xl border border-slate-200 bg-white shadow-sm">
         <div class="border-b border-slate-100 px-5 py-4">
-            <h3 class="font-bold text-slate-900">Thống kê theo trạng thái</h3>
+            <h3 class="font-bold text-slate-900">Thống kê trạng thái đề tài và gia hạn</h3>
+            <p class="mt-1 text-sm text-slate-500">Các dòng trạng thái đếm theo đề tài hiện tại; các dòng gia hạn đếm theo lượt yêu cầu đã phát sinh.</p>
         </div>
         <div class="overflow-x-auto p-3">
-            <table class="w-full min-w-[720px] text-sm">
+            <table class="w-full min-w-[900px] text-sm">
                 <thead class="text-left text-xs uppercase text-slate-500">
                     <tr>
-                        <th class="px-4 py-3">Trạng thái</th>
+                        <th class="px-4 py-3">Chỉ tiêu</th>
+                        <th class="px-4 py-3">Loại số liệu</th>
                         <th class="px-4 py-3 text-right">Số lượng</th>
                         <th class="px-4 py-3">Tỷ trọng</th>
                     </tr>
                 </thead>
                 <tbody class="[&_tr+tr_td]:border-t [&_tr+tr_td]:border-slate-100">
-                    @foreach($statuses as $status => $label)
-                        @php
-                            $count = (int) ($statusSummary[$status] ?? 0);
-                            $percent = $stats['registrations'] > 0 ? round($count * 100 / $stats['registrations']) : 0;
-                        @endphp
+                    <tr class="bg-slate-50/80">
+                        <td colspan="4" class="px-4 py-2 text-xs font-extrabold uppercase text-slate-500">Trạng thái hiện tại của đề tài</td>
+                    </tr>
+                    @foreach($statusRows as $row)
                         <tr class="hover:bg-slate-50/80">
-                            <td class="rounded-l-lg px-4 py-3.5 font-semibold text-slate-800">{{ $label }}</td>
-                            <td class="px-4 py-3.5 text-right font-extrabold text-slate-900">{{ number_format($count) }}</td>
+                            <td class="rounded-l-lg px-4 py-3.5">
+                                <p class="font-semibold text-slate-800">{{ $row['label'] }}</p>
+                                @if($row['note'])
+                                    <p class="mt-0.5 text-xs font-medium text-slate-500">{{ $row['note'] }}</p>
+                                @endif
+                            </td>
+                            <td class="px-4 py-3.5 text-xs font-bold uppercase text-blue-700">{{ $row['type'] }}</td>
+                            <td class="px-4 py-3.5 text-right font-extrabold text-slate-900">{{ number_format($row['count']) }}</td>
                             <td class="px-4 py-3">
                                 <div class="flex items-center gap-4">
                                     <div class="h-2.5 w-full max-w-sm overflow-hidden rounded-full bg-slate-100">
-                                        <div class="h-full rounded-full bg-blue-500" style="width: {{ $percent }}%"></div>
+                                        <div class="h-full rounded-full {{ $row['color'] }}" style="width: {{ $row['percent'] }}%"></div>
                                     </div>
-                                    <span class="w-12 text-right text-xs font-bold text-slate-500">{{ $percent }}%</span>
+                                    <span class="w-24 text-right text-xs font-bold text-slate-500">
+                                        {{ $row['percent'] }}%
+                                        <span class="block font-semibold text-slate-400">{{ number_format($row['count']) }}/{{ number_format($row['total']) }} {{ $row['unit'] }}</span>
+                                    </span>
+                                </div>
+                            </td>
+                        </tr>
+                    @endforeach
+                    <tr class="bg-slate-50/80">
+                        <td colspan="4" class="px-4 py-2 text-xs font-extrabold uppercase text-slate-500">Lịch sử lượt xin gia hạn</td>
+                    </tr>
+                    @foreach($extensionRows as $row)
+                        <tr class="hover:bg-slate-50/80">
+                            <td class="rounded-l-lg px-4 py-3.5">
+                                <p class="font-semibold text-slate-800">{{ $row['label'] }}</p>
+                                <p class="mt-0.5 text-xs font-medium text-slate-500">{{ $row['note'] }}</p>
+                            </td>
+                            <td class="px-4 py-3.5 text-xs font-bold uppercase text-emerald-700">{{ $row['type'] }}</td>
+                            <td class="px-4 py-3.5 text-right font-extrabold text-slate-900">{{ number_format($row['count']) }}</td>
+                            <td class="px-4 py-3">
+                                <div class="flex items-center gap-4">
+                                    <div class="h-2.5 w-full max-w-sm overflow-hidden rounded-full bg-slate-100">
+                                        <div class="h-full rounded-full {{ $row['color'] }}" style="width: {{ $row['percent'] }}%"></div>
+                                    </div>
+                                    <span class="w-24 text-right text-xs font-bold text-slate-500">
+                                        {{ $row['percent'] }}%
+                                        <span class="block font-semibold text-slate-400">{{ number_format($row['count']) }}/{{ number_format($row['total']) }} {{ $row['unit'] }}</span>
+                                    </span>
                                 </div>
                             </td>
                         </tr>

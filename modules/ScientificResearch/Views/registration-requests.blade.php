@@ -53,7 +53,9 @@
                 </thead>
                 <tbody class="divide-y divide-slate-100">
                     @forelse($extensionOverview as $item)
-                        @php($latestExtension = $item->extensionRequests->first())
+                        @php
+                            $latestExtension = $item->extensionRequests->first();
+                        @endphp
                         <tr class="align-top hover:bg-slate-50/80">
                             <td class="px-4 py-3">
                                 <p class="font-bold text-slate-900">{{ $item->project_code ?: 'Chưa cấp mã' }}</p>
@@ -199,8 +201,10 @@
                                 </thead>
                                 <tbody class="divide-y divide-slate-100">
                                     @foreach($registration->extensionRequests as $extension)
-                                        @php($canReviewExtension = \App\Support\PermissionCheck::can(auth()->user(), 'scientific-research.registrations.agency-approve') || \App\Support\PermissionCheck::can(auth()->user(), 'scientific-research.registrations.status'))
-                                        @php($extensionFormId = 'extension-update-'.$extension->id)
+                                        @php
+                                            $canReviewExtension = \App\Support\PermissionCheck::can(auth()->user(), 'scientific-research.registrations.agency-approve') || \App\Support\PermissionCheck::can(auth()->user(), 'scientific-research.registrations.status');
+                                            $extensionFormId = 'extension-update-'.$extension->id;
+                                        @endphp
                                         <tr data-extension-row data-status="{{ $extension->status }}" data-search="{{ \Illuminate\Support\Str::lower(($extension->request_note ?: '').' '.($extension->review_note ?: '').' '.($extension->requester?->name ?: '').' '.($extension->reviewer?->name ?: '')) }}" class="align-top hover:bg-slate-50/80">
                                             <td class="whitespace-nowrap px-3 py-3 text-slate-600">{{ $extension->requested_at?->format('d/m/Y H:i') ?: '—' }}</td>
                                             <td class="break-words px-3 py-3 font-semibold text-slate-800">{{ $extension->requester?->name ?: '—' }}</td>
