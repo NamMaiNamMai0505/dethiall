@@ -13,6 +13,9 @@
 @if(session('success'))
     <div class="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 font-semibold text-emerald-700">{{ session('success') }}</div>
 @endif
+@if(session('error'))
+    <div class="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 font-semibold text-rose-700">{{ session('error') }}</div>
+@endif
 @if($errors->any())
     <div class="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 font-semibold text-rose-700">{{ $errors->first() }}</div>
 @endif
@@ -956,17 +959,17 @@
     @elseif($section === 'funding')
         @php
             $fundingTypeLabels = [
-                'ESTIMATE' => 'Dự toán',
-                'ALLOCATED' => 'Phân bổ',
-                'SPENT' => 'Chi phí',
-                'PAYMENT' => 'Thanh toán',
-                'SETTLEMENT' => 'Quyết toán',
+                'ESTIMATE' => 'Dự kiến',
+                'ALLOCATED' => 'Được cấp',
+                'SPENT' => 'Đã chi/phát sinh',
+                'PAYMENT' => 'Đã thanh toán',
+                'SETTLEMENT' => 'Chốt kinh phí',
             ];
             $fundingStatusLabels = [
                 'PENDING' => 'Chờ xử lý',
                 'APPROVED' => 'Đã duyệt',
                 'PAID' => 'Đã thanh toán',
-                'SETTLED' => 'Đã quyết toán',
+                'SETTLED' => 'Đã chốt kinh phí',
             ];
             $fundingRegistrationInfo = $allRegistrations->mapWithKeys(fn ($registration) => [
                 (string) $registration->id => [
@@ -981,25 +984,93 @@
                     'members' => $registration->members->count() + 1,
                 ],
             ]);
+            $fundingTypeDescriptions = [
+                'ESTIMATE' => 'Dự kiến số tiền cần dùng trước khi thực hiện đề tài.',
+                'ALLOCATED' => 'Số tiền được cấp hoặc được giao cho đề tài.',
+                'SPENT' => 'Khoản chi phí phát sinh thực tế trong quá trình thực hiện.',
+                'PAYMENT' => 'Số tiền đã làm thủ tục thanh toán hoặc đã chi trả.',
+                'SETTLEMENT' => 'Số tiền chốt cuối cùng khi nghiệm thu/quyết toán đề tài.',
+            ];
+            $fundingWorkflow = [
+                'ESTIMATE' => [
+                    'step' => '1',
+                    'title' => 'Dự kiến',
+                    'hint' => 'Lập nhu cầu kinh phí ban đầu theo thuyết minh đề tài.',
+                    'items' => ['Nhập số tiền dự kiến hoặc từng hạng mục dự kiến', 'Ghi rõ căn cứ: vật tư, hội thảo, khảo sát, nghiệm thu', 'Đối chiếu với kinh phí đăng ký của đề tài'],
+                    'output' => 'Bảng kinh phí dự kiến',
+                    'status' => 'PENDING',
+                    'name' => 'Kinh phí dự kiến của đề tài',
+                    'note' => 'Căn cứ thuyết minh, dự kiến hạng mục chi...',
+                ],
+                'ALLOCATED' => [
+                    'step' => '2',
+                    'title' => 'Được cấp',
+                    'hint' => 'Ghi nhận phần kinh phí được cấp cho đề tài.',
+                    'items' => ['Nhập số tiền được cấp thực tế', 'Ghi quyết định/thông báo cấp kinh phí nếu có', 'So sánh với số tiền dự kiến đã lập'],
+                    'output' => 'Khoản kinh phí được cấp cho đề tài',
+                    'status' => 'APPROVED',
+                    'name' => 'Kinh phí được cấp',
+                    'note' => 'Theo quyết định/thông báo cấp kinh phí số...',
+                ],
+                'SPENT' => [
+                    'step' => '3',
+                    'title' => 'Theo dõi chi',
+                    'hint' => 'Theo dõi từng khoản chi phát sinh trong quá trình thực hiện.',
+                    'items' => ['Nhập từng khoản chi thực tế', 'Gắn ngày ghi nhận và nội dung chứng từ', 'Theo dõi còn lại so với kinh phí được cấp'],
+                    'output' => 'Danh sách chi phí phát sinh',
+                    'status' => 'PENDING',
+                    'name' => 'Chi phí thực hiện đề tài',
+                    'note' => 'Nội dung chi, số chứng từ, người nhận...',
+                ],
+                'PAYMENT' => [
+                    'step' => '4',
+                    'title' => 'Thanh toán',
+                    'hint' => 'Ghi nhận khoản đã thanh toán hoặc đề nghị thanh toán.',
+                    'items' => ['Nhập số tiền thanh toán', 'Ghi lần thanh toán, chứng từ, ngày thanh toán', 'Đối chiếu với khoản chi đã phát sinh'],
+                    'output' => 'Khoản đã thanh toán',
+                    'status' => 'PAID',
+                    'name' => 'Thanh toán kinh phí đề tài',
+                    'note' => 'Thanh toán lần..., chứng từ số...',
+                ],
+                'SETTLEMENT' => [
+                    'step' => '5',
+                    'title' => 'Chốt kinh phí',
+                    'hint' => 'Chốt số liệu cuối cùng sau khi đề tài nghiệm thu/hoàn thành.',
+                    'items' => ['Nhập số tiền chốt cuối cùng được chấp nhận', 'Ghi phần còn dư/thiếu nếu có', 'Xác nhận trạng thái đã chốt kinh phí'],
+                    'output' => 'Biên bản/bảng chốt kinh phí đề tài',
+                    'status' => 'SETTLED',
+                    'name' => 'Chốt kinh phí đề tài',
+                    'note' => 'Số chốt kinh phí, phần còn lại, kết luận...',
+                ],
+            ];
         @endphp
         <div class="sr-section-head">
             <div>
                 <h2>Theo dõi kinh phí theo đề tài</h2>
-                <p>Mỗi khoản bên dưới phải gắn với một đề tài cụ thể: dự toán, phân bổ, chi phí, thanh toán hoặc quyết toán.</p>
+                <p>Theo dõi kinh phí theo từng đề tài: dự kiến, được cấp, đã chi/phát sinh, đã thanh toán và chốt kinh phí.</p>
             </div>
-            <div class="sr-section-kpis">
-                <span><b>{{ number_format((float) $stats['funding'], 0, ',', '.') }}</b> tổng kinh phí</span>
-                <span><b>{{ $fundingTypeSummary->sum('total') }}</b> khoản</span>
-            </div>
+            <form method="GET" action="{{ route('scientific-research.funding.index') }}" class="flex flex-wrap items-end gap-2">
+                <label class="text-xs font-bold uppercase text-slate-500">Năm kinh phí
+                    <input name="funding_year" type="number" min="2000" max="2100" step="1" list="sr-funding-year-options" value="{{ $selectedFundingYear }}" placeholder="Tất cả năm" class="mt-1 w-36 rounded-lg border px-3 py-2 text-sm font-semibold text-slate-700" oninput="clearTimeout(this._filterTimer); this._filterTimer = setTimeout(() => { if (this.value === '' || /^\d{4}$/.test(this.value)) this.form.submit(); }, 600)">
+                    <datalist id="sr-funding-year-options">
+                        @foreach($fundingYearOptions as $year)
+                            <option value="{{ $year }}">Năm {{ $year }}</option>
+                        @endforeach
+                    </datalist>
+                </label>
+                @if($selectedFundingYear !== '')
+                    <a href="{{ route('scientific-research.funding.index') }}" class="rounded-lg border bg-white px-3 py-2 text-sm font-bold text-slate-600">Bỏ lọc</a>
+                @endif
+            </form>
         </div>
-        <div class="sr-workflow mb-5">
-            <span>1. Dự toán</span>
-            <span>2. Phân bổ</span>
-            <span>3. Theo dõi chi</span>
-            <span>4. Thanh toán</span>
-            <span>5. Quyết toán</span>
+        <div class="mb-5 rounded-xl border border-blue-100 bg-blue-50 p-4">
+            <p class="text-xs font-bold uppercase text-blue-700">{{ $selectedFundingYear !== '' ? 'Tổng chi phí năm '.$selectedFundingYear : 'Tổng chi phí' }}</p>
+            <p class="mt-1 text-2xl font-extrabold text-slate-900">{{ number_format((float) $fundingSettlementTotal, 0, ',', '.') }}</p>
         </div>
-        <form method="POST" action="{{ route('scientific-research.funding.store') }}" class="mb-5 grid gap-3 md:grid-cols-4">@csrf
+        <div class="mb-5 rounded-xl border bg-white p-4">
+            <button type="button" class="rounded-lg bg-blue-600 px-4 py-2.5 font-bold text-white" onclick="document.getElementById('sr-funding-global-create').classList.toggle('hidden')"><i class="bi bi-plus-lg"></i> Thêm khoản cho đề tài khác</button>
+            <div id="sr-funding-global-create" class="mt-4 hidden">
+        <form method="POST" action="{{ route('scientific-research.funding.store') }}" class="grid gap-3 md:grid-cols-4">@csrf
             <label class="text-sm font-semibold text-slate-700 md:col-span-2">Đề tài <span class="text-rose-500">*</span>
                 <select name="registration_id" required id="sr-funding-registration" class="mt-1 w-full rounded-lg border px-3 py-2.5">
                     <option value="">Chọn đề tài cần theo dõi kinh phí</option>
@@ -1010,108 +1081,182 @@
             </label>
             <div id="sr-funding-registration-info" class="hidden rounded-lg border border-blue-100 bg-blue-50/50 p-3 text-sm md:col-span-4"></div>
             <label class="text-sm font-semibold text-slate-700">Loại khoản
-                <select name="type" class="mt-1 w-full rounded-lg border px-3 py-2.5"><option value="ESTIMATE">Dự toán</option><option value="ALLOCATED">Phân bổ</option><option value="SPENT">Chi phí</option><option value="PAYMENT">Thanh toán</option><option value="SETTLEMENT">Quyết toán</option></select>
+                <select name="type" id="sr-funding-type" class="mt-1 w-full rounded-lg border px-3 py-2.5"><option value="ESTIMATE">Dự kiến</option><option value="ALLOCATED">Được cấp</option><option value="SPENT">Đã chi/phát sinh</option><option value="PAYMENT">Đã thanh toán</option><option value="SETTLEMENT">Chốt kinh phí</option></select>
             </label>
             <label class="text-sm font-semibold text-slate-700">Số tiền
                 <input name="amount" type="number" min="0" step="1000" required placeholder="Nhập số tiền" class="mt-1 w-full rounded-lg border px-3 py-2.5">
             </label>
             <label class="text-sm font-semibold text-slate-700">Tên khoản
-                <input name="item_name" required placeholder="VD: Kinh phí mua vật tư, hội thảo..." class="mt-1 w-full rounded-lg border px-3 py-2.5">
+                <input name="item_name" id="sr-funding-item-name" required placeholder="VD: Kinh phí mua vật tư, hội thảo..." class="mt-1 w-full rounded-lg border px-3 py-2.5">
             </label>
             <label class="text-sm font-semibold text-slate-700">Ngày ghi nhận
                 <input name="spent_on" type="date" class="mt-1 w-full rounded-lg border px-3 py-2.5">
             </label>
             <label class="text-sm font-semibold text-slate-700">Trạng thái
-                <select name="status" class="mt-1 w-full rounded-lg border px-3 py-2.5"><option value="PENDING">Chờ xử lý</option><option value="APPROVED">Đã duyệt</option><option value="PAID">Đã thanh toán</option><option value="SETTLED">Đã quyết toán</option></select>
+                <select name="status" id="sr-funding-status" class="mt-1 w-full rounded-lg border px-3 py-2.5"><option value="PENDING">Chờ xử lý</option><option value="APPROVED">Đã duyệt</option><option value="PAID">Đã thanh toán</option><option value="SETTLED">Đã chốt kinh phí</option></select>
             </label>
             <label class="text-sm font-semibold text-slate-700 md:col-span-2">Ghi chú
-                <input name="note" placeholder="Nội dung chi, chứng từ, lần thanh toán..." class="mt-1 w-full rounded-lg border px-3 py-2.5">
+                <input name="note" id="sr-funding-note" placeholder="Nội dung chi, chứng từ, lần thanh toán..." class="mt-1 w-full rounded-lg border px-3 py-2.5">
             </label>
             <button class="rounded-lg bg-blue-600 px-4 py-2.5 font-bold text-white md:col-span-4"><i class="bi bi-cash-coin"></i> Ghi nhận khoản theo đề tài</button>
         </form>
-        <div class="grid gap-3">
-            @forelse($fundings as $item)
-                <article class="rounded-xl border bg-white p-4 shadow-sm">
-                    <div class="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                            <p class="font-extrabold text-slate-900">{{ $item->item_name }}</p>
-                            <p class="mt-1 text-sm font-semibold text-slate-700">{{ $item->registration?->title ?: 'Chưa gắn đề tài' }}</p>
-                        </div>
-                        <button type="button" class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700" onclick="document.getElementById('sr-funding-setup-{{ $item->id }}').classList.toggle('hidden')">Thiết lập</button>
-                    </div>
-                    <div class="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-                        <div class="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-                            <p class="text-[11px] font-bold uppercase text-slate-500">Thuộc đề tài</p>
-                            <p class="mt-0.5 text-sm font-semibold text-slate-800">{{ $item->registration?->project_code ?: 'Chưa cấp mã' }}</p>
-                        </div>
-                        <div class="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-                            <p class="text-[11px] font-bold uppercase text-slate-500">Loại khoản</p>
-                            <p class="mt-0.5 text-sm font-semibold text-slate-800">{{ $fundingTypeLabels[$item->type] ?? $item->type }}</p>
-                        </div>
-                        <div class="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-                            <p class="text-[11px] font-bold uppercase text-slate-500">Số tiền</p>
-                            <p class="mt-0.5 text-sm font-semibold text-slate-800">{{ number_format((float) $item->amount, 0, ',', '.') }}</p>
-                        </div>
-                        <div class="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-                            <p class="text-[11px] font-bold uppercase text-slate-500">Trạng thái</p>
-                            <p class="mt-0.5 text-sm font-semibold text-blue-700">{{ $fundingStatusLabels[$item->status] ?? $item->status }}</p>
-                        </div>
-                    </div>
-                    @if($item->registration)
-                        <div class="mt-3 rounded-lg border border-blue-100 bg-blue-50/50 p-3">
-                            <p class="text-xs font-bold uppercase text-blue-700">Thông tin lấy từ đăng ký đề tài</p>
-                            <div class="mt-2 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
-                                <p><span class="font-semibold text-slate-700">Chủ nhiệm:</span> {{ $item->registration->user?->name ?: 'Chưa rõ' }}</p>
-                                <p><span class="font-semibold text-slate-700">Đơn vị:</span> {{ $item->registration->user?->unit?->name ?: 'Chưa có đơn vị' }}</p>
-                                <p><span class="font-semibold text-slate-700">Năm học:</span> {{ $item->registration->academic_year ?: 'Chưa có năm học' }}</p>
-                                <p><span class="font-semibold text-slate-700">Kinh phí đăng ký:</span> {{ number_format((float) $item->registration->budget, 0, ',', '.') }}</p>
-                            </div>
-                        </div>
-                    @endif
-                    @if($item->spent_on || $item->note)
-                        <div class="mt-3 rounded-lg border border-slate-100 bg-white p-3 text-sm text-slate-700">
-                            @if($item->spent_on)
-                                <p><span class="font-semibold">Ngày ghi nhận:</span> {{ $item->spent_on?->format('d/m/Y') }}</p>
-                            @endif
-                            @if($item->note)
-                                <p class="mt-1"><span class="font-semibold">Ghi chú:</span> {{ $item->note }}</p>
-                            @endif
-                        </div>
-                    @endif
-                    <div id="sr-funding-setup-{{ $item->id }}" class="mt-3 hidden rounded-lg border border-amber-200 bg-amber-50/40 p-3">
-                        <div class="mb-3 flex items-center justify-between gap-2">
-                            <p class="text-sm font-extrabold text-slate-900">Thiết lập khoản kinh phí</p>
-                            <button type="button" class="rounded-lg border bg-white px-3 py-1.5 text-xs font-bold text-slate-600" onclick="this.closest('[id^=sr-funding-setup-]').classList.add('hidden')">Thu gọn</button>
-                        </div>
-                        <form method="POST" action="{{ route('scientific-research.funding.update', $item) }}" class="grid gap-2 md:grid-cols-2">
-                            @csrf @method('PATCH')
-                            <label class="text-xs font-semibold text-slate-600 md:col-span-2">Đề tài<select name="registration_id" class="mt-1 w-full rounded-lg border px-3 py-2 text-sm"><option value="">Chọn đề tài</option>@foreach($allRegistrations as $registration)<option value="{{ $registration->id }}" @selected($item->registration_id === $registration->id)>{{ $registration->project_code ?: 'Chưa cấp mã' }} — {{ $registration->title }}</option>@endforeach</select></label>
-                            <label class="text-xs font-semibold text-slate-600">Tên khoản<input name="item_name" value="{{ $item->item_name }}" required class="mt-1 w-full rounded-lg border px-3 py-2 text-sm"></label>
-                            <label class="text-xs font-semibold text-slate-600">Loại khoản<select name="type" class="mt-1 w-full rounded-lg border px-3 py-2 text-sm"><option value="ESTIMATE" @selected($item->type === 'ESTIMATE')>Dự toán</option><option value="ALLOCATED" @selected($item->type === 'ALLOCATED')>Phân bổ</option><option value="SPENT" @selected($item->type === 'SPENT')>Chi phí</option><option value="PAYMENT" @selected($item->type === 'PAYMENT')>Thanh toán</option><option value="SETTLEMENT" @selected($item->type === 'SETTLEMENT')>Quyết toán</option></select></label>
-                            <label class="text-xs font-semibold text-slate-600">Số tiền<input name="amount" type="number" min="0" step="1000" value="{{ (float) $item->amount }}" required class="mt-1 w-full rounded-lg border px-3 py-2 text-sm"></label>
-                            <label class="text-xs font-semibold text-slate-600">Ngày ghi nhận<input name="spent_on" type="date" value="{{ $item->spent_on?->format('Y-m-d') }}" class="mt-1 w-full rounded-lg border px-3 py-2 text-sm"></label>
-                            <label class="text-xs font-semibold text-slate-600">Trạng thái<select name="status" class="mt-1 w-full rounded-lg border px-3 py-2 text-sm"><option value="PENDING" @selected($item->status === 'PENDING')>Chờ xử lý</option><option value="APPROVED" @selected($item->status === 'APPROVED')>Đã duyệt</option><option value="PAID" @selected($item->status === 'PAID')>Đã thanh toán</option><option value="SETTLED" @selected($item->status === 'SETTLED')>Đã quyết toán</option></select></label>
-                            <label class="text-xs font-semibold text-slate-600 md:col-span-2">Ghi chú<input name="note" value="{{ $item->note }}" placeholder="Ghi chú" class="mt-1 w-full rounded-lg border px-3 py-2 text-sm"></label>
-                            <button class="rounded-lg bg-slate-900 px-3 py-2 text-sm font-bold text-white md:col-span-2">Lưu khoản kinh phí</button>
-                        </form>
-                        <form method="POST" action="{{ route('scientific-research.funding.destroy', $item) }}" onsubmit="return confirm('Xóa khoản kinh phí này?')" class="mt-2">
-                            @csrf @method('DELETE')
-                            <button class="text-sm font-bold text-rose-700">Xóa khoản kinh phí</button>
-                        </form>
-                    </div>
-                </article>
-            @empty
-                <div class="rounded-xl border bg-white px-4 py-8 text-center text-slate-500">Chưa có khoản kinh phí theo đề tài.</div>
-            @endforelse
+            </div>
         </div>
-        <div class="mt-3">{{ $fundings->links() }}</div>
-        <script>
+        <div class="mb-5 rounded-xl border bg-white p-4">
+            <h3 class="font-extrabold text-slate-900">Bảng kinh phí theo đề tài</h3>
+            <p class="mt-1 text-sm text-slate-500">Mỗi đề tài hiển thị một dòng; mở chi tiết để xem, thêm, sửa hoặc xóa các khoản chi phát sinh của đề tài đó.</p>
+            <div class="mt-3 overflow-x-auto">
+                <table class="w-full min-w-[860px] text-left text-sm">
+                    <thead class="bg-slate-50 text-xs uppercase text-slate-500">
+                        <tr><th class="px-3 py-2">Ngày gần nhất</th><th class="px-3 py-2">Đề tài</th><th class="px-3 py-2">Chủ nhiệm</th><th class="px-3 py-2">Kinh phí thực tế / được cấp</th><th class="px-3 py-2">Thao tác</th></tr>
+                    </thead>
+                    <tbody class="divide-y">
+                        @forelse($fundingProjects as $project)
+                            @php
+                                $registration = $project->registration;
+                                 $projectFundings = $fundingDetailsByRegistration->get($project->registration_id, collect())->filter(fn ($row) => in_array($row->type, ['SPENT', 'PAYMENT'], true))->values();
+                                $projectTypeTotals = $project->type_totals;
+                                $detailId = 'sr-funding-project-'.$project->registration_id;
+                            @endphp
+                            <tr>
+                                <td class="px-3 py-2 whitespace-nowrap">{{ $project->actual_on ? \Illuminate\Support\Carbon::parse($project->actual_on)->format('d/m/Y') : '—' }}</td>
+                                <td class="px-3 py-2"><p class="font-bold text-slate-900">{{ $registration?->project_code ?: 'Chưa cấp mã' }}</p><p class="text-xs text-slate-500">{{ $registration?->title ?: 'Chưa gắn đề tài' }}</p></td>
+                                <td class="px-3 py-2"><p class="font-semibold text-slate-800">{{ $registration?->user?->name ?: '—' }}</p><p class="text-xs text-slate-500">{{ $registration?->user?->unit?->name ?: 'Chưa có đơn vị' }}</p></td>
+                                                                <td class="px-3 py-2">
+                                    <div class="min-w-48">
+                                        <div class="flex items-center justify-between gap-3 text-xs font-bold text-slate-600"><span>{{ $project->actual_source }}</span><span>{{ $project->usage_percent === null ? 'Chưa cấp' : $project->usage_percent.'%' }}</span></div>
+                                        <div class="mt-1 h-2 overflow-hidden rounded-full bg-slate-100">
+                                            <div class="h-full {{ $project->is_over_budget ? 'bg-rose-500' : 'bg-emerald-500' }}" style="width: {{ min(100, (float) ($project->usage_percent ?? 0)) }}%"></div>
+                                        </div>
+                                        <p class="mt-1 text-xs text-slate-600">{{ number_format((float) $project->actual_amount, 0, ',', '.') }} / {{ number_format((float) $project->allocated_amount, 0, ',', '.') }}</p>
+                                        @if($project->is_over_budget)
+                                            <p class="mt-1 text-xs font-bold text-rose-700">Kinh phí thực tế vượt số được cấp</p>
+                                        @endif
+                                    </div>
+                                </td>
+                                <td class="px-3 py-2">
+                                    <div class="flex flex-wrap gap-2">
+                                        <button type="button" class="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700" onclick="document.getElementById('{{ $detailId }}').classList.toggle('hidden')">Xem chi tiết</button>
+
+                                    </div>
+                                </td>
+                            </tr>
+                            <tr id="{{ $detailId }}" class="hidden bg-blue-50/40">
+                                <td colspan="5" class="px-3 py-3">
+                                    <div class="grid gap-3">
+                                        @if($project->is_over_budget)
+                                            <div class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-bold text-rose-700">Cảnh báo: kinh phí thực tế vượt số tiền được cấp {{ number_format((float) ($project->actual_amount - $project->allocated_amount), 0, ',', '.') }}.</div>
+                                        @elseif($project->allocated_amount > 0)
+                                            <div class="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">Kinh phí thực tế bằng {{ $project->usage_percent }}% kinh phí được cấp.</div>
+                                        @endif
+                                        <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                                            @foreach($fundingTypeLabels as $type => $label)
+                                                <div class="rounded-lg bg-white px-3 py-2">
+                                                    <p class="text-[11px] font-bold uppercase text-slate-500">{{ $label }}</p>
+                                                    <p class="mt-1 font-extrabold text-slate-900">{{ number_format((float) ($projectTypeTotals[$type] ?? 0), 0, ',', '.') }}</p>
+                                                </div>
+                                            @endforeach
+                                        </div>
+                                        @if($registration)
+                                            <div class="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3">
+                                                <p class="text-sm font-extrabold text-slate-900">Cập nhật kinh phí của đề tài</p>
+                                                <div class="mt-2 grid gap-2 md:grid-cols-5">
+                                                    @foreach($fundingTypeLabels as $type => $label)
+                                                        <div class="rounded-lg bg-white px-3 py-2">
+                                                            <p class="text-xs font-extrabold text-slate-900">{{ $label }}</p>
+                                                            <p class="mt-1 text-[11px] leading-4 text-slate-500">{{ $fundingTypeDescriptions[$type] ?? '' }}</p>
+                                                        </div>
+                                                    @endforeach
+                                                </div>
+                                                <form method="POST" action="{{ route('scientific-research.funding.store') }}" class="mt-3 grid gap-2 md:grid-cols-5">
+                                                    @csrf
+                                                    <input type="hidden" name="registration_id" value="{{ $project->registration_id }}">
+                                                    <label class="text-xs font-semibold text-slate-600">Loại cập nhật
+                                                        <select name="type" class="mt-1 w-full rounded-lg border px-3 py-2 text-sm">
+                                                            @foreach($fundingTypeLabels as $type => $label)
+                                                                <option value="{{ $type }}" @selected($type === 'SPENT')>{{ $label }}</option>
+                                                            @endforeach
+                                                        </select>
+                                                    </label>
+                                                    <label class="text-xs font-semibold text-slate-600 md:col-span-2">Tên khoản/nội dung<input name="item_name" required placeholder="VD: Mua vật tư, kinh phí được cấp, quyết toán..." class="mt-1 w-full rounded-lg border px-3 py-2 text-sm"></label>
+                                                    <label class="text-xs font-semibold text-slate-600">Số tiền<input name="amount" type="number" min="0" step="1000" required class="mt-1 w-full rounded-lg border px-3 py-2 text-sm"></label>
+                                                    <label class="text-xs font-semibold text-slate-600">Ngày ghi nhận<input name="spent_on" type="date" value="{{ now()->format('Y-m-d') }}" class="mt-1 w-full rounded-lg border px-3 py-2 text-sm"></label>
+                                                    <label class="text-xs font-semibold text-slate-600">Trạng thái
+                                                        <select name="status" class="mt-1 w-full rounded-lg border px-3 py-2 text-sm"><option value="PENDING">Chờ xử lý</option><option value="APPROVED">Đã duyệt</option><option value="PAID">Đã thanh toán</option><option value="SETTLED">Đã chốt kinh phí</option></select>
+                                                    </label>
+                                                    <label class="text-xs font-semibold text-slate-600 md:col-span-4">Ghi chú<input name="note" placeholder="Chứng từ, quyết định phân bổ, nội dung chi..." class="mt-1 w-full rounded-lg border px-3 py-2 text-sm"></label>
+                                                    <button class="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-bold text-white md:col-span-5">Lưu cập nhật kinh phí</button>
+                                                </form>
+                                            </div>
+                                        @endif                                        <div class="overflow-x-auto rounded-lg border border-blue-100 bg-white">
+                                            <table class="w-full min-w-[900px] text-sm">
+                                                <thead class="bg-slate-50 text-left text-xs uppercase text-slate-500">
+                                                    <tr><th class="px-3 py-2">Ngày</th><th class="px-3 py-2">Khoản</th><th class="px-3 py-2">Loại</th><th class="px-3 py-2 text-right">Số tiền</th><th class="px-3 py-2">Ghi chú</th><th class="px-3 py-2">Thao tác</th></tr>
+                                                </thead>
+                                                <tbody class="divide-y divide-slate-100">
+                                                    @forelse($projectFundings as $projectFunding)
+                                                        <tr>
+                                                            <td class="whitespace-nowrap px-3 py-2">{{ $projectFunding->spent_on?->format('d/m/Y') ?: $projectFunding->created_at?->format('d/m/Y') }}</td>
+                                                            <td class="px-3 py-2 font-semibold text-slate-900">{{ $projectFunding->item_name }}</td>
+                                                            <td class="px-3 py-2">{{ $fundingTypeLabels[$projectFunding->type] ?? $projectFunding->type }}</td>
+                                                            <td class="px-3 py-2 text-right font-extrabold text-slate-900">{{ number_format((float) $projectFunding->amount, 0, ',', '.') }}</td>
+                                                            <td class="px-3 py-2 text-slate-600">{{ $projectFunding->note ?: '—' }}</td>
+                                                            <td class="px-3 py-2">
+                                                                <div class="flex flex-wrap gap-2">
+                                                                    <button type="button" class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-bold text-amber-700" onclick="document.getElementById('sr-funding-edit-{{ $projectFunding->id }}').classList.toggle('hidden')">Sửa</button>
+                                                                    <form method="POST" action="{{ route('scientific-research.funding.destroy', $projectFunding) }}" onsubmit="return confirm('Xóa khoản kinh phí này?')">@csrf @method('DELETE')<button class="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-700">Xóa</button></form>
+                                                                </div>
+                                                            </td>
+                                                        </tr>
+                                                        <tr id="sr-funding-edit-{{ $projectFunding->id }}" class="hidden bg-amber-50/40">
+                                                            <td colspan="6" class="px-3 py-3">
+                                                                <form method="POST" action="{{ route('scientific-research.funding.update', $projectFunding) }}" class="grid gap-2 md:grid-cols-4">
+                                                                    @csrf @method('PATCH')
+                                                                    <input type="hidden" name="registration_id" value="{{ $projectFunding->registration_id }}">
+                                                                    <label class="text-xs font-semibold text-slate-600">Loại khoản<select name="type" class="mt-1 w-full rounded-lg border px-3 py-2 text-sm"><option value="ESTIMATE" @selected($projectFunding->type === 'ESTIMATE')>Dự kiến</option><option value="ALLOCATED" @selected($projectFunding->type === 'ALLOCATED')>Được cấp</option><option value="SPENT" @selected($projectFunding->type === 'SPENT')>Đã chi/phát sinh</option><option value="PAYMENT" @selected($projectFunding->type === 'PAYMENT')>Đã thanh toán</option><option value="SETTLEMENT" @selected($projectFunding->type === 'SETTLEMENT')>Chốt kinh phí</option></select></label>
+                                                                    <label class="text-xs font-semibold text-slate-600">Trạng thái<select name="status" class="mt-1 w-full rounded-lg border px-3 py-2 text-sm"><option value="PENDING" @selected($projectFunding->status === 'PENDING')>Chờ xử lý</option><option value="APPROVED" @selected($projectFunding->status === 'APPROVED')>Đã duyệt</option><option value="PAID" @selected($projectFunding->status === 'PAID')>Đã thanh toán</option><option value="SETTLED" @selected($projectFunding->status === 'SETTLED')>Đã chốt kinh phí</option></select></label>
+                                                                    <label class="text-xs font-semibold text-slate-600 md:col-span-2">Tên khoản<input name="item_name" value="{{ $projectFunding->item_name }}" required class="mt-1 w-full rounded-lg border px-3 py-2 text-sm"></label>
+                                                                    <label class="text-xs font-semibold text-slate-600">Số tiền<input name="amount" type="number" min="0" step="1000" value="{{ (float) $projectFunding->amount }}" required class="mt-1 w-full rounded-lg border px-3 py-2 text-sm"></label>
+                                                                    <label class="text-xs font-semibold text-slate-600">Ngày ghi nhận<input name="spent_on" type="date" value="{{ $projectFunding->spent_on?->format('Y-m-d') }}" class="mt-1 w-full rounded-lg border px-3 py-2 text-sm"></label>
+                                                                    <label class="text-xs font-semibold text-slate-600 md:col-span-2">Ghi chú<input name="note" value="{{ $projectFunding->note }}" class="mt-1 w-full rounded-lg border px-3 py-2 text-sm"></label>
+                                                                    <button class="rounded-lg bg-slate-900 px-3 py-2 text-sm font-bold text-white md:col-span-4">Lưu thay đổi</button>
+                                                                </form>
+                                                            </td>
+                                                        </tr>
+                                                    @empty
+                                                        <tr><td colspan="6" class="px-3 py-6 text-center text-slate-500">Chưa có khoản đã chi/phát sinh hoặc đã thanh toán của đề tài.</td></tr>
+                                                    @endforelse
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                        @empty
+                            <tr><td colspan="5" class="px-3 py-8 text-center text-slate-500">Chưa có đề tài nào có kinh phí trong phạm vi đang xem.</td></tr>
+                        @endforelse
+                    </tbody>
+                </table>
+            </div>
+        </div>        <script>
             document.addEventListener('DOMContentLoaded', () => {
                 const select = document.getElementById('sr-funding-registration');
                 const box = document.getElementById('sr-funding-registration-info');
+                const typeSelect = document.getElementById('sr-funding-type');
+                const statusSelect = document.getElementById('sr-funding-status');
+                const itemName = document.getElementById('sr-funding-item-name');
+                const noteInput = document.getElementById('sr-funding-note');
                 if (!select || !box) return;
                 const registrations = @json($fundingRegistrationInfo);
+                const typeHints = @json(collect($fundingWorkflow)->map(fn ($step) => ['status' => $step['status'], 'name' => $step['name'], 'note' => $step['note']]));
                 const escapeHtml = value => String(value || '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char]));
+                const applyTypeHint = () => {
+                    const step = typeHints[typeSelect?.value] || typeHints.ESTIMATE;
+                    if (!step) return;
+                    if (statusSelect && step.status) statusSelect.value = step.status;
+                    if (itemName && !itemName.value) itemName.placeholder = step.name || '';
+                    if (noteInput) noteInput.placeholder = step.note || '';
+                };
                 const render = () => {
                     const item = registrations[String(select.value)];
                     if (!item) {
@@ -1134,7 +1279,9 @@
                         </div>`;
                 };
                 select.addEventListener('change', render);
+                typeSelect?.addEventListener('change', applyTypeHint);
                 render();
+                applyTypeHint();
             });
         </script>
     @elseif($section === 'products')
@@ -1497,9 +1644,9 @@
             <p class="mt-1 text-sm text-slate-500">Tổng hợp nhanh theo trạng thái, danh mục, kinh phí và sản phẩm. Các bảng bên dưới có thể cuộn khi dữ liệu nhiều.</p>
         </div>
         <div class="flex flex-wrap gap-2">
-            <a href="{{ route('scientific-research.reports.csv') }}" class="sr-action bg-emerald-600 px-4 py-2 text-sm text-white"><i class="bi bi-filetype-csv"></i> CSV</a>
-            <a href="{{ route('scientific-research.reports.excel') }}" class="sr-action bg-blue-600 px-4 py-2 text-sm text-white"><i class="bi bi-file-earmark-excel"></i> Excel</a>
-            <a href="{{ route('scientific-research.reports.word') }}" class="sr-action bg-slate-900 px-4 py-2 text-sm text-white"><i class="bi bi-file-earmark-word"></i> Word</a>
+            <a href="{{ route('scientific-research.reports.csv') }}" class="sr-action bg-emerald-600 px-4 py-2 text-sm text-white"><i class="bi bi-filetype-csv"></i> Tải dữ liệu dạng bảng</a>
+            <a href="{{ route('scientific-research.reports.excel') }}" class="sr-action bg-blue-600 px-4 py-2 text-sm text-white"><i class="bi bi-file-earmark-excel"></i> Tải bảng tính</a>
+            <a href="{{ route('scientific-research.reports.word') }}" class="sr-action bg-slate-900 px-4 py-2 text-sm text-white"><i class="bi bi-file-earmark-word"></i> Tải văn bản</a>
         </div>
     </div>
     <div class="mb-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -1553,6 +1700,21 @@
                 'percent' => $extensionDisplayTotal > 0 ? round($row['count'] * 100 / $extensionPercentTotal) : 0,
             ];
         });
+        $reportFundingTypeLabels = [
+            'ESTIMATE' => 'Dự kiến',
+            'ALLOCATED' => 'Được cấp',
+            'SPENT' => 'Chi phí phát sinh',
+            'PAYMENT' => 'Đã thanh toán',
+            'SETTLEMENT' => 'Chốt kinh phí',
+        ];
+        $reportProductTypeLabels = [
+            'ARTICLE' => 'Bài báo',
+            'TEXTBOOK' => 'Giáo trình/tài liệu',
+            'INITIATIVE' => 'Sáng kiến',
+            'MODEL' => 'Mô hình/sản phẩm',
+            'WORK' => 'Công trình',
+            'OTHER' => 'Khác',
+        ];
     @endphp
     <div class="rounded-xl border border-slate-200 bg-white shadow-sm">
         <div class="border-b border-slate-100 px-5 py-4">
@@ -1657,7 +1819,7 @@
                         @forelse($fundingTypeSummary as $row)
                             <tr>
                                 <td class="px-5 py-4">
-                                    <p class="font-bold text-slate-900">{{ $row->type }}</p>
+                                    <p class="font-bold text-slate-900">{{ $reportFundingTypeLabels[$row->type] ?? 'Loại kinh phí khác' }}</p>
                                     <p class="mt-0.5 text-xs text-slate-500">{{ number_format((int) $row->total) }} khoản</p>
                                 </td>
                                 <td class="px-5 py-4 text-right font-extrabold text-emerald-700">{{ number_format((float) $row->total_amount, 0, ',', '.') }}</td>
@@ -1678,7 +1840,7 @@
                     <tbody class="divide-y divide-slate-100">
                         @forelse($productTypeSummary as $type => $total)
                             <tr>
-                                <td class="px-5 py-4 font-bold text-slate-900">{{ $type }}</td>
+                                <td class="px-5 py-4 font-bold text-slate-900">{{ $reportProductTypeLabels[$type] ?? 'Loại sản phẩm khác' }}</td>
                                 <td class="px-5 py-4 text-right font-extrabold text-violet-700">{{ number_format((int) $total) }}</td>
                             </tr>
                         @empty

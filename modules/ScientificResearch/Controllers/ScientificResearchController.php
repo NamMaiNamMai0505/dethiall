@@ -251,6 +251,93 @@ class ScientificResearchController extends Controller
             ->groupBy('type')
             ->orderBy('type')
             ->pluck('total', 'type');
+        $visibleFundingQuery = ScientificResearchFunding::query()
+            ->when(! PermissionCheck::can($request->user(), 'scientific-research.funding.edit'), fn (Builder $query) => $query->whereHas('registration', fn (Builder $registrationQuery) => $this->scopeRegistrationParticipation($registrationQuery, $request)));
+        $dataFundingYears = (clone $visibleFundingQuery)
+            ->get(['spent_on', 'created_at'])
+            ->map(fn ($item) => ($item->spent_on ?: $item->created_at)?->format('Y'))
+            ->filter();
+        $currentYear = (int) now()->format('Y');
+        $fundingYearOptions = $dataFundingYears
+            ->merge(range($currentYear + 1, $currentYear - 5))
+            ->map(fn ($year) => (string) $year)
+            ->unique()
+            ->sortDesc()
+            ->values();
+        $selectedFundingYear = preg_match('/^\d{4}$/', (string) $request->query('funding_year'))
+            ? (string) $request->query('funding_year')
+            : '';
+        $visibleFundingQuery->when($selectedFundingYear !== '', function (Builder $query) use ($selectedFundingYear): void {
+            $query->where(function (Builder $dateQuery) use ($selectedFundingYear): void {
+                $dateQuery
+                    ->whereYear('spent_on', $selectedFundingYear)
+                    ->orWhere(function (Builder $fallbackQuery) use ($selectedFundingYear): void {
+                        $fallbackQuery
+                            ->whereNull('spent_on')
+                            ->whereYear('created_at', $selectedFundingYear);
+                    });
+            });
+        });
+        $fundingSummaryItems = (clone $visibleFundingQuery)->with('registration.user.unit')->get();
+        $fundingTotalCount = $fundingSummaryItems->count();
+        $fundingDetailsByRegistration = $fundingSummaryItems
+            ->groupBy('registration_id')
+            ->map(fn ($items) => $items
+                ->sortByDesc(fn ($item) => ($item->spent_on ?: $item->created_at)?->timestamp ?? 0)
+                ->values());
+        $fundingProjects = $fundingDetailsByRegistration
+            ->map(function ($items, $registrationId): object {
+                $registration = $items->first()?->registration;
+                $typeTotals = $items->groupBy('type')->map(fn ($rows) => (float) $rows->sum('amount'));
+
+                $estimateAmount = (float) ($typeTotals['ESTIMATE'] ?? 0);
+                $allocatedAmount = (float) ($typeTotals['ALLOCATED'] ?? 0);
+                $spentAmount = (float) ($typeTotals['SPENT'] ?? 0);
+                $paymentAmount = (float) ($typeTotals['PAYMENT'] ?? 0);
+                $settlementAmount = (float) ($typeTotals['SETTLEMENT'] ?? 0);
+                $settlementItems = $items->where('type', 'SETTLEMENT');
+                $paymentItems = $items->where('type', 'PAYMENT');
+                $spentItems = $items->where('type', 'SPENT');
+
+                if ($settlementAmount > 0) {
+                    $actualAmount = $settlementAmount;
+                    $actualSource = 'Chốt kinh phí';
+                    $actualOn = $settlementItems->map(fn ($item) => $item->spent_on ?: $item->created_at)->filter()->max();
+                } elseif ($paymentAmount > 0) {
+                    $actualAmount = $paymentAmount;
+                    $actualSource = 'Đã thanh toán';
+                    $actualOn = $paymentItems->map(fn ($item) => $item->spent_on ?: $item->created_at)->filter()->max();
+                } else {
+                    $actualAmount = $spentAmount;
+                    $actualSource = 'Đã chi/phát sinh';
+                    $actualOn = $spentItems->map(fn ($item) => $item->spent_on ?: $item->created_at)->filter()->max();
+                }
+
+                $usagePercent = $allocatedAmount > 0 ? round($actualAmount * 100 / $allocatedAmount, 1) : null;
+
+                return (object) [
+                    'registration_id' => $registrationId,
+                    'registration' => $registration,
+                    'estimate_amount' => $estimateAmount,
+                    'allocated_amount' => $allocatedAmount,
+                    'spent_amount' => $spentAmount,
+                    'payment_amount' => $paymentAmount,
+                    'settlement_amount' => $settlementAmount,
+                    'actual_amount' => $actualAmount,
+                    'actual_source' => $actualSource,
+                    'actual_on' => $actualOn,
+                    'usage_percent' => $usagePercent,
+                    'is_over_budget' => $allocatedAmount > 0 && $actualAmount > $allocatedAmount,
+                    'total_count' => $items->count(),
+                    'type_totals' => $typeTotals,
+                    'latest_on' => $items->map(fn ($item) => $item->spent_on ?: $item->created_at)->filter()->max(),
+                ];
+            })
+            ->sortByDesc('actual_on')
+            ->values();
+        $fundingSettlementTotal = (float) $fundingSummaryItems
+            ->filter(fn ($item) => $item->type === 'SETTLEMENT' && $item->registration !== null)
+            ->sum('amount');
 
         return view('scientific-research::index', $this->dashboardData($request, $section) + [
             'announcements' => $announcements,
@@ -279,12 +366,13 @@ class ScientificResearchController extends Controller
                 ->latest()
                 ->paginate(12, ['*'], 'councils_page')
                 ->withQueryString(),
-            'fundings' => ScientificResearchFunding::query()
-                ->with(['registration.user.unit', 'registration.researchCategory', 'registration.members.user.unit'])
-                ->when(! PermissionCheck::can($request->user(), 'scientific-research.funding.edit'), fn (Builder $query) => $query->whereHas('registration', fn (Builder $registrationQuery) => $this->scopeRegistrationParticipation($registrationQuery, $request)))
-                ->latest()
-                ->paginate(12, ['*'], 'funding_page')
-                ->withQueryString(),
+
+            'fundingYearOptions' => $fundingYearOptions,
+            'selectedFundingYear' => $selectedFundingYear,
+            'fundingTotalCount' => $fundingTotalCount,
+            'fundingSettlementTotal' => $fundingSettlementTotal,
+            'fundingDetailsByRegistration' => $fundingDetailsByRegistration,
+            'fundingProjects' => $fundingProjects,
             'products' => ScientificResearchProduct::query()
                 ->with(['registration.user.unit', 'registration.researchCategory', 'registration.members.user.unit'])
                 ->when(! $this->canManageScientificRecords($request, 'scientific-research.products'), fn (Builder $query) => $query->whereHas('registration', fn (Builder $registrationQuery) => $this->scopeRegistrationParticipation($registrationQuery, $request)))
@@ -1086,6 +1174,24 @@ class ScientificResearchController extends Controller
             'note' => ['nullable', 'string'],
             'status' => ['required', 'in:PENDING,APPROVED,PAID,SETTLED'],
         ]);
+        $duplicate = ScientificResearchFunding::query()
+            ->where('registration_id', $data['registration_id'])
+            ->where('item_name', $data['item_name'])
+            ->where('type', $data['type'])
+            ->where('amount', (float) $data['amount'])
+            ->when(
+                filled($data['spent_on'] ?? null),
+                fn ($query) => $query->whereDate('spent_on', $data['spent_on']),
+                fn ($query) => $query->whereNull('spent_on')
+            )
+            ->first();
+
+        if ($duplicate) {
+            return back()
+                ->withInput()
+                ->with('error', 'Khoản kinh phí này đã tồn tại trong đề tài, không tạo thêm dòng trùng. Hãy bấm Sửa nếu cần cập nhật.');
+        }
+
         $funding = ScientificResearchFunding::create($data + ['created_by' => $request->user()->id]);
         $this->audit('funding.created', $funding, $funding->item_name, $data);
 
