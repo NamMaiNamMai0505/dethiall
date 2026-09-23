@@ -27,7 +27,7 @@
     </style>
 </head>
 <body>
-<div class="toolbar"><button onclick="window.print()">In / Lưu PDF</button> <a href="{{ route('essay-exams.approval-documents.download', $document) }}">Tải văn bản</a></div>
+<div class="toolbar"><button onclick="window.print()">In trang xác nhận</button> <a href="{{ route('essay-exams.approval-documents.download', $document) }}">{{ $document->exam?->source_pdf_path ? 'Tải file PDF đề duyệt' : 'Tải văn bản duyệt' }}</a></div>
 @php($formatAnswer = static fn ($answer) => preg_replace('/\R\s*(\[[^\x5D\r\n]*(?:\x{0111}i\x{1EC3}m|diem)[^\x5D\r\n]*\])/iu', ' $1', trim((string) $answer)) ?: trim((string) $answer))
 <main>
     <div class="header">

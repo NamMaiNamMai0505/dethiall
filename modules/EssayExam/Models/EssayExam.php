@@ -8,7 +8,7 @@ use Modules\Subject\Models\Subject;
 class EssayExam extends Model
 {
     protected $table = 'essay_exams';
-    protected $fillable = ['code','title','subject_id','class_id','status','duration_minutes','note','return_note','created_by_user_id','created_by_username','created_by_display_name','approved_by_user_id','approved_at','approval_qr','locked','academic_year','semester','difficulty','exam_type'];
+    protected $fillable = ['code','title','subject_id','class_id','status','duration_minutes','note','return_note','created_by_user_id','created_by_username','created_by_display_name','approved_by_user_id','approved_at','approval_qr','source_document_path','source_pdf_path','source_original_name','locked','academic_year','semester','difficulty','exam_type'];
     protected $casts = ['approved_at' => 'datetime', 'locked' => 'boolean'];
 
     public function subject() { return $this->belongsTo(Subject::class); }

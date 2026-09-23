@@ -4,6 +4,7 @@ namespace Modules\EssayExam\Controllers;
 
 use App\Models\User;
 use App\Models\AcademicYear;
+use App\Models\DigitalSignature;
 use App\Support\SystemNotifier;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\JsonResponse;
@@ -12,6 +13,7 @@ use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\View\View;
+use Modules\ExportTemplates\Contracts\DocumentConverterInterface;
 use Modules\EssayExam\Models\EssayExam;
 use Modules\EssayExam\Models\EssayExamQuestion;
 use Modules\EssayExam\Models\EssayExamWorkflowLog;
@@ -114,18 +116,18 @@ class EssayExamController extends Controller
     public function savePrintedApprovalDocument(Request $request, EssayExam $essayExam): JsonResponse
     {
         $data = $request->validate([
-            'print_mode' => 'required|in:unsigned,image,direct',
-            'signature_method' => 'nullable|in:upload,draw',
+            'print_mode' => 'required|in:unsigned,digital,direct',
             'signature_data' => 'nullable|string|max:7000000',
         ]);
         $signature = null;
-        if ($data['print_mode'] !== 'unsigned') {
-            abort_unless($data['signature_method'] === ($data['print_mode'] === 'image' ? 'upload' : 'draw'), 422, 'Phương thức ký không khớp với nút in.');
-            $signature = $this->captureApprovalSignature($request);
-        }
         $user = $request->user();
+        if ($data['print_mode'] === 'digital') {
+            $signature = $this->approvalDigitalSignature($user);
+        } elseif ($data['print_mode'] === 'direct') {
+            $signature = $this->captureDirectApprovalSignature((string) ($data['signature_data'] ?? ''));
+        }
         $essayExam->load(['subject', 'class', 'questions']);
-        $finalApproval = $data['print_mode'] !== 'unsigned';
+        $finalApproval = in_array($data['print_mode'], ['digital', 'direct'], true);
         if ($finalApproval) {
             // In có chữ ký là thao tác duyệt cuối: duyệt toàn bộ câu/đề trong bộ.
             $essayExam->questions()->where('paper_status', '!=', 'APPROVED')->update(['paper_status' => 'APPROVED']);
@@ -160,8 +162,16 @@ class EssayExamController extends Controller
         ])->render();
         $path = 'essay-exam/approval-documents/'.$document->decision_code.'.html';
         Storage::disk('public')->put($path, $html);
-        $document->update(['document_path' => $path]);
-        return response()->json(['ok' => true, 'document_id' => $document->id]);
+        $printPath = $finalApproval && $signature
+            ? ($this->createSignedExamPdf($essayExam, $user, $signature) ?: $this->examApprovalPrintablePath($essayExam))
+            : $this->examApprovalPrintablePath($essayExam);
+        $document->update(['document_path' => $printPath ?: $path]);
+
+        return response()->json([
+            'ok' => true,
+            'document_id' => $document->id,
+            'print_url' => $document->document_path ? Storage::disk('public')->url($document->document_path) : null,
+        ]);
     }
 
     public function approvalDocumentTemplate()
@@ -183,10 +193,11 @@ class EssayExamController extends Controller
     public function approvalDocumentDownload(EssayExamApprovalDocument $document)
     {
         abort_unless($document->document_path && Storage::disk('public')->exists($document->document_path), 404, 'Chưa có file văn bản phê duyệt.');
+        $extension = strtolower(pathinfo($document->document_path, PATHINFO_EXTENSION));
         return response()->download(
             Storage::disk('public')->path($document->document_path),
-            $document->decision_code.'.html',
-            ['Content-Type' => 'text/html; charset=UTF-8'],
+            $document->decision_code.'.'.$extension,
+            ['Content-Type' => $extension === 'pdf' ? 'application/pdf' : 'text/html; charset=UTF-8'],
         );
     }
 
@@ -617,12 +628,25 @@ class EssayExamController extends Controller
         ])->values()->all();
         $defaultAcademicYear = AcademicYear::query()->where('is_current', true)->where('is_active', true)->first()
             ?: AcademicYear::query()->where('is_active', true)->orderByDesc('start_year')->orderByDesc('id')->first();
-        $curriculumOptions = LmsCourse::query()->with(['academicYear:id,code','subject:id,semester'])->whereNotNull('class_id')->whereNotNull('subject_id')->get(['id','class_id','subject_id','academic_year_id','term'])->map(fn ($course) => [
+        $availableClassIds = $classes->pluck('class_id')->filter()->unique()->values();
+        $availableSubjectIds = $subjects->pluck('id')->filter()->unique()->values();
+        $curriculumOptions = LmsCourse::query()
+            ->with(['academicYear:id,code','subject:id,semester,specialization_id'])
+            ->whereNotNull('class_id')
+            ->whereNotNull('subject_id')
+            ->when($availableClassIds->isNotEmpty(), fn ($q) => $q->whereIn('class_id', $availableClassIds->all()))
+            ->when($availableSubjectIds->isNotEmpty(), fn ($q) => $q->whereIn('subject_id', $availableSubjectIds->all()))
+            ->get(['id','class_id','subject_id','academic_year_id','term'])
+            ->map(fn ($course) => [
             'class_id' => (int) $course->class_id,
             'subject_id' => (int) $course->subject_id,
+            'specialization_id' => (int) ($course->subject?->specialization_id ?: 0),
             'academic_year' => $course->academicYear?->code ?: $defaultAcademicYear?->code,
             'semester' => $course->term ?: $course->subject?->semester,
-        ])->filter(fn ($item) => $item['academic_year'] && $item['semester'])->unique(fn ($item) => $item['class_id'].':'.$item['subject_id'])->values()->all();
+        ])
+            ->filter(fn ($item) => $item['academic_year'] && $item['semester'])
+            ->unique(fn ($item) => $item['class_id'].':'.$item['subject_id'].':'.$item['academic_year'].':'.$item['semester'])
+            ->values()->all();
         $academicYears = AcademicYear::query()->where('is_active', true)->orderByDesc('start_year')->orderByDesc('id')->get(['id','code','name']);
         if ($academicYears->isEmpty()) {
             $academicYears = AcademicYear::query()->orderByDesc('start_year')->orderByDesc('id')->get(['id','code','name']);
@@ -630,21 +654,29 @@ class EssayExamController extends Controller
         return view('essay-exam::create', compact('subjects','classes','specializations','lessons','lessonOptions','curriculumOptions','academicYears'));
     }
 
-    private function curriculumMetadata(int $classId, int $subjectId): ?array
+    private function curriculumMetadata(int $classId, int $subjectId, ?string $academicYear = null, ?string $semester = null): ?array
     {
-        $course = LmsCourse::query()->with(['academicYear:id,code','subject:id,semester'])
+        $courses = LmsCourse::query()->with(['academicYear:id,code','subject:id,semester'])
             ->where('class_id', $classId)->where('subject_id', $subjectId)
-            ->latest('id')->first();
+            ->latest('id')->get();
 
-        $academicYear = $course?->academicYear?->code
-            ?: AcademicYear::query()->where('is_current', true)->where('is_active', true)->value('code')
+        $defaultAcademicYear = AcademicYear::query()->where('is_current', true)->where('is_active', true)->value('code')
             ?: AcademicYear::query()->where('is_active', true)->orderByDesc('start_year')->orderByDesc('id')->value('code');
-        $semester = $course?->term ?: $course?->subject?->semester;
-        if (! $academicYear || ! $semester) {
+        $rows = $courses->map(fn ($course) => [
+            'academic_year' => $course?->academicYear?->code ?: $defaultAcademicYear,
+            'semester' => $course?->term ?: $course?->subject?->semester,
+        ])->filter(fn ($item) => $item['academic_year'] && $item['semester'])->values();
+
+        if ($academicYear || $semester) {
+            $rows = $rows->filter(fn ($item) => (! $academicYear || $item['academic_year'] === $academicYear)
+                && (! $semester || $item['semester'] === $semester))->values();
+        }
+
+        if ($rows->isEmpty()) {
             return null;
         }
 
-        return ['academic_year' => $academicYear, 'semester' => $semester];
+        return $rows->first();
     }
 
     public function import(Request $request): RedirectResponse
@@ -659,15 +691,10 @@ class EssayExamController extends Controller
         $request->validate(['import_class_id'=>'required|exists:classes,id']);
         $subject = Subject::findOrFail($data['import_subject_id']);
         $class = ClassModel::findOrFail($request->integer('import_class_id'));
-         $curriculum = $this->curriculumMetadata((int) $class->id, (int) $subject->id) ?: [
-             'academic_year' => $data['academic_year'],
-             'semester' => $data['semester'],
-         ];
-        abort_unless($curriculum, 422, 'Chưa có chương trình đào tạo cho môn/lớp đã chọn nên không xác định được năm học và học kỳ.');
-         if ($curriculum) {
-             $data['academic_year'] = $curriculum['academic_year'];
-             $data['semester'] = $curriculum['semester'];
-         }
+        $curriculum = $this->curriculumMetadata((int) $class->id, (int) $subject->id, $data['academic_year'], $data['semester']);
+        abort_unless($curriculum, 422, 'Lớp/môn đã chọn chưa được mở trong năm học và học kỳ này.');
+        $data['academic_year'] = $curriculum['academic_year'];
+        $data['semester'] = $curriculum['semester'];
         abort_unless((int) $subject->specialization_id === (int) $data['import_specialization_id'], 422, 'Môn học không thuộc ngành đã chọn.');
         abort_unless((int) $class->specialization_id === (int) $data['import_specialization_id'], 422, 'Lớp không thuộc ngành đã chọn.');
         if (! empty($data['import_lesson_id'])) {
@@ -711,6 +738,7 @@ class EssayExamController extends Controller
         if ($request->hasFile('import_files')) {
             return $this->importMultipleFiles($request, $data, $user);
         }
+        $importDocument = $request->hasFile('import_file') ? $this->storeImportDocumentAsPdf($request->file('import_file'), $data['import_code']) : [];
         $text = $request->hasFile('import_file') ? $this->readImportText($data['import_file']) : '';
         $rows = $this->parseImportRows($text);
         $questionTypes = collect($rows)->pluck('question_type')->filter()->unique();
@@ -721,14 +749,14 @@ class EssayExamController extends Controller
         $data['import_class_id'] = $request->integer('import_class_id');
         $paperGroups = collect($rows)->groupBy('paper');
         if ($paperGroups->count() > 1) {
-            $createdExams = DB::transaction(function () use ($paperGroups, $data, $user) {
+            $createdExams = DB::transaction(function () use ($paperGroups, $data, $user, $importDocument) {
                 $created = [];
                 foreach ($paperGroups as $paper => $questions) {
                     $baseCode = trim($data['import_code']).'-D'.(int) $paper;
                     $code = $baseCode;
                     $version = 2;
                     while (EssayExam::where('code', $code)->exists()) $code = $baseCode.'-B'.$version++;
-                    $exam = EssayExam::create(['code'=>$code,'title'=>($data['import_title'] ?: 'Đề thi tự luận').' số '.(int) $paper,'subject_id'=>$data['import_subject_id'],'duration_minutes'=>$data['duration_minutes'],'academic_year'=>$data['academic_year'],'semester'=>$data['semester'],'difficulty'=>$data['difficulty'],'exam_type'=>$data['exam_type'],'created_by_user_id'=>$user->id,'created_by_username'=>$user->email,'created_by_display_name'=>$user->name,'note'=>'Import đề số '.(int) $paper]);
+                    $exam = EssayExam::create(['code'=>$code,'title'=>($data['import_title'] ?: 'Đề thi tự luận').' số '.(int) $paper,'subject_id'=>$data['import_subject_id'],'class_id'=>$class->id,'duration_minutes'=>$data['duration_minutes'],'academic_year'=>$data['academic_year'],'semester'=>$data['semester'],'difficulty'=>$data['difficulty'],'exam_type'=>$data['exam_type'],'created_by_user_id'=>$user->id,'created_by_username'=>$user->email,'created_by_display_name'=>$user->name,'note'=>'Import đề số '.(int) $paper] + $importDocument);
                     $exam->update(['class_id' => $data['import_class_id']]);
                     foreach ($questions as $i => $q) $exam->questions()->create(['lms_lesson_id'=>$data['import_lesson_id'] ?? null,'paper_number'=>1,'question_number'=>$i+1,'question_type'=>$q['question_type'] ?? 'essay','content'=>$q['content'],'options'=>$q['options'] ?? null,'answer'=>$q['answer'] ?? '','points'=>$q['points'] ?? 1]);
                     $this->log($exam,'IMPORT',null,'DRAFT',$user);
@@ -739,13 +767,13 @@ class EssayExamController extends Controller
             return redirect()->route('essay-exams.show', $createdExams[0])->with('success', 'Đã tách và import '.count($createdExams).' đề riêng từ file Word.');
         }
         // Một lần import = một bộ đề; mỗi đề số được phân biệt bằng paper_number.
-        $created = DB::transaction(function () use ($rows, $data, $user) {
+        $created = DB::transaction(function () use ($rows, $data, $user, $importDocument) {
             $baseCode = trim($data['import_code']);
             $code = $baseCode;
             $version = 2;
             while (EssayExam::where('code', $code)->exists()) $code = $baseCode.'-B'.$version++;
             $data['import_code'] = $code;
-            $exam = EssayExam::create(['code'=>$data['import_code'],'title'=>$data['import_title'] ?: 'Đề thi tự luận import','subject_id'=>$data['import_subject_id'],'duration_minutes'=>$data['duration_minutes'],'academic_year'=>$data['academic_year'],'semester'=>$data['semester'],'difficulty'=>$data['difficulty'],'exam_type'=>$data['exam_type'],'created_by_user_id'=>$user->id,'created_by_username'=>$user->email,'created_by_display_name'=>$user->name,'note'=>'Import bộ đề']);
+            $exam = EssayExam::create(['code'=>$data['import_code'],'title'=>$data['import_title'] ?: 'Đề thi tự luận import','subject_id'=>$data['import_subject_id'],'class_id'=>$class->id,'duration_minutes'=>$data['duration_minutes'],'academic_year'=>$data['academic_year'],'semester'=>$data['semester'],'difficulty'=>$data['difficulty'],'exam_type'=>$data['exam_type'],'created_by_user_id'=>$user->id,'created_by_username'=>$user->email,'created_by_display_name'=>$user->name,'note'=>'Import bộ đề'] + $importDocument);
             $exam->update(['class_id' => $data['import_class_id']]);
             foreach (collect($rows)->groupBy('paper') as $paper => $questions) {
                 foreach ($questions as $i => $q) $exam->questions()->create(['lms_lesson_id'=>$data['import_lesson_id'] ?? null,'paper_number'=>(int)$paper,'question_number'=>$i+1,'question_type'=>$q['question_type'] ?? 'essay','content'=>$q['content'],'options'=>$q['options'] ?? null,'answer'=>$q['answer'],'points'=>$q['points']]);
@@ -776,10 +804,12 @@ class EssayExamController extends Controller
         abort_unless($data['exam_type'] === 'Tự luận' || ! empty($data['import_lesson_id']), 422, 'Import dạng trắc nghiệm/tích hợp bắt buộc phải chọn bài học.');
         $data['import_specialization_id'] = $request->integer('import_specialization_id');
         abort_unless(preg_match('/^semester_[1-7]$/', (string) $data['semester']) === 1, 422, 'Học kỳ phải thuộc chương trình đào tạo từ Học kỳ 1 đến Học kỳ 7.');
-        $curriculum = $this->curriculumMetadata((int) $data['import_class_id'], (int) $data['import_subject_id']);
-        abort_unless($curriculum, 422, 'Chưa có chương trình đào tạo cho môn/lớp đã chọn nên không xác định được năm học và học kỳ.');
+        $curriculum = $this->curriculumMetadata((int) $data['import_class_id'], (int) $data['import_subject_id'], $data['academic_year'], $data['semester']);
+        abort_unless($curriculum, 422, 'Lớp/môn đã chọn chưa được mở trong năm học và học kỳ này.');
         $data['academic_year'] = $curriculum['academic_year'];
         $data['semester'] = $curriculum['semester'];
+        $importDocument = $this->storeImportDocumentAsPdf($data['import_file'], $data['import_code']);
+        $data = array_merge($data, $importDocument);
         $rows = $this->parseImportRows($this->readImportText($data['import_file']));
         abort_unless($rows, 422, 'Không nhận diện được câu hỏi trong file.');
         $duplicateCode = EssayExam::where('code',$data['import_code'])->exists();
@@ -839,7 +869,7 @@ class EssayExamController extends Controller
 
     public function confirmImport(Request $request): RedirectResponse
     {
-        $data = $request->validate(['rows_json'=>'required|string','import_code'=>'required|string|max:80','import_title'=>'nullable|string|max:255','import_subject_id'=>'required|exists:subjects,id','import_lesson_id'=>'nullable|integer|exists:lms_lessons,id','import_class_id'=>'required|exists:classes,id','duration_minutes'=>'required|integer|min:1|max:600','academic_year'=>'required|string|max:20','semester'=>'required|string|max:30','difficulty'=>'required|in:Dễ,Vừa,Khó','exam_type'=>'required|in:Tự luận,Tích hợp']);
+        $data = $request->validate(['rows_json'=>'required|string','import_code'=>'required|string|max:80','import_title'=>'nullable|string|max:255','import_subject_id'=>'required|exists:subjects,id','import_lesson_id'=>'nullable|integer|exists:lms_lessons,id','import_class_id'=>'required|exists:classes,id','duration_minutes'=>'required|integer|min:1|max:600','academic_year'=>'required|string|max:20','semester'=>'required|string|max:30','difficulty'=>'required|in:Dễ,Vừa,Khó','exam_type'=>'required|in:Tự luận,Tích hợp','source_document_path'=>'nullable|string|max:255','source_pdf_path'=>'nullable|string|max:255','source_original_name'=>'nullable|string|max:255']);
         $rows = json_decode($data['rows_json'], true);
         $data['import_specialization_id'] = $request->validate(['import_specialization_id' => 'required|exists:specializations,id'])['import_specialization_id'];
         abort_unless(preg_match('/^semester_[1-7]$/', (string) $data['semester']) === 1, 422, 'Học kỳ phải thuộc chương trình đào tạo từ Học kỳ 1 đến Học kỳ 7.');
@@ -847,6 +877,10 @@ class EssayExamController extends Controller
         $class = ClassModel::findOrFail($data['import_class_id']);
         abort_unless((int) $subject->specialization_id === (int) $data['import_specialization_id'], 422, 'Môn học không thuộc ngành đã chọn.');
         abort_unless((int) $class->specialization_id === (int) $data['import_specialization_id'], 422, 'Lớp không thuộc ngành đã chọn.');
+        $curriculum = $this->curriculumMetadata((int) $data['import_class_id'], (int) $data['import_subject_id'], $data['academic_year'], $data['semester']);
+        abort_unless($curriculum, 422, 'Lớp/môn đã chọn chưa được mở trong năm học và học kỳ này.');
+        $data['academic_year'] = $curriculum['academic_year'];
+        $data['semester'] = $curriculum['semester'];
         abort_unless(is_array($rows) && count($rows), 422, 'Dữ liệu xem trước không hợp lệ.');
         abort_unless($data['exam_type'] === 'Tự luận' || ! empty($data['import_lesson_id']), 422, 'Import dạng trắc nghiệm/tích hợp bắt buộc phải chọn bài học.');
         $user = $request->user();
@@ -860,7 +894,7 @@ class EssayExamController extends Controller
         $created = DB::transaction(function () use ($rows, $data, $user) {
             $baseCode = trim($data['import_code']); $code = $baseCode; $version = 2;
             while (EssayExam::where('code',$code)->exists()) $code = $baseCode.'-B'.$version++;
-            $exam = EssayExam::create(['code'=>$code,'title'=>$data['import_title'] ?: 'Đề thi tự luận import','subject_id'=>$data['import_subject_id'],'class_id'=>$data['import_class_id'],'duration_minutes'=>$data['duration_minutes'],'academic_year'=>$data['academic_year'],'semester'=>$data['semester'],'difficulty'=>$data['difficulty'],'exam_type'=>$data['exam_type'],'created_by_user_id'=>$user->id,'created_by_username'=>$user->email,'created_by_display_name'=>$user->name,'note'=>'Import bộ đề']);
+            $exam = EssayExam::create(['code'=>$code,'title'=>$data['import_title'] ?: 'Đề thi tự luận import','subject_id'=>$data['import_subject_id'],'class_id'=>$data['import_class_id'],'duration_minutes'=>$data['duration_minutes'],'academic_year'=>$data['academic_year'],'semester'=>$data['semester'],'difficulty'=>$data['difficulty'],'exam_type'=>$data['exam_type'],'created_by_user_id'=>$user->id,'created_by_username'=>$user->email,'created_by_display_name'=>$user->name,'note'=>'Import bộ đề','source_document_path'=>$data['source_document_path'] ?? null,'source_pdf_path'=>$data['source_pdf_path'] ?? null,'source_original_name'=>$data['source_original_name'] ?? null]);
              foreach (collect($rows)->groupBy('paper') as $paper => $questions) foreach ($questions as $i => $q) $exam->questions()->create(['lms_lesson_id'=>$data['import_lesson_id'] ?? null,'paper_number'=>(int)$paper,'question_number'=>$i+1,'question_type'=>$q['question_type'] ?? 'essay','content'=>$q['content'],'options'=>$q['options'] ?? null,'answer'=>$q['answer'] ?? '','points'=>$q['points'] ?? 1]);
              if (in_array($data['exam_type'], ['Trắc nghiệm','Tích hợp'], true)) $this->syncLmsMultipleChoice($rows, $data, $user);
             $this->log($exam,'IMPORT',null,'DRAFT',$user); return $exam;
@@ -898,6 +932,11 @@ class EssayExamController extends Controller
         $data = $request->validate(['code'=>'required|string|max:80|unique:essay_exams,code','title'=>'required|string|max:255','subject_id'=>'required|exists:subjects,id','class_id'=>'required|exists:classes,id','duration_minutes'=>'required|integer|min:1|max:600','academic_year'=>'required|string|max:20','semester'=>'required|string|max:30','difficulty'=>'required|in:Dễ,Vừa,Khó','exam_type'=>'required|in:Tự luận,Tích hợp','note'=>'nullable|string','questions'=>'required|array|min:1','questions.*.content'=>'required|string','questions.*.answer'=>'nullable|string','questions.*.points'=>'required|numeric|min:0']);
         $user = $request->user();
         $class = ClassModel::findOrFail($data['class_id']);
+        abort_unless(preg_match('/^semester_[1-7]$/', (string) $data['semester']) === 1, 422, 'Học kỳ phải thuộc chương trình đào tạo từ Học kỳ 1 đến Học kỳ 7.');
+        $curriculum = $this->curriculumMetadata((int) $class->id, (int) $data['subject_id'], $data['academic_year'], $data['semester']);
+        abort_unless($curriculum, 422, 'Lớp/môn đã chọn chưa được mở trong năm học và học kỳ này.');
+        $data['academic_year'] = $curriculum['academic_year'];
+        $data['semester'] = $curriculum['semester'];
         $instructorId = $user?->instructor_id ?: Instructor::query()->where(function ($q) use ($user) {
             $q->where('email', $user?->email)->orWhere('name', $user?->name);
         })->value('id');
@@ -950,7 +989,9 @@ class EssayExamController extends Controller
             ->doesntExist();
         $signature = null;
         if ($stage === 'PENDING_BGH' && $willComplete) {
-            $signature = $this->captureApprovalSignature($request);
+            $signature = $request->filled('signature_data')
+                ? $this->captureDirectApprovalSignature((string) $request->input('signature_data'))
+                : $this->approvalDigitalSignature($user);
         }
         $essayExam->questions()->where('paper_status',$stage)->whereIn('paper_number', $paperNumbers)->update(['paper_status'=>$next]);
         $allApproved = $essayExam->questions()->select('paper_number')->distinct()->where('paper_status','!=','APPROVED')->doesntExist();
@@ -971,20 +1012,48 @@ class EssayExamController extends Controller
         return back()->with('success', 'Đã ghi nhận duyệt đề số: '.implode(', ', $paperNumbers).($allApproved ? ' — bộ đề đã chuyển bước.' : ' — các đề còn lại vẫn chờ duyệt.'));
     }
 
-    private function captureApprovalSignature(Request $request): array
+    private function approvalDigitalSignature(?User $user): array
     {
-        $data = $request->validate([
-            'signature_method' => 'required|in:upload,draw',
-            'signature_data' => 'required|string|max:7000000',
-        ]);
-        if (! preg_match('/^data:image\/png;base64,(.+)$/s', (string) $data['signature_data'], $match)) {
-            abort(422, 'Chữ ký phải là ảnh PNG nền trong suốt.');
+        abort_unless($user, 403);
+        $signature = DigitalSignature::query()
+            ->active()
+            ->forUser((int) $user->id)
+            ->orderByDesc('is_default')
+            ->orderBy('sort_order')
+            ->orderByDesc('id')
+            ->first();
+
+        abort_unless($signature && $signature->imageUrl(), 422, 'Tài khoản chưa có chữ ký số. Vui lòng cập nhật chữ ký số trên dashboard trước khi duyệt/in bản ký.');
+
+        return [
+            'method' => 'digital',
+            'path' => $signature->image_path,
+            'display_name' => $signature->display_name,
+            'role_line1' => $signature->role_line1,
+            'role_line2' => $signature->role_line2,
+        ];
+    }
+
+    private function captureDirectApprovalSignature(string $signatureData): array
+    {
+        if (! preg_match('/^data:image\/png;base64,(.+)$/s', $signatureData, $match)) {
+            abort(422, 'Chữ ký trực tiếp phải là ảnh PNG hợp lệ.');
         }
         $binary = base64_decode($match[1], true);
-        abort_unless($binary !== false && strlen($binary) > 100, 422, 'Ảnh chữ ký không hợp lệ.');
-        $path = 'essay-exam/signatures/'.now()->format('Y/m').'/signature-'.now()->format('YmdHis').'-'.bin2hex(random_bytes(5)).'.png';
+        abort_unless($binary !== false && strlen($binary) > 100, 422, 'Chữ ký trực tiếp chưa hợp lệ.');
+
+        $path = 'essay-exam/signatures/'.now()->format('Y/m').'/direct-signature-'.now()->format('YmdHis').'-'.bin2hex(random_bytes(5)).'.png';
         Storage::disk('public')->put($path, $binary);
-        return ['method' => $data['signature_method'], 'path' => $path];
+
+        $user = auth()->user();
+
+        return [
+            'method' => 'direct',
+            'path' => $path,
+            'display_name' => $this->approvalSignerName($user),
+            'role_line1' => 'HIỆU TRƯỞNG',
+            'role_line2' => $this->approvalSignerRank($user),
+        ];
     }
 
     private function createApprovalDocument(EssayExam $exam, User $user, array $signature): EssayExamApprovalDocument
@@ -1015,7 +1084,8 @@ class EssayExamController extends Controller
         ])->render();
         $path = 'essay-exam/approval-documents/'.$document->decision_code.'.html';
         Storage::disk('public')->put($path, $html);
-        $document->update(['document_path' => $path]);
+        $printPath = $this->createSignedExamPdf($exam, $user, $signature) ?: $this->examApprovalPrintablePath($exam);
+        $document->update(['document_path' => $printPath ?: $path]);
 
         $recipientIds = User::whereHas('roles', fn ($query) => $query->whereIn('name', ['exam-manager', 'exam-office', 'testing-office']))->pluck('id');
         if ($recipientIds->isNotEmpty()) {
@@ -1036,8 +1106,118 @@ class EssayExamController extends Controller
 
     private function signatureDataUrl(?string $path): ?string
     {
-        if (! $path || ! Storage::disk('public')->exists($path)) return null;
-        return 'data:image/png;base64,'.base64_encode(Storage::disk('public')->get($path));
+        if (! $path) return null;
+        if (Storage::disk('public')->exists($path)) {
+            return 'data:image/png;base64,'.base64_encode(Storage::disk('public')->get($path));
+        }
+        foreach ([public_path($path), public_path('images/'.$path), $path] as $candidate) {
+            if (is_string($candidate) && is_file($candidate)) {
+                return 'data:image/png;base64,'.base64_encode(file_get_contents($candidate));
+            }
+        }
+        return null;
+    }
+
+    private function createSignedExamPdf(EssayExam $exam, User $user, array $signature): ?string
+    {
+        $sourcePath = $this->examApprovalPrintablePath($exam);
+        if (! $sourcePath || ! class_exists(\Mpdf\Mpdf::class)) {
+            return null;
+        }
+
+        $sourceAbsolutePath = Storage::disk('public')->path($sourcePath);
+        $signatureAbsolutePath = $this->signatureAbsolutePath($signature['path'] ?? null);
+        if (! is_file($sourceAbsolutePath) || ! $signatureAbsolutePath) {
+            return null;
+        }
+
+        $signedPath = 'essay-exam/signed-pdfs/'.now()->format('Y/m').'/signed-'.$exam->id.'-'.now()->format('YmdHis').'-'.bin2hex(random_bytes(4)).'.pdf';
+        Storage::disk('public')->makeDirectory(dirname($signedPath));
+
+        try {
+            Storage::disk('local')->makeDirectory('mpdf-temp');
+            $mpdf = new \Mpdf\Mpdf([
+                'mode' => 'utf-8',
+                'tempDir' => storage_path('app/mpdf-temp'),
+                'margin_left' => 0,
+                'margin_right' => 0,
+                'margin_top' => 0,
+                'margin_bottom' => 0,
+                'default_font' => 'dejavusans',
+            ]);
+            $mpdf->SetDisplayMode('fullpage');
+            $pageCount = $mpdf->setSourceFile($sourceAbsolutePath);
+
+            for ($pageNo = 1; $pageNo <= $pageCount; $pageNo++) {
+                $template = $mpdf->importPage($pageNo);
+                $size = $mpdf->getTemplateSize($template);
+                $mpdf->AddPageByArray([
+                    'orientation' => $size['orientation'] ?? (($size['width'] ?? 0) > ($size['height'] ?? 0) ? 'L' : 'P'),
+                    'sheet-size' => [$size['width'], $size['height']],
+                    'margin-left' => 0,
+                    'margin-right' => 0,
+                    'margin-top' => 0,
+                    'margin-bottom' => 0,
+                ]);
+                $mpdf->useTemplate($template, 0, 0, $size['width'], $size['height']);
+
+                if ($pageNo === $pageCount) {
+                    $this->writePrincipalSignatureBlock($mpdf, (float) $size['width'], (float) $size['height'], $signatureAbsolutePath, $user, $signature);
+                }
+            }
+
+            $mpdf->Output(Storage::disk('public')->path($signedPath), \Mpdf\Output\Destination::FILE);
+        } catch (\Throwable $exception) {
+            report($exception);
+            return null;
+        }
+
+        return $signedPath;
+    }
+
+    private function writePrincipalSignatureBlock(\Mpdf\Mpdf $mpdf, float $pageWidth, float $pageHeight, string $signaturePath, User $user, array $signature): void
+    {
+        $blockWidth = min(62.0, max(50.0, $pageWidth * 0.29));
+        $x = max(12.0, $pageWidth - $blockWidth - 18.0);
+        $y = max(12.0, $pageHeight - 43.0);
+
+        $mpdf->SetFont('dejavusans', 'B', 11);
+        $mpdf->SetXY($x, $y);
+        $mpdf->Cell($blockWidth, 6, 'HIỆU TRƯỞNG', 0, 1, 'C');
+        $mpdf->Image($signaturePath, $x + 14, $y + 7, $blockWidth - 28, 16, '', '', true, true);
+        $mpdf->SetFont('dejavusans', 'B', 10);
+        $mpdf->SetXY($x, $y + 28);
+        $mpdf->Cell($blockWidth, 6, $this->approvalSignerBottomLine($user, $signature), 0, 1, 'C');
+    }
+
+    private function signatureAbsolutePath(?string $path): ?string
+    {
+        if (! $path) return null;
+        foreach ([Storage::disk('public')->path($path), public_path($path), public_path('images/'.$path), $path] as $candidate) {
+            if (is_string($candidate) && is_file($candidate)) {
+                return $candidate;
+            }
+        }
+        return null;
+    }
+
+    private function approvalSignerBottomLine(User $user, array $signature): string
+    {
+        $rank = trim((string) ($signature['role_line2'] ?? '')) ?: $this->approvalSignerRank($user);
+        $name = trim((string) ($signature['display_name'] ?? '')) ?: $this->approvalSignerName($user);
+        return trim($rank.' '.$name) ?: 'Hiệu trưởng';
+    }
+
+    private function approvalSignerRank(?User $user): string
+    {
+        if (! $user) return '';
+        $user->loadMissing(['militaryRank', 'position']);
+        return trim((string) ($user->militaryRank?->abbreviation ?: $user->militaryRank?->name ?: $user->position?->name ?: ''));
+    }
+
+    private function approvalSignerName(?User $user): string
+    {
+        return trim((string) ($user?->name ?: $user?->email ?: ''));
     }
 
         /* legacy stray calls removed */
@@ -1121,11 +1301,59 @@ class EssayExamController extends Controller
     private function log(EssayExam $exam, string $action, ?string $from, ?string $to, $user, ?string $note = null): void { EssayExamWorkflowLog::create(['essay_exam_id'=>$exam->id,'action'=>$action,'from_status'=>$from,'to_status'=>$to,'note'=>$note,'actor_user_id'=>$user?->id,'actor_username'=>$user?->email,'actor_display_name'=>$user?->name]); }
     private function logIntegratedAnswer(IntegratedAnswerSet $set, string $action, ?string $from, ?string $to, $user, ?string $note = null): void { IntegratedAnswerWorkflowLog::create(['answer_set_id'=>$set->id,'action'=>$action,'from_status'=>$from,'to_status'=>$to,'note'=>$note,'actor_user_id'=>$user?->id,'actor_username'=>$user?->email,'actor_display_name'=>$user?->name]); }
 
+    private function storeImportDocumentAsPdf($file, string $code): array
+    {
+        $extension = strtolower($file->getClientOriginalExtension());
+        $originalName = $file->getClientOriginalName();
+        $safeCode = trim(preg_replace('/[^A-Za-z0-9_-]+/', '-', $code) ?: 'de-thi', '-');
+        $safeName = trim(preg_replace('/[^A-Za-z0-9._-]+/', '-', pathinfo($originalName, PATHINFO_FILENAME)) ?: 'file', '-');
+        $directory = 'essay-exam/imports/'.now()->format('Y/m');
+        $baseName = $safeCode.'-'.$safeName.'-'.now()->format('YmdHis').'-'.bin2hex(random_bytes(3));
+        $sourcePath = $file->storeAs($directory, $baseName.'.'.$extension, 'public');
+        $result = [
+            'source_document_path' => $sourcePath,
+            'source_pdf_path' => null,
+            'source_original_name' => $originalName,
+        ];
+
+        if (! in_array($extension, ['doc', 'docx'], true)) {
+            return $result;
+        }
+
+        $pdfPath = $directory.'/'.$baseName.'.pdf';
+        try {
+            app(DocumentConverterInterface::class)->convert(
+                Storage::disk('public')->path($sourcePath),
+                'pdf',
+                Storage::disk('public')->path($pdfPath),
+            );
+        } catch (\Throwable $exception) {
+            \Log::error('Essay exam import PDF conversion failed', [
+                'source' => $sourcePath,
+                'pdf' => $pdfPath,
+                'error' => $exception->getMessage(),
+            ]);
+            abort(500, 'Không chuyển được file Word sang PDF để lưu bản in duyệt đề: '.$exception->getMessage());
+        }
+        abort_unless(Storage::disk('public')->exists($pdfPath), 500, 'Không tạo được file PDF từ file Word đã import.');
+        $result['source_pdf_path'] = $pdfPath;
+
+        return $result;
+    }
+
+    private function examApprovalPrintablePath(EssayExam $exam): ?string
+    {
+        return $exam->source_pdf_path && Storage::disk('public')->exists($exam->source_pdf_path)
+            ? $exam->source_pdf_path
+            : null;
+    }
+
     private function importMultipleFiles(Request $request, array $data, $user): RedirectResponse
     {
         $files = array_values((array) $request->file('import_files', []));
         $created = [];
         foreach ($files as $file) {
+            $importDocument = $this->storeImportDocumentAsPdf($file, $data['import_code']);
             $fileText = $this->readImportText($file);
             $rows = $this->parseImportRows($fileText);
             abort_unless($rows, 422, 'Không nhận diện được câu hỏi trong file '.$file->getClientOriginalName().'.');
@@ -1133,12 +1361,11 @@ class EssayExamController extends Controller
             $fileData = $data;
             if ($types->contains('multiple_choice') && $types->contains('essay')) $fileData['exam_type'] = 'Tích hợp';
             $fileData['import_class_id'] = $request->integer('import_class_id');
-            $created[] = DB::transaction(function () use ($rows, $fileData, $user, $file) {
+            $created[] = DB::transaction(function () use ($rows, $fileData, $user, $file, $importDocument) {
                 $baseCode = trim($fileData['import_code']).'-'.strtoupper(pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME));
                 $code = $baseCode; $version = 2;
                 while (EssayExam::where('code', $code)->exists()) $code = $baseCode.'-B'.$version++;
-                $exam = EssayExam::create(['code'=>$code,'title'=>$fileData['import_title'] ?: pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME),'subject_id'=>$fileData['import_subject_id'],'duration_minutes'=>$fileData['duration_minutes'],'academic_year'=>$fileData['academic_year'],'semester'=>$fileData['semester'],'difficulty'=>$fileData['difficulty'],'exam_type'=>$fileData['exam_type'],'created_by_user_id'=>$user->id,'created_by_username'=>$user->email,'created_by_display_name'=>$user->name,'note'=>'Import nhiều file: '.$file->getClientOriginalName()]);
-                $exam->update(['class_id' => $fileData['import_class_id']]);
+                $exam = EssayExam::create(['code'=>$code,'title'=>$fileData['import_title'] ?: pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME),'subject_id'=>$fileData['import_subject_id'],'class_id'=>$fileData['import_class_id'],'duration_minutes'=>$fileData['duration_minutes'],'academic_year'=>$fileData['academic_year'],'semester'=>$fileData['semester'],'difficulty'=>$fileData['difficulty'],'exam_type'=>$fileData['exam_type'],'created_by_user_id'=>$user->id,'created_by_username'=>$user->email,'created_by_display_name'=>$user->name,'note'=>'Import nhiều file: '.$file->getClientOriginalName()] + $importDocument);
                 foreach (collect($rows)->groupBy('paper') as $paper => $questions) foreach ($questions as $i => $q) $exam->questions()->create(['paper_number'=>(int)$paper,'question_number'=>$i+1,'question_type'=>$q['question_type'] ?? 'essay','content'=>$q['content'],'options'=>$q['options'] ?? null,'answer'=>$q['answer'] ?? '','points'=>$q['points'] ?? 1]);
                 $this->log($exam,'IMPORT',null,'DRAFT',$user);
                 return $exam;

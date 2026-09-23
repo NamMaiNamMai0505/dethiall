@@ -9,6 +9,12 @@
     .essay-question-options { font-family: "Times New Roman", Times, serif; font-size: 15px; line-height: 1.35; }
 </style>
 <h1 class="text-2xl font-bold mb-5">{{ $exam->title }}</h1>
+@if($exam->source_pdf_path)
+<div class="mb-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4 flex flex-wrap items-center justify-between gap-3">
+    <div><p class="font-bold text-emerald-900">File PDF gốc đã lưu từ file Word import</p><p class="text-sm text-emerald-800">{{ $exam->source_original_name ?: basename($exam->source_pdf_path) }}</p></div>
+    <a class="px-4 py-2 rounded-lg bg-emerald-600 text-white font-bold" href="{{ asset('storage/'.$exam->source_pdf_path) }}" target="_blank">Mở PDF gốc</a>
+</div>
+@endif
 @php($labels=['DRAFT'=>'Bản nháp','PENDING_DEPT'=>'Chờ khoa duyệt','PENDING_EXAM_OFFICE'=>'Chờ khảo thí duyệt','PENDING_BGH'=>'Chờ BGH duyệt','APPROVED'=>'Đã duyệt','RETURNED'=>'Trả lại'])
 @foreach($exam->questions->groupBy('paper_number') as $paper=>$questions)
 @php($paperStatus=$questions->first()->paper_status ?? $exam->status)
