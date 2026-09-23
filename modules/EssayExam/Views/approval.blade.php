@@ -226,7 +226,7 @@
         win.focus();
     };
     const bindForms = () => {
-        const all = forms(); if (!all.length || !target) return;
+        const all = forms(); if (!all.length || !target) return false;
         if (!target.dataset.bound) {
             target.dataset.bound='1';
             // Dự phòng cho trường hợp trình duyệt giữ HTML cũ chưa có option server.
@@ -252,8 +252,19 @@
             }));
         }
         updatePrintButtons();
+        return true;
     };
-    document.addEventListener('DOMContentLoaded', bindForms, { once: true });
+    const bindWhenReady = () => {
+        if (bindForms()) return;
+        let attempts = 0;
+        const timer = setInterval(() => {
+            attempts++;
+            if (bindForms() || attempts >= 20) clearInterval(timer);
+        }, 150);
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bindWhenReady, { once: true });
+    else bindWhenReady();
+    window.addEventListener('pageshow', bindWhenReady);
 })();
 </script>
 <div class="flex justify-between items-center mb-5"><div><h1 class="text-2xl font-bold">Duyệt đề</h1><p class="text-sm text-slate-500">Đang ở cấp: {{ $stageLabel }}. Bao gồm đề tự luận và ngân hàng trắc nghiệm LMS.</p></div><a href="{{ route('essay-exams.index') }}" class="text-blue-600">Đề của tôi</a></div>
