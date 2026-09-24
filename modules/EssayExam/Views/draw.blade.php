@@ -35,7 +35,7 @@
     #draw-state-box > div { border-color:#bfdbfe !important; background:rgba(239,246,255,.72); border-radius:13px; }
     form[action*="essay-exams/draw"] #integrated-source-wrap,
     form[action*="essay-exams/draw"] #multiple-choice-count-wrap,
-    form[action*="essay-exams/draw"] #self-essay-count-wrap,
+    form[action*="essay-exams/draw"] #self-essay-draw-note,
     form[action*="essay-exams/draw"] #draw-state-box { grid-column:1 / -1 !important; width:100%; }
     form[action*="essay-exams/draw"] #integrated-source-wrap { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:start; }
     @media (max-width: 767px) {
@@ -44,7 +44,35 @@
 </style>
 <h1 class="text-2xl font-bold mb-5">Rút đề thi</h1>
 <form method="POST" action="{{ route('essay-exams.draw.store') }}" class="bg-white border rounded-xl p-5 grid md:grid-cols-2 gap-4">@csrf<div><label>Ngành đào tạo</label><select data-native-select="1" id="sp" name="specialization_id" required class="w-full border rounded px-3 py-2"><option value="">Chọn ngành</option>@foreach($specializations as $x)<option value="{{ $x->id }}">{{ $x->code }} — {{ $x->name }}</option>@endforeach</select></div><div><label>Lớp phụ trách</label><select data-native-select="1" id="cl" name="class_id" required class="w-full border rounded px-3 py-2"><option value="">Chọn lớp</option>@foreach($classes as $x)<option value="{{ $x->id }}" data-sp="{{ $x->specialization_id }}">{{ $x->name }} ({{ $x->code }})</option>@endforeach</select></div><div><label>Môn đang dạy ở lớp</label><select data-native-select="1" id="su" name="subject_id" required class="w-full border rounded px-3 py-2"><option value="">Chọn môn</option>@foreach($subjects as $x)@php($ids=collect($classSubjectMap)->filter(fn($a)=>in_array($x->id,$a))->keys()->implode(','))<option value="{{ $x->id }}" data-sp="{{ $x->specialization_id }}" data-classes="{{ $ids }}">{{ $x->code }} — {{ $x->name }}</option>@endforeach</select></div><div><label>Loại phiếu</label><select name="draw_type" class="w-full border rounded px-3 py-2"><option value="EVEN">Chẵn</option><option value="ODD">Lẻ</option></select></div><div><label>Ngày thi</label><input type="date" name="exam_date" class="w-full border rounded px-3 py-2"></div><div><label>Giờ thi</label><input type="time" name="exam_time" class="w-full border rounded px-3 py-2"></div><button class="md:col-span-2 px-5 py-2 rounded bg-blue-600 text-white">Rút đề ngẫu nhiên</button></form>
-<div class="bg-white border rounded-xl overflow-hidden mt-6"><div class="p-4 font-semibold">Lịch sử bốc đề</div><div class="overflow-x-auto"><table class="w-full min-w-[980px] table-fixed text-sm"><colgroup><col class="w-[19%]"><col class="w-[12%]"><col class="w-[8%]"><col class="w-[18%]"><col class="w-[16%]"><col class="w-[13.5%]"><col class="w-[13.5%]"></colgroup><thead class="bg-slate-100"><tr><th class="p-3 text-left whitespace-nowrap">Mã bốc</th><th class="p-3 text-left whitespace-nowrap">Mã đề</th><th class="p-3 text-center whitespace-nowrap">Đề số</th><th class="p-3 text-left">Lớp thi</th><th class="p-3 text-left whitespace-nowrap">Ngày bốc</th><th class="p-3 text-center whitespace-nowrap">In đề</th><th class="p-3 text-center whitespace-nowrap">In đáp án</th></tr></thead><tbody class="divide-y">@forelse($draws as $draw)<tr><td class="p-3 font-mono whitespace-nowrap">{{ $draw->draw_code }}</td><td class="p-3 whitespace-nowrap">{{ $draw->exam->code }}</td><td class="p-3 text-center">{{ $draw->paper_number }}</td><td class="p-3 truncate" title="{{ $draw->class_name }}">{{ $draw->class_name }}</td><td class="p-3 whitespace-nowrap">{{ $draw->drawn_at?->format('d/m/Y H:i') }}</td><td class="p-3 text-center"><a target="_blank" class="inline-flex px-3 py-1 rounded bg-slate-800 text-white" href="{{ route('essay-exams.draw.print',$draw) }}">In đề</a></td><td class="p-3 text-center"><a target="_blank" class="inline-flex px-3 py-1 rounded bg-blue-600 text-white" href="{{ route('essay-exams.draw.print',$draw) }}?answers=1">In đáp án</a></td></tr>@empty<tr><td colspan="7" class="p-8 text-center">Chưa có lịch sử bốc đề.</td></tr>@endforelse</tbody></table></div></div>
+<script>
+(() => {
+    const form = document.querySelector('form[action="{{ route('essay-exams.draw.store') }}"]');
+    if (!form) return;
+    const plans = @json($examPlans);
+    const classLabel = form.querySelector('#cl')?.closest('div')?.querySelector('label');
+    const subjectLabel = form.querySelector('#su')?.closest('div')?.querySelector('label');
+    if (classLabel?.firstChild) classLabel.firstChild.textContent = 'Lớp thi';
+    if (subjectLabel?.firstChild) subjectLabel.firstChild.textContent = 'Môn thi';
+    const planInput = document.createElement('input');
+    planInput.type = 'hidden'; planInput.name = 'plan_id'; form.appendChild(planInput);
+    const dateInput = form.querySelector('[name="exam_date"]');
+    const timeInput = form.querySelector('[name="exam_time"]');
+    dateInput.readOnly = true; timeInput.readOnly = true;
+    const submit = form.querySelector('button:not([type]), button[type="submit"]');
+    const refreshPlan = () => {
+        const classId = form.querySelector('[name="class_id"]')?.value;
+        const subjectId = form.querySelector('[name="subject_id"]')?.value;
+        const plan = plans.find(item => String(item.class_id) === String(classId) && String(item.subject_id) === String(subjectId));
+        planInput.value = plan?.id || '';
+        dateInput.value = plan?.date || '';
+        timeInput.value = plan?.time || '';
+        if (submit) submit.disabled = !plan;
+    };
+    form.addEventListener('change', refreshPlan);
+    refreshPlan();
+})();
+</script>
+<div class="bg-white border rounded-xl overflow-hidden mt-6"><div class="p-4 font-semibold">Lịch sử bốc đề</div><div class="overflow-x-auto"><table class="w-full min-w-[980px] table-fixed text-sm"><colgroup><col class="w-[19%]"><col class="w-[13%]"><col class="w-[18%]"><col class="w-[16%]"><col class="w-[17%]"><col class="w-[17%]"></colgroup><thead class="bg-slate-100"><tr><th class="p-3 text-left whitespace-nowrap">Mã bốc</th><th class="p-3 text-left whitespace-nowrap">Mã bộ đề</th><th class="p-3 text-left">Lớp thi</th><th class="p-3 text-left whitespace-nowrap">Ngày bốc</th><th class="p-3 text-center whitespace-nowrap">In đề</th><th class="p-3 text-center whitespace-nowrap">In đáp án</th></tr></thead><tbody class="divide-y">@forelse($draws as $draw)<tr><td class="p-3 font-mono whitespace-nowrap">{{ $draw->draw_code }}</td><td class="p-3 whitespace-nowrap">{{ $draw->exam->code }}</td><td class="p-3 truncate" title="{{ $draw->class_name }}">{{ $draw->class_name }}</td><td class="p-3 whitespace-nowrap">{{ $draw->drawn_at?->format('d/m/Y H:i') }}</td><td class="p-3 text-center"><a target="_blank" class="inline-flex px-3 py-1 rounded bg-slate-800 text-white" href="{{ route('essay-exams.draw.print',$draw) }}?auto=1">In đề</a></td><td class="p-3 text-center"><a target="_blank" class="inline-flex px-3 py-1 rounded bg-blue-600 text-white" href="{{ route('essay-exams.draw.print',$draw) }}?answers=1&amp;auto=1">In đáp án</a></td></tr>@empty<tr><td colspan="6" class="p-8 text-center">Chưa có lịch sử bốc đề.</td></tr>@endforelse</tbody></table></div></div>
 <script>
 (() => {
     const sp = document.getElementById('sp');
@@ -106,25 +134,6 @@ if (subjectSelect) {
 }
 </script>
 <script>
-document.querySelectorAll('a[href*="/draw/"]').forEach(function (link) {
-    try {
-        const url = new URL(link.href, window.location.origin);
-        if (url.pathname.endsWith('/print')) {
-            url.searchParams.set('auto', '1');
-            link.href = url.toString();
-            link.addEventListener('click', function (event) {
-                event.preventDefault();
-                const popup = window.open('', '_blank');
-                if (!popup) { window.location.href = link.href; return; }
-                fetch(link.href, { credentials: 'same-origin' }).then(r => r.text()).then(html => {
-                    popup.document.open();
-                    popup.document.write(html);
-                    popup.document.close();
-                }).catch(() => { popup.close(); window.location.href = link.href; });
-            });
-        }
-    } catch (e) {}
-});
 const drawType = document.querySelector('select[name="draw_type"]');
 const drawForm = document.querySelector('form:has(select[name="draw_type"])') || document.querySelector('form[action*="essay-exams/draw"]') || document.querySelector('form');
 if (drawForm) drawForm.setAttribute('data-turbo', 'false');
@@ -249,9 +258,9 @@ const historyTable = document.querySelector('.bg-white.border.rounded-xl.overflo
 if (historyTable) {
     historyTable.style.tableLayout = 'fixed';
     historyTable.style.minWidth = '1450px';
-    // Thứ tự: mã bốc, mã đề, đề số, lớp, ngày, in đề, in đáp án,
+    // Thứ tự: mã bốc, mã bộ đề, lớp, ngày, in đề, in đáp án,
     // loại phiếu, dạng đề, môn, biên bản.
-    const fixedWidths = [165, 125, 70, 170, 140, 100, 120, 105, 150, 180, 125];
+    const fixedWidths = [165, 125, 170, 140, 100, 120, 105, 150, 180, 125];
     const colgroup = historyTable.querySelector('colgroup');
     if (colgroup) colgroup.innerHTML = fixedWidths.map(width => '<col style="width:'+width+'px">').join('');
     historyTable.querySelectorAll('th,td').forEach(cell => { cell.style.paddingLeft = '10px'; cell.style.paddingRight = '10px'; cell.style.verticalAlign = 'middle'; });
@@ -261,7 +270,7 @@ if (historyTable) {
     heading.textContent = 'Loại phiếu';
     header.appendChild(heading);
     historyTable.querySelectorAll('tbody tr').forEach(function (row, index) {
-        if (row.children.length === 1) { row.children[0].setAttribute('colspan', '11'); return; }
+        if (row.children.length === 1) { row.children[0].setAttribute('colspan', '10'); return; }
         const cell = document.createElement('td');
         cell.className = 'p-3 text-center font-semibold';
         cell.textContent = historyDrawTypes[index] === 'ODD' ? 'Lẻ' : 'Chẵn';
@@ -283,13 +292,13 @@ if (historyTable) {
     <div class="overflow-x-auto">
         <table class="w-full min-w-[900px] text-sm">
             <thead class="bg-slate-100"><tr><th class="p-3 text-left">Mã đề</th><th class="p-3 text-left">Mã bốc</th><th class="p-3 text-left">Lớp thi</th><th class="p-3 text-left">Ngày thi</th><th class="p-3 text-left">QR</th><th class="p-3">In</th></tr></thead>
-            <tbody class="divide-y">@forelse($draws as $usedDraw)<tr><td class="p-3 font-semibold">{{ $usedDraw->exam->code }}-D{{ str_pad($usedDraw->paper_number,2,'0',STR_PAD_LEFT) }}</td><td class="p-3 font-mono">{{ $usedDraw->draw_code }}</td><td class="p-3">{{ $usedDraw->class_name }}</td><td class="p-3">{{ $usedDraw->exam_date?->format('d/m/Y') ?? '—' }}</td><td class="p-3 font-mono">{{ $usedDraw->qr_code }}</td><td class="p-3 text-center"><a target="_blank" class="px-3 py-1 rounded bg-slate-800 text-white" href="{{ route('essay-exams.draw.print',$usedDraw) }}?auto=1">In đề</a></td></tr>@empty<tr><td colspan="6" class="p-6 text-center text-slate-500">Chưa có đề đã sử dụng.</td></tr>@endforelse</tbody>
+            <tbody class="divide-y">@forelse($draws as $usedDraw)<tr><td class="p-3 font-semibold">{{ $usedDraw->exam->paperCode((int) $usedDraw->paper_number) }}</td><td class="p-3 font-mono">{{ $usedDraw->draw_code }}</td><td class="p-3">{{ $usedDraw->class_name }}</td><td class="p-3">{{ $usedDraw->exam_date?->format('d/m/Y') ?? '—' }}</td><td class="p-3 font-mono">{{ $usedDraw->qr_code }}</td><td class="p-3 text-center"><a target="_blank" class="px-3 py-1 rounded bg-slate-800 text-white" href="{{ route('essay-exams.draw.print',$usedDraw) }}?auto=1">In đề</a></td></tr>@empty<tr><td colspan="6" class="p-6 text-center text-slate-500">Chưa có đề đã sử dụng.</td></tr>@endforelse</tbody>
         </table>
     </div>
 </div>
 <div class="bg-amber-50 border border-amber-300 rounded-xl overflow-hidden mt-4">
-    <div class="px-4 py-3 font-semibold text-amber-900 border-b border-amber-300">Cảnh báo đề đã rút quá 3 ngày</div>
-    <div class="overflow-x-auto"><table class="w-full min-w-[760px] text-sm"><thead><tr><th class="p-3 text-left">Mã đề</th><th class="p-3 text-left">Loại phiếu</th><th class="p-3 text-left">Lớp</th><th class="p-3 text-left">Ngày rút</th><th class="p-3 text-left">Trạng thái</th></tr></thead><tbody class="divide-y divide-amber-200">@foreach($expiredDraws as $expired)<tr><td class="p-3 font-semibold">{{ $expired->exam->code }}-D{{ str_pad($expired->paper_number,2,'0',STR_PAD_LEFT) }}</td><td class="p-3">{{ $expired->draw_type === 'ODD' ? 'Lẻ' : 'Chẵn' }}</td><td class="p-3">{{ $expired->class_name }}</td><td class="p-3">{{ $expired->drawn_at?->format('d/m/Y H:i') }}</td><td class="p-3 text-amber-800">Không còn được in — có thể rút lại</td></tr>@endforeach</tbody></table></div>
+    <div class="px-4 py-3 font-semibold text-amber-900 border-b border-amber-300">Đề đã rút quá 3 ngày</div>
+    <div class="overflow-x-auto"><table class="w-full min-w-[760px] text-sm"><thead><tr><th class="p-3 text-left">Mã bộ đề</th><th class="p-3 text-left">Loại phiếu</th><th class="p-3 text-left">Lớp</th><th class="p-3 text-left">Ngày rút</th><th class="p-3 text-left">Trạng thái</th></tr></thead><tbody class="divide-y divide-amber-200">@foreach($expiredDraws as $expired)<tr><td class="p-3 font-semibold">{{ $expired->exam->code }}</td><td class="p-3">{{ $expired->draw_type === 'ODD' ? 'Lẻ' : 'Chẵn' }}</td><td class="p-3">{{ $expired->class_name }}</td><td class="p-3">{{ $expired->drawn_at?->format('d/m/Y H:i') }}</td><td class="p-3 text-amber-800">Lưu trong lịch sử</td></tr>@endforeach</tbody></table></div>
 </div>
 <script>
 (() => {
@@ -367,23 +376,24 @@ if (historyTable) {
     const syncSelfEssay = () => {
         const type = form.querySelector('[name="exam_type"]')?.value || '';
         const isSelf = type === 'Tự luận' || type.toLowerCase().includes('tự luận');
+        const isIntegrated = type.includes('Tích') || type.includes('TÃ­ch');
         const source = document.getElementById('integrated-source-wrap');
         const mcqLabel = source?.querySelector('[name="mcq_bank_id"]')?.closest('label');
         const essayLabel = source?.querySelector('[name="essay_pool_id"]')?.closest('label');
-        if (source) source.style.display = isSelf ? '' : (type ? '' : 'none');
-        if (mcqLabel) mcqLabel.hidden = isSelf;
-        if (essayLabel) essayLabel.hidden = !isSelf && !type.includes('Tích') && !type.includes('TÃ­ch');
+        if (source) source.style.display = isIntegrated ? '' : 'none';
+        if (mcqLabel) mcqLabel.hidden = false;
+        if (essayLabel) essayLabel.hidden = false;
         const mcq = source?.querySelector('[name="mcq_bank_id"]');
         const essay = source?.querySelector('[name="essay_pool_id"]');
-        if (mcq) mcq.required = !isSelf && !!type;
-        if (essay) essay.required = isSelf || type.includes('Tích') || type.includes('TÃ­ch');
-        let wrap = document.getElementById('self-essay-count-wrap');
+        if (mcq) mcq.required = isIntegrated;
+        if (essay) essay.required = isIntegrated;
+        let wrap = document.getElementById('self-essay-draw-note');
         if (!isSelf) { wrap?.remove(); return; }
         if (!wrap) {
             wrap = document.createElement('div');
-            wrap.id = 'self-essay-count-wrap';
+            wrap.id = 'self-essay-draw-note';
             wrap.className = 'md:col-span-2 rounded-lg border border-amber-200 bg-amber-50 p-3';
-            wrap.innerHTML = '<label class="text-sm font-semibold text-amber-900">Số câu tự luận<select name="essay_question_count" class="mt-1 w-full border rounded px-3 py-2 bg-white" required><option value="">Chọn số câu</option><option value="1">1 câu — chọn câu 4 điểm</option><option value="2">2 câu — chọn 2 câu, mỗi câu 2 điểm</option></select></label><p class="text-xs text-amber-800 mt-1">Tổng đề tự luận luôn là 4 điểm.</p>';
+            wrap.innerHTML = '<div class="font-semibold text-amber-900">Rút đề tự luận</div><p class="text-sm text-amber-800 mt-1">Hệ thống sẽ tự bốc ngẫu nhiên một đề tự luận hoàn chỉnh đã duyệt trong ngân hàng đề theo môn và lớp đang chọn, không cần nhập số câu.</p>';
             source?.insertAdjacentElement('afterend', wrap) || form.insertBefore(wrap, form.querySelector('button'));
         }
     };

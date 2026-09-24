@@ -218,8 +218,8 @@
                 </li>
             @endif
 
-            @if(auth()->check() && auth()->user()->can('essay-exams.index'))
-                <li><a href="{{ route('essay-exams.index') }}" class="sidebar-tooltip flex items-center px-4 py-2 text-sm hover:bg-gray-700 {{ request()->routeIs('essay-exams.*') ? 'bg-blue-600' : '' }}" data-tooltip="Đề thi"><i class="bi bi-file-earmark-text mr-3 flex-shrink-0"></i><span class="sidebar-text">Đề thi</span></a></li>
+            @if(auth()->check() && (auth()->user()->can('essay-exams.index') || auth()->user()->can('essay-exams.mine')))
+                <li><a href="{{ route(auth()->user()->can('essay-exams.index') ? 'essay-exams.index' : 'essay-exams.mine') }}" class="sidebar-tooltip flex items-center px-4 py-2 text-sm hover:bg-gray-700 {{ request()->routeIs('essay-exams.*') ? 'bg-blue-600' : '' }}" data-tooltip="Đề thi"><i class="bi bi-file-earmark-text mr-3 flex-shrink-0"></i><span class="sidebar-text">Đề thi</span></a></li>
             @endif
             @if(auth()->check() && auth()->user()->can('exam-organization.view'))
                 <li><a href="{{ route('exam-organization.index') }}" class="sidebar-tooltip flex items-center px-4 py-2 text-sm hover:bg-gray-700 {{ request()->routeIs('exam-organization.*') ? 'bg-blue-600' : '' }}" data-tooltip="Tổ chức thi"><i class="bi bi-calendar2-check mr-3 flex-shrink-0"></i><span class="sidebar-text">Tổ chức thi</span></a></li>

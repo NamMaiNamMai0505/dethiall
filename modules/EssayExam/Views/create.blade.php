@@ -82,18 +82,21 @@
 </style>
 @include('partials.module-menu', ['module' => 'exam'])
 @if($errors->any())<div class="mb-4 rounded-lg bg-red-50 border border-red-300 text-red-800 px-4 py-3"><b>Không thể xem trước import:</b><ul class="list-disc pl-5">@foreach($errors->all() as $error)<li>{{ $error }}</li>@endforeach</ul></div>@endif
-<x-breadcrumb :items="[['title'=>'Đề thi tự luận','url'=>route('essay-exams.index')],['title'=>'Soạn đề mới']]" />
-<div class="bg-blue-50 border border-blue-200 rounded-xl p-5 mb-5"><h2 class="font-semibold text-lg text-blue-900">Import bộ câu hỏi + đáp án</h2><p class="text-sm text-blue-800 mt-1 mb-3">Chỉ dùng file mẫu Word chuẩn đang được ban hành để import đề.</p><div class="flex flex-wrap gap-2 mb-4 text-xs"><span class="font-medium text-blue-900">Tải file mẫu:</span><a class="text-blue-700 hover:underline" href="{{ asset('samples/essay-exam/Đe_dieu_duong_unique.docx') }}" download>Đề điều dưỡng chuẩn</a></div><form method="POST" action="{{ route('essay-exams.import') }}" enctype="multipart/form-data" class="grid md:grid-cols-2 gap-3">@csrf<input name="import_code" required placeholder="Mã đề gốc (vd: DT-2026-01)" class="border rounded-lg px-3 py-2 bg-white"><input name="import_title" placeholder="Tên đề (tùy chọn)" class="border rounded-lg px-3 py-2 bg-white"><select name="import_subject_id" required class="border rounded-lg px-3 py-2 bg-white"><option value="">Chọn môn học hiện có</option>@foreach($subjects as $subject)<option value="{{ $subject->id }}">{{ $subject->code }} — {{ $subject->name }}</option>@endforeach</select><input type="number" name="duration_minutes" value="60" min="1" max="600" class="border rounded-lg px-3 py-2 bg-white" placeholder="Thời gian (phút)"><input type="file" name="import_file" required accept=".txt,.csv,.tsv,.doc,.docx" class="border rounded-lg px-3 py-2 bg-white md:col-span-2"><button class="md:col-span-2 justify-self-start px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700">Import và tạo bản nháp</button></form></div>
+<x-breadcrumb :items="[['title'=>'Đề thi tự luận','url'=>route(auth()->user()->can('essay-exams.index') ? 'essay-exams.index' : 'essay-exams.mine')],['title'=>'Soạn đề mới']]" />
+<div class="bg-blue-50 border border-blue-200 rounded-xl p-5 mb-5"><h2 class="font-semibold text-lg text-blue-900">Import bộ câu hỏi + đáp án</h2><p class="text-sm text-blue-800 mt-1 mb-3">Chỉ dùng file mẫu Word chuẩn đang được ban hành để import đề.</p><div class="flex flex-wrap gap-2 mb-4 text-xs"><span class="font-medium text-blue-900">Tải file mẫu:</span><a class="text-blue-700 hover:underline" href="{{ asset('samples/essay-exam/Đe_dieu_duong_unique.docx') }}" download>Đề điều dưỡng chuẩn</a></div><form method="POST" action="{{ route('essay-exams.import') }}" enctype="multipart/form-data" class="grid md:grid-cols-2 gap-3">@csrf<input name="import_code" required maxlength="80" value="{{ old('import_code') }}" placeholder="Mã bộ đề (vd: DT-2026-01)" class="border rounded-lg px-3 py-2 bg-white"><select name="import_subject_id" required class="border rounded-lg px-3 py-2 bg-white"><option value="">Chọn môn học hiện có</option>@foreach($subjects as $subject)<option value="{{ $subject->id }}">{{ $subject->code }} — {{ $subject->name }}</option>@endforeach</select><input type="number" name="duration_minutes" value="60" min="1" max="600" class="border rounded-lg px-3 py-2 bg-white" placeholder="Thời gian (phút)"><input type="file" name="import_file" required accept=".txt,.csv,.tsv,.doc,.docx" class="border rounded-lg px-3 py-2 bg-white md:col-span-2"><button class="md:col-span-2 justify-self-start px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700">Import và tạo bản nháp</button></form></div>
  <form method="POST" action="{{ route('essay-exams.store') }}" class="space-y-5" id="exam-form">@csrf
-<div class="bg-white border rounded-xl p-5"><h2 class="font-semibold text-lg mb-4">Thông tin đề</h2><div class="grid md:grid-cols-2 gap-4"><div><label class="block text-sm mb-1">Mã đề *</label><input name="code" required class="w-full border rounded-lg px-3 py-2" value="{{ old('code') }}">@error('code')<p class="text-red-600 text-xs mt-1">{{ $message }}</p>@enderror</div><div><label class="block text-sm mb-1">Môn học *</label><select name="subject_id" required class="w-full border rounded-lg px-3 py-2"><option value="">Chọn môn học đã có</option>@foreach($subjects as $subject)<option value="{{ $subject->id }}" @selected(old('subject_id')==$subject->id)>{{ $subject->code }} — {{ $subject->name }}</option>@endforeach</select></div><div><label class="block text-sm mb-1">Tên đề *</label><input name="title" required class="w-full border rounded-lg px-3 py-2" value="{{ old('title') }}"></div><div><label class="block text-sm mb-1">Thời gian (phút)</label><input type="number" name="duration_minutes" min="1" max="600" value="{{ old('duration_minutes',60) }}" class="w-full border rounded-lg px-3 py-2"></div></div><label class="block text-sm mt-4 mb-1">Ghi chú</label><textarea name="note" rows="2" class="w-full border rounded-lg px-3 py-2">{{ old('note') }}</textarea></div>
+<div class="bg-white border rounded-xl p-5"><h2 class="font-semibold text-lg mb-4">Thông tin đề</h2><div class="grid md:grid-cols-2 gap-4"><div><label class="block text-sm mb-1">Mã đề *</label><input name="code" required maxlength="80" class="w-full border rounded-lg px-3 py-2" value="{{ old('code') }}">@error('code')<p class="text-red-600 text-xs mt-1">{{ $message }}</p>@enderror</div><div><label class="block text-sm mb-1">Môn học *</label><select name="subject_id" required class="w-full border rounded-lg px-3 py-2"><option value="">Chọn môn học đã có</option>@foreach($subjects as $subject)<option value="{{ $subject->id }}" @selected(old('subject_id')==$subject->id)>{{ $subject->code }} — {{ $subject->name }}</option>@endforeach</select></div><div><label class="block text-sm mb-1">Thời gian (phút)</label><input type="number" name="duration_minutes" min="1" max="600" value="{{ old('duration_minutes',60) }}" class="w-full border rounded-lg px-3 py-2"></div></div><label class="block text-sm mt-4 mb-1">Ghi chú</label><textarea name="note" rows="2" class="w-full border rounded-lg px-3 py-2">{{ old('note') }}</textarea></div>
 <div class="bg-white border rounded-xl p-5"><div class="flex items-center justify-between mb-4"><h2 class="font-semibold text-lg">Câu hỏi và đáp án</h2><button type="button" id="add-question" class="px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200">+ Thêm câu</button></div><div id="questions">@for($i=0;$i<3;$i++)<div class="question border rounded-lg p-4 mb-3"><div class="flex justify-between mb-2"><strong>Câu <span class="number">{{ $i+1 }}</span></strong><button type="button" class="remove text-red-600 {{ $i<1?'hidden':'' }}">Xóa</button></div><textarea name="questions[{{ $i }}][content]" required rows="3" class="w-full border rounded px-3 py-2 mb-2" placeholder="Nội dung câu hỏi..."></textarea><textarea name="questions[{{ $i }}][answer]" rows="2" class="w-full border rounded px-3 py-2 mb-2" placeholder="Đáp án / hướng dẫn chấm..."></textarea><input name="questions[{{ $i }}][points]" type="number" step="0.25" min="0" value="1" class="border rounded px-3 py-2 w-32" placeholder="Điểm"></div>@endfor</div></div><div class="flex justify-end gap-3"><a href="{{ route('essay-exams.index') }}" class="px-4 py-2 border rounded-lg">Hủy</a><button class="px-5 py-2 rounded-lg bg-blue-600 text-white">Lưu bản nháp</button></div></form>
-<script>const box=document.getElementById('questions');function renumber(){[...box.querySelectorAll('.question')].forEach((el,i)=>{el.querySelector('.number').textContent=i+1;el.querySelectorAll('[name]').forEach(x=>x.name=x.name.replace(/questions\[\d+\]/,'questions['+i+']'))})}[...box.querySelectorAll('.remove')].forEach(b=>b.onclick=()=>{b.closest('.question').remove();renumber()});document.getElementById('add-question').onclick=()=>{const i=box.children.length;const el=document.createElement('div');el.className='question border rounded-lg p-4 mb-3';el.innerHTML='<div class="flex justify-between mb-2"><strong>Câu <span class="number">'+(i+1)+'</span></strong><button type="button" class="remove text-red-600">Xóa</button></div><textarea name="questions['+i+'][content]" required rows="3" class="w-full border rounded px-3 py-2 mb-2" placeholder="Nội dung câu hỏi..."></textarea><textarea name="questions['+i+'][answer]" rows="2" class="w-full border rounded px-3 py-2 mb-2" placeholder="Đáp án / hướng dẫn chấm..."></textarea><input name="questions['+i+'][points]" type="number" step="0.25" min="0" value="1" class="border rounded px-3 py-2 w-32">';el.querySelector('.remove').onclick=()=>{el.remove();renumber()};box.append(el)};</script>
+<script>const box=document.getElementById('questions');function renumber(){[...box.querySelectorAll('.question')].forEach((el,i)=>{el.querySelector('.number').textContent=i+1;el.querySelectorAll('[name]').forEach(x=>x.name=x.name.replace(/questions\[\d+\]/,'questions['+i+']'))})}[...box.querySelectorAll('.remove')].forEach(b=>b.onclick=()=>{b.closest('.question').remove();renumber()});document.getElementById('add-question').onclick=()=>{const i=box.children.length;const el=document.createElement('div');el.className='question border rounded-lg p-4 mb-3';el.innerHTML='<div class="flex justify-between mb-2"><strong>Câu <span class="number">'+(i+1)+'</span></strong><button type="button" class="remove text-red-600">Xóa</button></div><textarea name="questions['+i+'][content]" required rows="3" class="w-full border rounded px-3 py-2 mb-2" placeholder="Nội dung câu hỏi..."></textarea><textarea name="questions['+i+'][answer]" rows="2" class="w-full border rounded px-3 py-2 mb-2" placeholder="Đáp án / hướng dẫn chấm..."></textarea><input name="questions['+i+'][points]" type="number" step="0.25" min="0" value="1" class="border rounded px-3 py-2 w-32">';el.querySelector('.remove').onclick=()=>{el.remove();renumber()};box.append(el)};
+const cancelLink = document.querySelector('#exam-form a[href="{{ route('essay-exams.index') }}"]');
+if (cancelLink && @json(! auth()->user()->can('essay-exams.index'))) cancelLink.href = @json(route('essay-exams.mine'));
+</script>
 <script>
 const importForm = document.querySelector('form[action="{{ route('essay-exams.import') }}"]');
 const actualImportForm = importForm || [...document.querySelectorAll('form')].find(f => f.querySelector('input[name="import_file"]'));
 document.querySelectorAll('#exam-form select[name="subject_id"], [name="import_subject_id"]').forEach(select => select.dataset.nativeSelect = '1');
 if (actualImportForm) {
-  const importLabels = {import_code:'Mã đề gốc *', import_title:'Tên đề', import_subject_id:'Môn học', duration_minutes:'Thời gian làm bài (phút)', import_file:'File câu hỏi / bộ đề'};
+  const importLabels = {import_code:'Mã bộ đề *', import_subject_id:'Môn học', duration_minutes:'Thời gian làm bài (phút)', import_file:'File câu hỏi / bộ đề'};
   Object.entries(importLabels).forEach(([name, text]) => {
     const field = actualImportForm.querySelector('[name="'+name+'"]');
     if (!field || field.closest('label')) return;
@@ -140,7 +143,7 @@ if (importForm) {
    subject?.closest('label')?.insertAdjacentElement('afterend',lessonWrap);
   subject?.closest('label')?.insertAdjacentElement('beforebegin',selectWrap);
   if (subject) subject.disabled = true;
-    const filterLessons=()=>{ [...lesson.options].forEach(o=>{o.hidden=!!(o.value && (o.dataset.class!==select.value || o.dataset.subject!==subject.value));}); if(lesson.selectedOptions[0]?.hidden) lesson.value=''; }; select.addEventListener('change',()=>{ const classOption=select.options[select.selectedIndex]; const subjectIds=(classOption?.dataset.subjects || '').split(',').map(String).map(x=>x.trim()).filter(Boolean); [...subject.options].forEach(o=>{o.hidden=!!(o.value && subjectIds.length && !subjectIds.includes(String(o.value)))}); subject.value=subjectIds.length===1 ? subjectIds[0] : ''; subject.disabled=!select.value; if(select.value && !subjectIds.length){ [...subject.options].forEach(o=>o.hidden=false); subject.value=''; } filterLessons(); }); subject.addEventListener('change',filterLessons);
+    const filterLessons=()=>{ [...lesson.options].forEach(o=>{o.hidden=!!(o.value && (o.dataset.class!==select.value || o.dataset.subject!==subject.value));}); if(lesson.selectedOptions[0]?.hidden) lesson.value=''; }; select.addEventListener('change',()=>{ const classOption=select.options[select.selectedIndex]; const subjectIds=(classOption?.dataset.subjects || '').split(',').map(String).map(x=>x.trim()).filter(Boolean); [...subject.options].forEach(o=>{o.hidden=!!(o.value && subjectIds.length && !subjectIds.includes(String(o.value)))}); subject.value=''; subject.disabled=!select.value; if(select.value && !subjectIds.length){ [...subject.options].forEach(o=>o.hidden=false); subject.value=''; } filterLessons(); }); subject.addEventListener('change',filterLessons);
     const syncLessonRequired=()=>{ const type=importForm.querySelector('[name="exam_type"]')?.value || ''; lesson.required=type.includes('Trắc') || type.includes('Tích'); }; document.querySelectorAll('[name="exam_type"]').forEach(x=>x.addEventListener('change',syncLessonRequired)); syncLessonRequired();
 }
 </script>
@@ -344,32 +347,6 @@ if (examForm) {
  syncLessonVisibility();
  </script>
  <script>
- (() => {
-     const form = document.querySelector('form[action="{{ route('essay-exams.import') }}"]');
-     const subject = form?.querySelector('[name="import_subject_id"]');
-     const semesterInput = form?.querySelector('[name="semester"]');
-     if (!form || !subject || !semesterInput) return;
-     const curriculumSubjects = @json($subjects->map(fn ($item) => ['id' => $item->id, 'semester' => $item->semester])->values());
-     const semesterSelect = document.createElement('select');
-     semesterSelect.name = 'semester';
-     semesterSelect.required = true;
-     semesterSelect.className = semesterInput.className;
-     semesterSelect.innerHTML = '<option value="">Chọn học kỳ theo chương trình đào tạo</option>' + Array.from({ length: 7 }, (_, index) => {
-         const value = `semester_${index + 1}`;
-         return `<option value="${value}">Học kỳ ${index + 1}</option>`;
-     }).join('');
-     semesterInput.replaceWith(semesterSelect);
-     const syncSemester = () => {
-         const curriculum = curriculumSubjects.find((item) => String(item.id) === String(subject.value));
-         const rawSemester = String(curriculum?.semester || '');
-         semesterSelect.value = rawSemester.startsWith('semester_') ? rawSemester : (rawSemester ? `semester_${rawSemester}` : '');
-         semesterSelect.disabled = false;
-     };
-     subject.addEventListener('change', syncSemester);
-     syncSemester();
- })();
- </script>
- <script>
  document.querySelectorAll('.exam-type-picker').forEach((picker) => {
      const choices = picker.querySelectorAll('.exam-type-option');
      const labels = [
@@ -404,6 +381,7 @@ if (examForm) {
   yearSelect.name = 'academic_year';
   yearSelect.required = true;
   yearSelect.className = yearInput.className;
+  yearSelect.dataset.nativeSelect = '1';
   yearSelect.innerHTML = '<option value="">Chọn năm học từ cơ sở dữ liệu</option>' + academicYears.map(year => `<option value="${year.code}">${year.code}${year.name ? ` · ${year.name}` : ''}</option>`).join('');
   yearInput.replaceWith(yearSelect);
   const semesterSelect = semesterInput.tagName === 'SELECT' ? semesterInput : (() => {
@@ -414,24 +392,52 @@ if (examForm) {
     semesterInput.replaceWith(select);
     return select;
   })();
-  semesterSelect.innerHTML = '<option value="">Chọn học kỳ từ chương trình đào tạo</option>' + Array.from({ length: 7 }, (_, index) => `<option value="semester_${index + 1}">Học kỳ ${index + 1}</option>`).join('');
+  semesterSelect.dataset.nativeSelect = '1';
+  semesterSelect.innerHTML = '<option value="">Chọn học kỳ</option>' + Array.from({ length: 7 }, (_, index) => `<option value="semester_${index + 1}">Học kỳ ${index + 1}</option>`).join('') + '<option value="summer">Học kỳ hè</option>';
+
+  const metadataContainer = yearSelect.closest('label').parentElement;
+  const periodFields = document.createElement('div');
+  periodFields.className = 'md:col-span-2 grid md:grid-cols-2 xl:grid-cols-4 gap-3';
+  const difficultyLabel = form.querySelector('[name="difficulty"]')?.closest('label');
+  const typeLabel = form.querySelector('[name="exam_type"]')?.closest('label');
+  const typeBox = typeLabel?.parentElement;
+  periodFields.append(yearSelect.closest('label'), semesterSelect.closest('label'));
+  if (difficultyLabel) periodFields.append(difficultyLabel);
+  if (typeLabel) periodFields.append(typeLabel);
+  form.insertBefore(periodFields, specializationSelect.closest('label'));
+  if (!metadataContainer.children.length) metadataContainer.remove();
+  if (typeBox && !typeBox.children.length) typeBox.remove();
 
   const classById = new Map(classRows.map((item) => [String(item.class_id), item]));
   const normalizeSemester = (value) => {
     const raw = String(value || '').trim();
     if (!raw) return '';
+    if (raw === 'summer') return raw;
     return raw.startsWith('semester_') ? raw : `semester_${raw}`;
+  };
+  const periodRows = () => {
+    const year = String(yearSelect.value || '');
+    const semester = normalizeSemester(semesterSelect.value);
+    if (!year || !semester) return [];
+    return curriculumRows.filter((row) => String(row.academic_year || '') === year
+      && normalizeSemester(row.semester) === semester);
   };
   const validRows = () => {
     const specializationId = String(specializationSelect.value || '');
+    return periodRows().filter((row) => !specializationId
+      || String(row.specialization_id || classById.get(String(row.class_id))?.specialization_id || '') === specializationId);
+  };
+  const refreshSemesters = () => {
     const year = String(yearSelect.value || '');
-    const semester = normalizeSemester(semesterSelect.value);
-    return curriculumRows.filter((row) => {
-      const classRow = classById.get(String(row.class_id));
-      return (!specializationId || String(row.specialization_id || classRow?.specialization_id || '') === specializationId)
-        && (!year || String(row.academic_year || '') === year)
-        && (!semester || normalizeSemester(row.semester) === semester);
-    });
+    semesterSelect.disabled = !year;
+    if (!year) semesterSelect.value = '';
+  };
+  const refreshSpecializations = () => {
+    const rows = periodRows();
+    const validIds = new Set(rows.map((row) => String(row.specialization_id || classById.get(String(row.class_id))?.specialization_id || '')));
+    [...specializationSelect.options].slice(1).forEach((option) => { option.hidden = !validIds.has(option.value); });
+    if (specializationSelect.selectedOptions[0]?.hidden) specializationSelect.value = '';
+    specializationSelect.disabled = !yearSelect.value || !semesterSelect.value || validIds.size === 0;
   };
   const refreshLessons = () => {
     if (!lessonSelect) return;
@@ -449,13 +455,11 @@ if (examForm) {
     if (!classSelect.value || (subjectSelect.value && !validSubjectIds.has(String(subjectSelect.value)))) {
       subjectSelect.value = '';
     }
-    if (!subjectSelect.value && validSubjectIds.size === 1) {
-      subjectSelect.value = [...validSubjectIds][0];
-    }
     subjectSelect.disabled = !classSelect.value || validSubjectIds.size === 0;
     refreshLessons();
   };
   const refreshClasses = () => {
+    refreshSpecializations();
     const rows = validRows();
     const validClassIds = new Set(rows.map((row) => String(row.class_id)));
     [...classSelect.options].forEach((option) => {
@@ -464,27 +468,31 @@ if (examForm) {
     if (classSelect.value && !validClassIds.has(String(classSelect.value))) {
       classSelect.value = '';
     }
+    classSelect.disabled = !specializationSelect.value || validClassIds.size === 0;
     refreshSubjects();
   };
-  const syncFieldsFromPair = () => {
-    const selectedSemester = normalizeSemester(semesterSelect.value);
-    const item = curriculumRows.find((row) => String(row.class_id) === String(classSelect.value || '')
-      && String(row.subject_id) === String(subjectSelect.value || '')
-      && (!yearSelect.value || String(row.academic_year || '') === String(yearSelect.value))
-      && (!selectedSemester || normalizeSemester(row.semester) === selectedSemester));
-    if (item) {
-      yearSelect.value = item.academic_year || yearSelect.value;
-      semesterSelect.value = normalizeSemester(item.semester);
-    }
-    yearSelect.classList.toggle('bg-blue-50', !!item);
-    semesterSelect.classList.toggle('bg-blue-50', !!item);
-    refreshLessons();
-  };
-  specializationSelect.addEventListener('change', refreshClasses);
-  yearSelect.addEventListener('change', refreshClasses);
-  semesterSelect.addEventListener('change', refreshClasses);
-  classSelect.addEventListener('change', () => { refreshSubjects(); syncFieldsFromPair(); });
-  subjectSelect.addEventListener('change', syncFieldsFromPair);
+  yearSelect.addEventListener('change', () => {
+    semesterSelect.value = '';
+    specializationSelect.value = '';
+    classSelect.value = '';
+    subjectSelect.value = '';
+    refreshSemesters();
+    refreshClasses();
+  });
+  semesterSelect.addEventListener('change', () => {
+    specializationSelect.value = '';
+    classSelect.value = '';
+    subjectSelect.value = '';
+    refreshClasses();
+  });
+  specializationSelect.addEventListener('change', () => {
+    classSelect.value = '';
+    subjectSelect.value = '';
+    refreshClasses();
+  });
+  classSelect.addEventListener('change', () => { subjectSelect.value = ''; refreshSubjects(); });
+  subjectSelect.addEventListener('change', refreshLessons);
+  refreshSemesters();
   refreshClasses();
 })();
 </script>

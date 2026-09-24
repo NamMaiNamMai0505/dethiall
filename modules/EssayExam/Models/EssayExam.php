@@ -12,10 +12,15 @@ class EssayExam extends Model
     protected $casts = ['approved_at' => 'datetime', 'locked' => 'boolean'];
 
     public function subject() { return $this->belongsTo(Subject::class); }
+    public function creator() { return $this->belongsTo(\App\Models\User::class, 'created_by_user_id'); }
     public function class() { return $this->belongsTo(\Modules\Class\Models\ClassModel::class, 'class_id'); }
     public function questions() { return $this->hasMany(EssayExamQuestion::class)->orderBy('question_number'); }
     public function logs() { return $this->hasMany(EssayExamWorkflowLog::class)->latest(); }
     public function draws() { return $this->hasMany(EssayExamDraw::class, 'essay_exam_id'); }
+    public function paperCode(int $paperNumber): string
+    {
+        return $this->code.'-D'.str_pad((string) $paperNumber, 2, '0', STR_PAD_LEFT);
+    }
     public function getStatusLabelAttribute(): string
     {
         return ['DRAFT'=>'Bản nháp','PENDING_DEPT'=>'Chờ duyệt khoa','PENDING_EXAM_OFFICE'=>'Chờ phòng đào tạo','PENDING_BGH'=>'Chờ BGH','APPROVED'=>'Đã duyệt','RETURNED'=>'Trả lại','REJECTED'=>'Từ chối'][$this->status] ?? $this->status;

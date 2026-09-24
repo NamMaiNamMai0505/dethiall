@@ -4,9 +4,9 @@
     <meta charset="utf-8">
     <title>{{ $withAnswers ? 'Đáp án đề thi' : 'Đề thi hết học phần' }}</title>
     <style>
-        @page { size: A4; margin: 16mm 20mm 18mm; }
+        @page { size: A4; margin: 0; }
         * { box-sizing: border-box; }
-        body { margin: 0; min-height: 263mm; color: #111; font-family: "Times New Roman", Times, serif; font-size: 14px; line-height: 1.35; display: flex; flex-direction: column; }
+        body { margin: 0; min-height: 297mm; padding: 16mm 20mm 18mm; color: #111; font-family: "Times New Roman", Times, serif; font-size: 14px; line-height: 1.35; display: flex; flex-direction: column; }
         .no-print { position: fixed; top: 12px; right: 12px; display: flex; gap: 8px; z-index: 5; font-family: Arial, sans-serif; }
         .no-print button, .no-print a { padding: 8px 14px; border: 0; border-radius: 5px; background: #1e3a8a; color: #fff; cursor: pointer; text-decoration: none; font: inherit; }
         .no-print a { background: #475569; }
@@ -32,9 +32,9 @@
         .answer-key-table th, .answer-key-table td { border: 1px solid #222; padding: 4px 6px; text-align: center; }
         .answer-key-table th { font-weight: 700; }
         .section-title { margin: 14px 0 7px; font-weight: 700; }
-        .end { text-align: center; font-weight: 700; margin: auto 0 6px; padding-top: 18px; }
+        .end { text-align: center; font-weight: 700; margin: 12px 0 6px; break-inside: avoid; }
         .note { text-align: center; font-size: 12px; font-style: italic; }
-        @media print { .no-print { display: none; } }
+        @media print { .no-print { display: none !important; } }
     </style>
 </head>
 <body>
@@ -71,7 +71,9 @@
             return implode("\n", array_map(fn ($line) => preg_match('/^[-–—•]/u', $line) ? '- '.trim(preg_replace('/^[-–—•]\s*/u', '', $line)) : '- '.$line, $lines));
         };
         $drawTypeLabel = $draw->draw_type === 'ODD' ? 'Lẻ' : 'Chẵn';
-        $examCode = $draw->exam->code.'-D'.str_pad($draw->paper_number, 2, '0', STR_PAD_LEFT);
+        $examCode = $draw->exam->paperCode((int) $draw->paper_number);
+        $totalPoints = $questions->sum(fn ($question) => $draw->question_points && $question->question_type === 'multiple_choice'
+            ? (float) $draw->question_points : (float) $question->points);
     @endphp
     <div class="no-print actions"><button onclick="window.print()">In trang này</button><a href="{{ route('essay-exams.draw') }}">Quay lại Rút đề</a></div>
     <table class="head">
@@ -83,10 +85,12 @@
     <section class="title">
         <h1>{{ $withAnswers ? 'ĐÁP ÁN ĐỀ THI HẾT HỌC PHẦN' : 'ĐỀ THI HẾT HỌC PHẦN' }}</h1>
         <div class="meta">
-            <div class="line">Môn: {{ $draw->exam->subject->name ?? $draw->exam->title }}</div>
+            <div class="line">Môn thi: {{ $draw->exam->subject->name ?? $draw->exam->title }}</div>
             <div class="line">Ngày thi: {{ $draw->exam_date?->format('d/m/Y') ?? '' }}</div>
-            <div class="line">Lớp: {{ $draw->class_name ?: '' }}</div>
+            <div class="line">Giờ thi: {{ $draw->exam_time ? substr((string) $draw->exam_time, 0, 5) : '' }}</div>
+            <div class="line">Lớp thi: {{ $draw->class_name ?: '' }}</div>
             <div class="line">Thời gian: {{ $draw->exam->duration_minutes ?: 60 }} phút</div>
+            <div class="line">Tổng điểm: {{ number_format($totalPoints, 2, ',', '.') }}</div>
             <div class="line">Loại đề: {{ $drawTypeLabel }}</div>
             <div class="line">Mã đề: {{ $examCode }}</div>
         </div>

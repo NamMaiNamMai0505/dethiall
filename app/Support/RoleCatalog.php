@@ -150,6 +150,7 @@ final class RoleCatalog
                 'label' => 'Giảng viên',
                 'description' => 'Tự kê khai giờ quy đổi và NCKH; dạy trên LMS và nhập điểm cho lớp mình phụ trách.',
                 'scope' => 'Lớp / khóa được phân công',
+                'permissions' => ['essay-exams.mine', 'essay-exams.show'],
                 'abilities' => self::instructorAbilities(),
             ],
             [
@@ -204,11 +205,7 @@ final class RoleCatalog
             return [];
         }
 
-        if (isset($group['permissions'])) {
-            return array_values(array_unique($group['permissions']));
-        }
-
-        $names = [];
+        $names = $group['permissions'] ?? [];
         foreach ($group['abilities'] as $application => $actions) {
             foreach ($actions as $action) {
                 foreach (ApplicationRegistry::permissionNamesFor($application, $action) as $permission) {
@@ -481,7 +478,6 @@ final class RoleCatalog
             'grades.requests' => [self::VIEW, self::CREATE],
             'grades.extracts' => [self::VIEW, self::EXPORT],
             // Giảng viên được tạo/import, xem đề của mình và tra cứu ngân hàng đề
-            'essay-exams' => [self::VIEW],
             'essay-exams.authoring' => [self::VIEW, self::CREATE],
             'essay-exams.import' => [self::VIEW, self::CREATE],
             'essay-exams.submission' => [self::VIEW, self::CREATE],

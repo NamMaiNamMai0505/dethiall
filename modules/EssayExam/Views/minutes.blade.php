@@ -44,8 +44,8 @@
     <table class="codes">
         <thead><tr><th>Đề thi</th><th>Mã đề thi</th></tr></thead>
         <tbody>
-            <tr><td>Đề chẵn</td><td><b>{{ $even->exam->code }}-D{{ str_pad($even->paper_number, 2, '0', STR_PAD_LEFT) }}</b></td></tr>
-            <tr><td>Đề lẻ</td><td><b>{{ $odd->exam->code }}-D{{ str_pad($odd->paper_number, 2, '0', STR_PAD_LEFT) }}</b></td></tr>
+            <tr><td>Đề chẵn</td><td><b>{{ $even->exam->code }}D{{ $even->paper_number }}</b></td></tr>
+            <tr><td>Đề lẻ</td><td><b>{{ $odd->exam->code }}D{{ $odd->paper_number }}</b></td></tr>
         </tbody>
     </table>
     <div class="sign">
