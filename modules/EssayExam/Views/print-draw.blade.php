@@ -34,6 +34,9 @@
         .section-title { margin: 14px 0 7px; font-weight: 700; }
         .end { text-align: center; font-weight: 700; margin: 12px 0 6px; break-inside: avoid; }
         .note { text-align: center; font-size: 12px; font-style: italic; }
+        .answer-signatures { display: flex; width: 100%; margin-top: 12mm; break-inside: avoid; page-break-inside: avoid; }
+        .answer-signatures > div { width: 50%; min-height: 28mm; text-align: center; }
+        .answer-signatures strong { display: block; }
         @media print { .no-print { display: none !important; } }
     </style>
 </head>
@@ -158,6 +161,12 @@
     @endif
     <div class="end">--------------------HẾT--------------------</div>
     <div class="note">(Thí sinh không được sử dụng tài liệu, cán bộ coi thi không giải thích gì thêm)</div>
+    @if($withAnswers)
+        <div class="answer-signatures">
+            <div><strong>CHỦ NHIỆM KHOA</strong><span>(Ký, ghi rõ họ tên)</span></div>
+            <div><strong>GIÁO VIÊN</strong><span>(Ký, ghi rõ họ tên)</span></div>
+        </div>
+    @endif
     @if($autoPrint)
         <script>window.addEventListener('load', function () { document.title = ''; setTimeout(function () { window.print(); }, 350); });</script>
     @endif
