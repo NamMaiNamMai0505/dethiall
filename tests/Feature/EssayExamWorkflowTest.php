@@ -59,6 +59,7 @@ class EssayExamWorkflowTest extends TestCase
         Schema::create('subjects', function (Blueprint $table): void {
             $table->id();
             $table->string('name');
+            $table->string('abbreviation')->nullable();
             $table->unsignedBigInteger('specialization_id');
             $table->softDeletes();
         });
@@ -75,6 +76,10 @@ class EssayExamWorkflowTest extends TestCase
             $table->string('exam_type')->default('Tự luận');
             $table->unsignedInteger('duration_minutes')->default(60);
             $table->timestamps();
+        });
+        Schema::create('essay_exam_code_sequences', function (Blueprint $table): void {
+            $table->unsignedTinyInteger('id')->primary();
+            $table->unsignedSmallInteger('last_number');
         });
         Schema::create('essay_exam_questions', function (Blueprint $table): void {
             $table->id();
@@ -121,11 +126,12 @@ class EssayExamWorkflowTest extends TestCase
         DB::table('training_systems')->insert([['id' => 1, 'name' => 'Cao dang'], ['id' => 2, 'name' => 'Trung cap']]);
         DB::table('specializations')->insert([['id' => 1, 'name' => 'Nganh A', 'training_system_id' => 1], ['id' => 2, 'name' => 'Nganh B', 'training_system_id' => 2]]);
         DB::table('classes')->insert([['id' => 1, 'name' => 'Lop A', 'code' => 'A1', 'specialization_id' => 1], ['id' => 2, 'name' => 'Lop B', 'code' => 'B1', 'specialization_id' => 2]]);
-        DB::table('subjects')->insert([['id' => 1, 'name' => 'Mon A', 'specialization_id' => 1], ['id' => 2, 'name' => 'Mon B', 'specialization_id' => 2]]);
+        DB::table('subjects')->insert([['id' => 1, 'name' => 'Mon A', 'abbreviation' => 'MA', 'specialization_id' => 1], ['id' => 2, 'name' => 'Mon B', 'abbreviation' => 'MB', 'specialization_id' => 2]]);
         DB::table('essay_exams')->insert([
             ['id' => 1, 'code' => 'TMP-A', 'title' => 'A', 'subject_id' => 1, 'class_id' => 1, 'created_by_user_id' => 2, 'created_at' => now(), 'updated_at' => now()],
             ['id' => 2, 'code' => 'TMP-B', 'title' => 'B', 'subject_id' => 2, 'class_id' => 2, 'created_by_user_id' => 3, 'created_at' => now(), 'updated_at' => now()],
         ]);
+        DB::table('essay_exam_code_sequences')->insert(['id' => 1, 'last_number' => 0]);
     }
 
     public function test_faculty_list_is_unit_scoped_and_filters_by_system_major_and_class(): void
@@ -194,6 +200,35 @@ class EssayExamWorkflowTest extends TestCase
         $request = Request::create('/essay-exams/mine', 'GET', ['class_id' => 3]);
         $request->setUserResolver(fn () => $user);
         $this->assertSame([], $controller->mine($request)->getData()['exams']->pluck('id')->all());
+    }
+
+    public function test_exam_title_uses_subject_abbreviation_and_class_code(): void
+    {
+        $title = new \ReflectionMethod(new EssayExamController(), 'examTitle');
+
+        $this->assertSame('Bộ ĐTTL môn MA Lớp A1', $title->invoke(new EssayExamController(), 1, 1));
+    }
+
+    public function test_exam_codes_are_six_characters_and_skip_existing_codes(): void
+    {
+        DB::table('essay_exams')->insert(['id' => 3, 'code' => 'TL0001', 'title' => 'Existing', 'subject_id' => 1, 'class_id' => 1, 'created_by_user_id' => 2, 'created_at' => now(), 'updated_at' => now()]);
+        $controller = new EssayExamController();
+        $nextCode = new \ReflectionMethod($controller, 'nextExamCode');
+
+        $this->assertSame('TL0002', $nextCode->invoke($controller));
+        $this->assertSame('TL0003', $nextCode->invoke($controller));
+        $this->assertSame(3, DB::table('essay_exam_code_sequences')->where('id', 1)->value('last_number'));
+    }
+
+    public function test_exam_code_sequence_stops_at_9999(): void
+    {
+        DB::table('essay_exam_code_sequences')->where('id', 1)->update(['last_number' => 9998]);
+        $controller = new EssayExamController();
+        $nextCode = new \ReflectionMethod($controller, 'nextExamCode');
+
+        $this->assertSame('TL9999', $nextCode->invoke($controller));
+        $this->expectException(\Symfony\Component\HttpKernel\Exception\HttpException::class);
+        $nextCode->invoke($controller);
     }
 
     public function test_paper_code_matches_the_live_draw_format(): void

@@ -75,7 +75,24 @@ class EssayExamController extends Controller
         $subject = Subject::findOrFail($subjectId);
         $class = ClassModel::findOrFail($classId);
 
-        return 'Bộ ĐTTL môn '.$subject->name.' Lớp '.($class->code ?: $class->name);
+        return 'Bộ ĐTTL môn '.$subject->short_label.' Lớp '.($class->code ?: $class->name);
+    }
+
+    private function nextExamCode(): string
+    {
+        return DB::transaction(function (): string {
+            $sequence = DB::table('essay_exam_code_sequences')->where('id', 1)->lockForUpdate()->first();
+            abort_unless($sequence, 500, 'Chưa khởi tạo dãy mã bộ đề.');
+            $number = (int) $sequence->last_number;
+            do {
+                abort_if($number >= 9999, 422, 'Đã hết dãy mã bộ đề TL0001–TL9999.');
+                $code = 'TL'.str_pad((string) ++$number, 4, '0', STR_PAD_LEFT);
+            } while (EssayExam::where('code', $code)->exists());
+
+            DB::table('essay_exam_code_sequences')->where('id', 1)->update(['last_number' => $number]);
+
+            return $code;
+        });
     }
 
     public function approval(Request $request): View
@@ -542,9 +559,6 @@ class EssayExamController extends Controller
             abort_if($essayCount < 1, 422, 'Hãy nhập số câu tự luận cần rút.');
             $course = LmsCourse::where('subject_id', $data['subject_id'])->where('class_id', $class->id)->first();
             abort_unless($course, 422, 'Chưa có khóa LMS cho môn/lớp này.');
-            $code = 'AUTO-'.now()->format('YmdHis').'-'.random_int(100,999);
-            $exam = EssayExam::create(['code'=>$code,'title'=>'Đề tích hợp tự động '.$chosenSubject->name,'subject_id'=>$data['subject_id'],'class_id'=>$class->id,'duration_minutes'=>60,'exam_type'=>'Tích hợp','created_by_user_id'=>$request->user()->id,'created_by_username'=>$request->user()->email,'created_by_display_name'=>$request->user()->name,'note'=>'Cơ cấu đề: '.json_encode($plan, JSON_UNESCAPED_UNICODE)]);
-            $number = 0;
             $pickedMcqQuestions = collect();
             foreach ($plan as $lessonId => $counts) {
                 $lessonId = (int) $lessonId; $mcqCount = max(0, (int) ($counts['mcq'] ?? 0));
@@ -568,6 +582,9 @@ class EssayExamController extends Controller
             abort_if($essayCount > 0 && $essayTotalPoints <= 0, 422, 'Hãy nhập tổng điểm tự luận lớn hơn 0.');
             $mcqPoint = $mcqTotal > 0 ? round($mcqTotalPoints / $mcqTotal, 4) : 0;
             $essayPoint = $essayCount > 0 ? round($essayTotalPoints / $essayCount, 4) : 0;
+            $code = $this->nextExamCode();
+            $exam = EssayExam::create(['code'=>$code,'title'=>$this->examTitle((int) $data['subject_id'], (int) $class->id),'subject_id'=>$data['subject_id'],'class_id'=>$class->id,'duration_minutes'=>60,'exam_type'=>'Tích hợp','created_by_user_id'=>$request->user()->id,'created_by_username'=>$request->user()->email,'created_by_display_name'=>$request->user()->name,'note'=>'Cơ cấu đề: '.json_encode($plan, JSON_UNESCAPED_UNICODE)]);
+            $number = 0;
             foreach ($pickedMcqQuestions as $index => $item) {
                 $q = $item['question'];
                 $point = $index === $mcqTotal - 1 ? round($mcqTotalPoints - ($mcqPoint * max(0, $mcqTotal - 1)), 4) : $mcqPoint;
@@ -730,7 +747,7 @@ class EssayExamController extends Controller
 
     public function import(Request $request): RedirectResponse
     {
-        $data = $request->validate(['import_file'=>'nullable|file|extensions:txt,csv,tsv,doc,docx|max:10240','answer_file'=>'nullable|file|extensions:txt,csv,tsv,doc,docx|max:10240','import_mode'=>'nullable|in:question,answer','import_code'=>'required|string|max:80','import_title'=>'nullable|string|max:255','import_subject_id'=>'required|exists:subjects,id','import_lesson_id'=>'nullable|integer|exists:lms_lessons,id','duration_minutes'=>'required|integer|min:1|max:600','academic_year'=>'required|string|max:20','semester'=>'required|string|max:30','difficulty'=>'required|in:Dễ,Vừa,Khó','exam_type'=>'required|in:Tự luận,Tích hợp']);
+        $data = $request->validate(['import_file'=>'nullable|file|extensions:txt,csv,tsv,doc,docx|max:10240','answer_file'=>'nullable|file|extensions:txt,csv,tsv,doc,docx|max:10240','import_mode'=>'nullable|in:question,answer','import_title'=>'nullable|string|max:255','import_subject_id'=>'required|exists:subjects,id','import_lesson_id'=>'nullable|integer|exists:lms_lessons,id','duration_minutes'=>'required|integer|min:1|max:600','academic_year'=>'required|string|max:20','semester'=>'required|string|max:30','difficulty'=>'required|in:Dễ,Vừa,Khó','exam_type'=>'required|in:Tự luận,Tích hợp']);
         $data['import_mode'] = $data['import_mode'] ?? 'question';
         $data['import_specialization_id'] = $request->validate(['import_specialization_id' => 'required|exists:specializations,id'])['import_specialization_id'];
         abort_unless(preg_match('/^(?:semester_[1-7]|summer)$/', (string) $data['semester']) === 1, 422, 'Học kỳ phải là Học kỳ 1-7 hoặc Học kỳ hè.');
@@ -788,7 +805,7 @@ class EssayExamController extends Controller
         if ($request->hasFile('import_files')) {
             return $this->importMultipleFiles($request, $data, $user);
         }
-        $importDocument = $request->hasFile('import_file') ? $this->storeImportDocumentAsPdf($request->file('import_file'), $data['import_code']) : [];
+        $importDocument = $request->hasFile('import_file') ? $this->storeImportDocumentAsPdf($request->file('import_file'), (string) Str::ulid()) : [];
         $text = $request->hasFile('import_file') ? $this->readImportText($data['import_file']) : '';
         $rows = $this->parseImportRows($text);
         $questionTypes = collect($rows)->pluck('question_type')->filter()->unique();
@@ -797,33 +814,9 @@ class EssayExamController extends Controller
         }
         abort_unless($rows, 422, 'Không nhận diện được bảng câu hỏi/đáp án. Hãy dùng mẫu TSV: Đề số | Câu hỏi | Nội dung | Đáp án | Điểm.');
         $data['import_class_id'] = $request->integer('import_class_id');
-        $paperGroups = collect($rows)->groupBy('paper');
-        if ($paperGroups->count() > 1) {
-            $createdExams = DB::transaction(function () use ($paperGroups, $data, $user, $importDocument, $class) {
-                $created = [];
-                foreach ($paperGroups as $paper => $questions) {
-                    $baseCode = trim($data['import_code']).'-D'.(int) $paper;
-                    $code = $baseCode;
-                    $version = 2;
-                    while (EssayExam::where('code', $code)->exists()) $code = $baseCode.'-B'.$version++;
-                    $exam = EssayExam::create(['code'=>$code,'title'=>$this->examTitle((int) $data['import_subject_id'], (int) $class->id),'subject_id'=>$data['import_subject_id'],'class_id'=>$class->id,'duration_minutes'=>$data['duration_minutes'],'academic_year'=>$data['academic_year'],'semester'=>$data['semester'],'difficulty'=>$data['difficulty'],'exam_type'=>$data['exam_type'],'created_by_user_id'=>$user->id,'created_by_username'=>$user->email,'created_by_display_name'=>$user->name,'note'=>'Import đề số '.(int) $paper] + $importDocument);
-                    $exam->update(['class_id' => $data['import_class_id']]);
-                    foreach ($questions as $i => $q) $exam->questions()->create(['lms_lesson_id'=>$data['import_lesson_id'] ?? null,'paper_number'=>1,'question_number'=>$i+1,'question_type'=>$q['question_type'] ?? 'essay','content'=>$q['content'],'options'=>$q['options'] ?? null,'answer'=>$q['answer'] ?? '','points'=>$q['points'] ?? 1]);
-                    $this->log($exam,'IMPORT',null,'DRAFT',$user);
-                    $created[] = $exam;
-                }
-                return $created;
-            });
-            return redirect()->route('essay-exams.show', $createdExams[0])->with('success', 'Đã tách và import '.count($createdExams).' đề riêng từ file Word.');
-        }
         // Một lần import = một bộ đề; mỗi đề số được phân biệt bằng paper_number.
         $created = DB::transaction(function () use ($rows, $data, $user, $importDocument, $class) {
-            $baseCode = trim($data['import_code']);
-            $code = $baseCode;
-            $version = 2;
-            while (EssayExam::where('code', $code)->exists()) $code = $baseCode.'-B'.$version++;
-            $data['import_code'] = $code;
-            $exam = EssayExam::create(['code'=>$data['import_code'],'title'=>$this->examTitle((int) $data['import_subject_id'], (int) $class->id),'subject_id'=>$data['import_subject_id'],'class_id'=>$class->id,'duration_minutes'=>$data['duration_minutes'],'academic_year'=>$data['academic_year'],'semester'=>$data['semester'],'difficulty'=>$data['difficulty'],'exam_type'=>$data['exam_type'],'created_by_user_id'=>$user->id,'created_by_username'=>$user->email,'created_by_display_name'=>$user->name,'note'=>'Import bộ đề'] + $importDocument);
+            $exam = EssayExam::create(['code'=>$this->nextExamCode(),'title'=>$this->examTitle((int) $data['import_subject_id'], (int) $class->id),'subject_id'=>$data['import_subject_id'],'class_id'=>$class->id,'duration_minutes'=>$data['duration_minutes'],'academic_year'=>$data['academic_year'],'semester'=>$data['semester'],'difficulty'=>$data['difficulty'],'exam_type'=>$data['exam_type'],'created_by_user_id'=>$user->id,'created_by_username'=>$user->email,'created_by_display_name'=>$user->name,'note'=>'Import bộ đề'] + $importDocument);
             $exam->update(['class_id' => $data['import_class_id']]);
             foreach (collect($rows)->groupBy('paper') as $paper => $questions) {
                 foreach ($questions as $i => $q) $exam->questions()->create(['lms_lesson_id'=>$data['import_lesson_id'] ?? null,'paper_number'=>(int)$paper,'question_number'=>$i+1,'question_type'=>$q['question_type'] ?? 'essay','content'=>$q['content'],'options'=>$q['options'] ?? null,'answer'=>$q['answer'],'points'=>$q['points']]);
@@ -833,24 +826,12 @@ class EssayExamController extends Controller
             return $exam;
         });
         return redirect()->route('essay-exams.show',$created)->with('success','Đã import bộ đề gồm '.collect($rows)->pluck('paper')->unique()->count().' đề số và '.count($rows).' câu hỏi.');
-        /* Legacy code below is unreachable and kept temporarily. */
-        $created = DB::transaction(function () use ($rows, $data, $user) {
-            $groups = collect($rows)->groupBy('paper'); $first = null;
-            foreach ($groups as $paper => $questions) {
-                $code = count($groups) > 1 ? $data['import_code'].'-'.$paper : $data['import_code'];
-                $exam = EssayExam::create(['code'=>$code,'title'=>$data['import_title'] ?: 'Đề thi tự luận import'.(count($groups)>1 ? ' số '.$paper : ''),'subject_id'=>$data['import_subject_id'],'duration_minutes'=>$data['duration_minutes'],'created_by_user_id'=>$user->id,'created_by_username'=>$user->email,'created_by_display_name'=>$user->name,'note'=>'Import từ '.($data['import_file'] ?? $data['answer_file'])->getClientOriginalName()]);
-                foreach ($questions as $i => $q) $exam->questions()->create(['question_number'=>$i+1,'question_type'=>$q['question_type'] ?? 'essay','content'=>$q['content'],'options'=>$q['options'] ?? null,'answer'=>$q['answer'],'points'=>$q['points']]);
-                $this->log($exam,'IMPORT',null,'DRAFT',$user); $first ??= $exam;
-            }
-            return $first;
-        });
-        return redirect()->route('essay-exams.show',$created)->with('success','Đã import '.count($rows).' câu hỏi từ file. Các đề được lưu ở trạng thái bản nháp.');
     }
 
     public function previewImport(Request $request): View
     {
         $request->validate(['import_specialization_id' => 'required|exists:specializations,id']);
-        $data = $request->validate(['import_file'=>'required|file|extensions:txt,csv,tsv,doc,docx|max:10240','import_code'=>'required|string|max:80','import_title'=>'nullable|string|max:255','import_subject_id'=>'required|exists:subjects,id','import_lesson_id'=>'nullable|integer|exists:lms_lessons,id','import_class_id'=>'required|exists:classes,id','duration_minutes'=>'required|integer|min:1|max:600','academic_year'=>'required|string|max:20','semester'=>'required|string|max:30','difficulty'=>'required|in:Dễ,Vừa,Khó','exam_type'=>'required|in:Tự luận,Tích hợp']);
+        $data = $request->validate(['import_file'=>'required|file|extensions:txt,csv,tsv,doc,docx|max:10240','import_title'=>'nullable|string|max:255','import_subject_id'=>'required|exists:subjects,id','import_lesson_id'=>'nullable|integer|exists:lms_lessons,id','import_class_id'=>'required|exists:classes,id','duration_minutes'=>'required|integer|min:1|max:600','academic_year'=>'required|string|max:20','semester'=>'required|string|max:30','difficulty'=>'required|in:Dễ,Vừa,Khó','exam_type'=>'required|in:Tự luận,Tích hợp']);
         abort_unless($data['exam_type'] === 'Tự luận' || ! empty($data['import_lesson_id']), 422, 'Import dạng trắc nghiệm/tích hợp bắt buộc phải chọn bài học.');
         $data['import_specialization_id'] = $request->integer('import_specialization_id');
         abort_unless(preg_match('/^(?:semester_[1-7]|summer)$/', (string) $data['semester']) === 1, 422, 'Học kỳ phải là Học kỳ 1-7 hoặc Học kỳ hè.');
@@ -858,7 +839,7 @@ class EssayExamController extends Controller
         abort_unless($curriculum, 422, 'Lớp/môn đã chọn chưa được mở trong năm học và học kỳ này.');
         $data['academic_year'] = $curriculum['academic_year'];
         $data['semester'] = $curriculum['semester'];
-        $importDocument = $this->storeImportDocumentAsPdf($data['import_file'], $data['import_code']);
+        $importDocument = $this->storeImportDocumentAsPdf($data['import_file'], (string) Str::ulid());
         $data = array_merge($data, $importDocument);
         $request->session()->put('essay_exam_import_preview', [
             'user_id' => $request->user()->id,
@@ -867,9 +848,8 @@ class EssayExamController extends Controller
         ]);
         $rows = $this->parseImportRows($this->readImportText($data['import_file']));
         abort_unless($rows, 422, 'Không nhận diện được câu hỏi trong file.');
-        $duplicateCode = EssayExam::where('code',$data['import_code'])->exists();
         $papers = collect($rows)->groupBy('paper')->map(fn ($qs,$paper) => ['paper'=>(int)$paper,'questions'=>$qs->count(),'points'=>$qs->sum('points')])->values();
-        return view('essay-exam::import-preview', compact('data','papers','duplicateCode','rows'));
+        return view('essay-exam::import-preview', compact('data','papers','rows'));
     }
 
     public function integratedAnswers(Request $request): View
@@ -951,7 +931,7 @@ class EssayExamController extends Controller
 
     public function confirmImport(Request $request): RedirectResponse
     {
-        $data = $request->validate(['rows_json'=>'required|string','import_code'=>'required|string|max:80','import_title'=>'nullable|string|max:255','import_subject_id'=>'required|exists:subjects,id','import_lesson_id'=>'nullable|integer|exists:lms_lessons,id','import_class_id'=>'required|exists:classes,id','duration_minutes'=>'required|integer|min:1|max:600','academic_year'=>'required|string|max:20','semester'=>'required|string|max:30','difficulty'=>'required|in:Dễ,Vừa,Khó','exam_type'=>'required|in:Tự luận,Tích hợp','source_document_path'=>'nullable|string|max:255','source_pdf_path'=>'nullable|string|max:255','source_original_name'=>'nullable|string|max:255']);
+        $data = $request->validate(['rows_json'=>'required|string','import_title'=>'nullable|string|max:255','import_subject_id'=>'required|exists:subjects,id','import_lesson_id'=>'nullable|integer|exists:lms_lessons,id','import_class_id'=>'required|exists:classes,id','duration_minutes'=>'required|integer|min:1|max:600','academic_year'=>'required|string|max:20','semester'=>'required|string|max:30','difficulty'=>'required|in:Dễ,Vừa,Khó','exam_type'=>'required|in:Tự luận,Tích hợp','source_document_path'=>'nullable|string|max:255','source_pdf_path'=>'nullable|string|max:255','source_original_name'=>'nullable|string|max:255']);
         $preview = $request->session()->get('essay_exam_import_preview');
         abort_unless(is_array($preview)
             && (int) ($preview['user_id'] ?? 0) === (int) $request->user()->id
@@ -979,11 +959,7 @@ class EssayExamController extends Controller
              abort_unless($hasSchedule || $hasTeachingAssignment || $hasLmsCourse, 403, 'Bạn chưa được phân công môn/lớp này.');
         }
         $created = DB::transaction(function () use ($rows, $data, $user) {
-            $baseCode = trim($data['import_code']);
-            $code = $baseCode;
-            $version = 2;
-            while (EssayExam::where('code', $code)->exists()) $code = $baseCode.'-B'.$version++;
-            $exam = EssayExam::create(['code'=>$code,'title'=>$this->examTitle((int) $data['import_subject_id'], (int) $data['import_class_id']),'subject_id'=>$data['import_subject_id'],'class_id'=>$data['import_class_id'],'duration_minutes'=>$data['duration_minutes'],'academic_year'=>$data['academic_year'],'semester'=>$data['semester'],'difficulty'=>$data['difficulty'],'exam_type'=>$data['exam_type'],'created_by_user_id'=>$user->id,'created_by_username'=>$user->email,'created_by_display_name'=>$user->name,'note'=>'Import bộ đề','source_document_path'=>$data['source_document_path'] ?? null,'source_pdf_path'=>$data['source_pdf_path'] ?? null,'source_original_name'=>$data['source_original_name'] ?? null]);
+            $exam = EssayExam::create(['code'=>$this->nextExamCode(),'title'=>$this->examTitle((int) $data['import_subject_id'], (int) $data['import_class_id']),'subject_id'=>$data['import_subject_id'],'class_id'=>$data['import_class_id'],'duration_minutes'=>$data['duration_minutes'],'academic_year'=>$data['academic_year'],'semester'=>$data['semester'],'difficulty'=>$data['difficulty'],'exam_type'=>$data['exam_type'],'created_by_user_id'=>$user->id,'created_by_username'=>$user->email,'created_by_display_name'=>$user->name,'note'=>'Import bộ đề','source_document_path'=>$data['source_document_path'] ?? null,'source_pdf_path'=>$data['source_pdf_path'] ?? null,'source_original_name'=>$data['source_original_name'] ?? null]);
              foreach (collect($rows)->groupBy('paper') as $paper => $questions) foreach ($questions as $i => $q) $exam->questions()->create(['lms_lesson_id'=>$data['import_lesson_id'] ?? null,'paper_number'=>(int)$paper,'question_number'=>$i+1,'question_type'=>$q['question_type'] ?? 'essay','content'=>$q['content'],'options'=>$q['options'] ?? null,'answer'=>$q['answer'] ?? '','points'=>$q['points'] ?? 1]);
              if (in_array($data['exam_type'], ['Trắc nghiệm','Tích hợp'], true)) $this->syncLmsMultipleChoice($rows, $data, $user);
             $this->log($exam,'IMPORT',null,'DRAFT',$user); return $exam;
@@ -1019,7 +995,7 @@ class EssayExamController extends Controller
 
     public function store(Request $request): RedirectResponse
     {
-        $data = $request->validate(['code'=>'required|string|max:80|unique:essay_exams,code','subject_id'=>'required|exists:subjects,id','class_id'=>'required|exists:classes,id','duration_minutes'=>'required|integer|min:1|max:600','academic_year'=>'required|string|max:20','semester'=>'required|string|max:30','difficulty'=>'required|in:Dễ,Vừa,Khó','exam_type'=>'required|in:Tự luận,Tích hợp','note'=>'nullable|string','questions'=>'required|array|min:1','questions.*.content'=>'required|string','questions.*.answer'=>'nullable|string','questions.*.points'=>'required|numeric|min:0']);
+        $data = $request->validate(['subject_id'=>'required|exists:subjects,id','class_id'=>'required|exists:classes,id','duration_minutes'=>'required|integer|min:1|max:600','academic_year'=>'required|string|max:20','semester'=>'required|string|max:30','difficulty'=>'required|in:Dễ,Vừa,Khó','exam_type'=>'required|in:Tự luận,Tích hợp','note'=>'nullable|string','questions'=>'required|array|min:1','questions.*.content'=>'required|string','questions.*.answer'=>'nullable|string','questions.*.points'=>'required|numeric|min:0']);
         $user = $request->user();
         $class = ClassModel::findOrFail($data['class_id']);
         abort_unless(preg_match('/^(?:semester_[1-7]|summer)$/', (string) $data['semester']) === 1, 422, 'Học kỳ phải là Học kỳ 1-7 hoặc Học kỳ hè.');
@@ -1037,7 +1013,7 @@ class EssayExamController extends Controller
             abort_unless($hasSchedule || $hasTeachingAssignment || $hasLmsCourse, 403, 'Bạn chưa được phân công môn/lớp này.');
         }
         $exam = DB::transaction(function () use ($data, $user) {
-            $exam = EssayExam::create(['code'=>$data['code'],'title'=>$this->examTitle((int) $data['subject_id'], (int) $data['class_id']),'subject_id'=>$data['subject_id'],'class_id'=>$data['class_id'],'duration_minutes'=>$data['duration_minutes'],'academic_year'=>$data['academic_year'],'semester'=>$data['semester'],'difficulty'=>$data['difficulty'],'exam_type'=>$data['exam_type'],'note'=>$data['note'] ?? null,'created_by_user_id'=>$user->id,'created_by_username'=>$user->email,'created_by_display_name'=>$user->name]);
+            $exam = EssayExam::create(['code'=>$this->nextExamCode(),'title'=>$this->examTitle((int) $data['subject_id'], (int) $data['class_id']),'subject_id'=>$data['subject_id'],'class_id'=>$data['class_id'],'duration_minutes'=>$data['duration_minutes'],'academic_year'=>$data['academic_year'],'semester'=>$data['semester'],'difficulty'=>$data['difficulty'],'exam_type'=>$data['exam_type'],'note'=>$data['note'] ?? null,'created_by_user_id'=>$user->id,'created_by_username'=>$user->email,'created_by_display_name'=>$user->name]);
             foreach ($data['questions'] as $number => $question) $exam->questions()->create(['question_number'=>$number+1,'question_type'=>$question['type'] ?? 'essay','content'=>$question['content'],'options'=>$question['options'] ?? null,'answer'=>$question['answer'] ?? null,'points'=>$question['points']]);
             $this->log($exam, 'CREATE', null, 'DRAFT', $user);
             return $exam;
@@ -1564,7 +1540,7 @@ class EssayExamController extends Controller
         $files = array_values((array) $request->file('import_files', []));
         $created = [];
         foreach ($files as $file) {
-            $importDocument = $this->storeImportDocumentAsPdf($file, $data['import_code']);
+            $importDocument = $this->storeImportDocumentAsPdf($file, (string) Str::ulid());
             $fileText = $this->readImportText($file);
             $rows = $this->parseImportRows($fileText);
             abort_unless($rows, 422, 'Không nhận diện được câu hỏi trong file '.$file->getClientOriginalName().'.');
@@ -1573,11 +1549,7 @@ class EssayExamController extends Controller
             if ($types->contains('multiple_choice') && $types->contains('essay')) $fileData['exam_type'] = 'Tích hợp';
             $fileData['import_class_id'] = $request->integer('import_class_id');
             $created[] = DB::transaction(function () use ($rows, $fileData, $user, $file, $importDocument) {
-                $baseCode = trim($fileData['import_code']).'-'.strtoupper(pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME));
-                $code = $baseCode;
-                $version = 2;
-                while (EssayExam::where('code', $code)->exists()) $code = $baseCode.'-B'.$version++;
-                $exam = EssayExam::create(['code'=>$code,'title'=>$this->examTitle((int) $fileData['import_subject_id'], (int) $fileData['import_class_id']),'subject_id'=>$fileData['import_subject_id'],'class_id'=>$fileData['import_class_id'],'duration_minutes'=>$fileData['duration_minutes'],'academic_year'=>$fileData['academic_year'],'semester'=>$fileData['semester'],'difficulty'=>$fileData['difficulty'],'exam_type'=>$fileData['exam_type'],'created_by_user_id'=>$user->id,'created_by_username'=>$user->email,'created_by_display_name'=>$user->name,'note'=>'Import nhiều file: '.$file->getClientOriginalName()] + $importDocument);
+                $exam = EssayExam::create(['code'=>$this->nextExamCode(),'title'=>$this->examTitle((int) $fileData['import_subject_id'], (int) $fileData['import_class_id']),'subject_id'=>$fileData['import_subject_id'],'class_id'=>$fileData['import_class_id'],'duration_minutes'=>$fileData['duration_minutes'],'academic_year'=>$fileData['academic_year'],'semester'=>$fileData['semester'],'difficulty'=>$fileData['difficulty'],'exam_type'=>$fileData['exam_type'],'created_by_user_id'=>$user->id,'created_by_username'=>$user->email,'created_by_display_name'=>$user->name,'note'=>'Import nhiều file: '.$file->getClientOriginalName()] + $importDocument);
                 foreach (collect($rows)->groupBy('paper') as $paper => $questions) foreach ($questions as $i => $q) $exam->questions()->create(['paper_number'=>(int)$paper,'question_number'=>$i+1,'question_type'=>$q['question_type'] ?? 'essay','content'=>$q['content'],'options'=>$q['options'] ?? null,'answer'=>$q['answer'] ?? '','points'=>$q['points'] ?? 1]);
                 $this->log($exam,'IMPORT',null,'DRAFT',$user);
                 return $exam;
