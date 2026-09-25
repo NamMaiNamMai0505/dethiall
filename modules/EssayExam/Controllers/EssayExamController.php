@@ -56,7 +56,7 @@ class EssayExamController extends Controller
     private function examList(Request $request, $query, bool $mine): View
     {
         $classes = ClassModel::with('specialization.trainingSystem')->orderBy('name')->get();
-        $specializations = Specialization::orderBy('name')->get();
+        $specializations = Specialization::with('trainingSystem')->orderBy('name')->get();
         $trainingSystems = TrainingSystem::orderBy('name')->get();
 
         $exams = $query->with(['subject.specialization', 'class.specialization.trainingSystem', 'questions'])
@@ -117,7 +117,7 @@ class EssayExamController extends Controller
             ->latest()
             ->get();
         $subjects = Subject::orderBy('name')->get(['id','code','name']);
-        $specializations = \Modules\Specialization\Models\Specialization::orderBy('name')->get(['id','name','code']);
+        $specializations = Specialization::with('trainingSystem')->orderBy('name')->get();
         return view('essay-exam::approval', compact('exams','lmsBanks','stage','subjects','specializations','examOptions'));
     }
 
@@ -374,7 +374,7 @@ class EssayExamController extends Controller
     public function draw(Request $request): View
     {
         $subjects = Subject::with('specialization')->active()->orderBy('name')->get();
-        $specializations = \Modules\Specialization\Models\Specialization::orderBy('name')->get(['id','code','name']);
+        $specializations = Specialization::with('trainingSystem')->orderBy('name')->get();
         $classes = ClassModel::with('specialization')->where('is_active',true)->whereNotNull('specialization_id')->orderBy('name')->get();
         $user = $request->user();
         $instructorId = $user?->instructor_id ?: Instructor::where('email',$user?->email)->value('id');
@@ -678,9 +678,14 @@ class EssayExamController extends Controller
         })->values();
         $classSpecializations = ClassModel::whereIn('id', $classes->pluck('class_id')->all())->pluck('specialization_id', 'id');
         $classes = $classes->map(fn ($item) => $item + ['specialization_id' => $classSpecializations[$item['class_id']] ?? null])->values();
-        $specializations = \Modules\Specialization\Models\Specialization::query()
+        $specializations = Specialization::query()
+            ->with('trainingSystem')
             ->whereIn('id', $subjects->pluck('specialization_id')->filter()->unique()->all())
-            ->orderBy('name')->get(['id','code','name']);
+            ->orderBy('name')->get();
+        $specializationOptions = $specializations->map(fn ($item) => [
+            'id' => $item->id,
+            'label' => $item->selection_label,
+        ])->values();
         $lessons = LmsLesson::query()->with('course:id,subject_id,class_id')->whereHas('course', function ($q) use ($subjectIds, $classesByInstructor) {
             $q->whereIn('subject_id', $subjectIds->all())->when($classesByInstructor->isNotEmpty(), fn ($x) => $x->whereIn('class_id', $classesByInstructor->pluck('id')->all()));
         })->orderBy('sort_order')->get(['id','lms_course_id','title']);
@@ -717,7 +722,7 @@ class EssayExamController extends Controller
         if ($academicYears->isEmpty()) {
             $academicYears = AcademicYear::query()->orderByDesc('start_year')->orderByDesc('id')->get(['id','code','name']);
         }
-        return view('essay-exam::create', compact('subjects','classes','specializations','lessons','lessonOptions','curriculumOptions','academicYears'));
+        return view('essay-exam::create', compact('subjects','classes','specializationOptions','lessons','lessonOptions','curriculumOptions','academicYears'));
     }
 
     private function curriculumMetadata(int $classId, int $subjectId, ?string $academicYear = null, ?string $semester = null): ?array

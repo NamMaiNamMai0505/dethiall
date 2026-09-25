@@ -154,7 +154,7 @@ if (importForm) {
   const subjectSelect = form?.querySelector('[name="import_subject_id"]');
   if (!form || !classSelect || !subjectSelect) return;
   const classData = @json($classes);
-  const specializations = @json($specializations);
+  const specializations = @json($specializationOptions);
   const specializationWrap = document.createElement('label');
   specializationWrap.className = 'block text-sm font-bold text-slate-800';
   specializationWrap.dataset.importField = 'import_specialization_id';
@@ -163,7 +163,7 @@ if (importForm) {
   specializationSelect.name = 'import_specialization_id';
   specializationSelect.required = true;
   specializationSelect.className = 'mt-1 w-full border rounded-lg px-3 py-2 bg-white';
-  specializationSelect.innerHTML = '<option value="">Chọn ngành đào tạo</option>' + specializations.map((item) => `<option value="${item.id}">${item.code} — ${item.name}</option>`).join('');
+  specializationSelect.replaceChildren(new Option('Chọn ngành đào tạo', ''), ...specializations.map((item) => new Option(item.label, item.id)));
   specializationWrap.appendChild(specializationSelect);
   classSelect.closest('label')?.insertAdjacentElement('beforebegin', specializationWrap);
   specializationSelect.dataset.nativeSelect = '1';
