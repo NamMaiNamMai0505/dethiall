@@ -64,7 +64,11 @@
         const subjectId = form.querySelector('[name="subject_id"]')?.value;
         const plan = plans.find(item => String(item.class_id) === String(classId) && String(item.subject_id) === String(subjectId));
         planInput.value = plan?.id || '';
-        dateInput.value = plan?.date || '';
+        if (typeof window.setDateInputValue === 'function') {
+            window.setDateInputValue(dateInput, plan?.date || '', false);
+        } else {
+            dateInput.value = plan?.date || '';
+        }
         timeInput.value = plan?.time || '';
         if (submit) submit.disabled = !plan;
     };
