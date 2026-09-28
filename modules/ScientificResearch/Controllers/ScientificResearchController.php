@@ -255,6 +255,7 @@ class ScientificResearchController extends Controller
             ->when(! PermissionCheck::can($request->user(), 'scientific-research.funding.edit'), fn (Builder $query) => $query->whereHas('registration', fn (Builder $registrationQuery) => $this->scopeRegistrationParticipation($registrationQuery, $request)));
         $dataFundingYears = (clone $visibleFundingQuery)
             ->get(['spent_on', 'created_at'])
+            ->toBase()
             ->map(fn ($item) => ($item->spent_on ?: $item->created_at)?->format('Y'))
             ->filter();
         $currentYear = (int) now()->format('Y');
