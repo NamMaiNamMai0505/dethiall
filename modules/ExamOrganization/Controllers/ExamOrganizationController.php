@@ -52,9 +52,10 @@ class ExamOrganizationController extends Controller
             'text' => trim(($item->code ? $item->code.' — ' : '').$item->name),
         ])->values();
         $conversionCategories = ConversionCategory::active()->orderBy('name')->get();
+        $gradingCategories = $conversionCategories->filter(fn ($category) => $category->unit === 'Bài' && $category->conversion_method === ConversionCategory::METHOD_COEFFICIENT && str_contains(mb_strtolower($category->name), 'chấm'))->values();
         $classrooms = Classroom::where('status', true)->orderBy('name')->get();
         $selectedPlanId = $r->integer('plan_id') ?: null;
-        $selectedPlan = $selectedPlanId ? ExamOrganizationPlan::with(['class','subject','proctors.instructor','proctors.conversionCategory'])->find($selectedPlanId) : null;
+        $selectedPlan = $selectedPlanId ? ExamOrganizationPlan::with(['class','subject','proctors.instructor','proctors.conversionCategory','graders.instructor','graders.conversionCategory'])->find($selectedPlanId) : null;
         $selectedLogs = $selectedPlanId ? ExamOrganizationLog::where('plan_id', $selectedPlanId)->latest()->get() : collect();
         $packetLogs = $selectedPlanId ? ExamOrganizationLog::where('plan_id', $selectedPlanId)->where('process_type', 'PACKET')->latest()->get() : collect();
         $packetCandidateCounts = $selectedPlanId ? ExamOrganizationCandidate::where('plan_id', $selectedPlanId)->whereNotNull('packet_number')->selectRaw('packet_number, COUNT(*) as total')->groupBy('packet_number')->pluck('total', 'packet_number') : collect();
@@ -74,7 +75,7 @@ class ExamOrganizationController extends Controller
         $rooms = $selectedPlanId ? ExamOrganizationCandidate::where('plan_id', $selectedPlanId)->whereNotNull('room_name')->distinct()->orderBy('room_name')->pluck('room_name') : collect();
         $packets = $selectedPlanId ? ExamOrganizationCandidate::where('plan_id', $selectedPlanId)->whereNotNull('packet_number')->distinct()->orderBy('packet_number')->pluck('packet_number') : collect();
         $registeredRooms = $selectedPlanId ? ExamOrganizationLog::where('plan_id', $selectedPlanId)->where('process_type', 'ROOM_REGISTER')->whereNotNull('method')->pluck('method')->unique()->values() : collect();
-        return view('exam-organization::index', compact('plans','allPlans','actions','instructors','trainingSystems','specializations','subjects','classes','examSpecializationOptions','examClassOptions','examSubjectOptions','classrooms','conversionCategories','section','selectedPlanId','selectedPlan','selectedLogs','packetLogs','packetCandidateCounts','allPacketLogs','allPacketCandidateCounts','allPacketCandidates','preExamLogs','preExamCandidates','allGradingLogs','allGradingCandidates','gradingMode','gradingRoom','gradingPacket','gradingClassId','gradingClass','candidates','rooms','packets','registeredRooms'));
+        return view('exam-organization::index', compact('plans','allPlans','actions','instructors','trainingSystems','specializations','subjects','classes','examSpecializationOptions','examClassOptions','examSubjectOptions','classrooms','conversionCategories','gradingCategories','section','selectedPlanId','selectedPlan','selectedLogs','packetLogs','packetCandidateCounts','allPacketLogs','allPacketCandidateCounts','allPacketCandidates','preExamLogs','preExamCandidates','allGradingLogs','allGradingCandidates','gradingMode','gradingRoom','gradingPacket','gradingClassId','gradingClass','candidates','rooms','packets','registeredRooms'));
     }
 
     public function store(Request $r)
@@ -125,6 +126,11 @@ class ExamOrganizationController extends Controller
             'proctors'=>'nullable|array',
             'proctors.*.instructor_id'=>'nullable|exists:instructors,id',
             'proctors.*.conversion_category_id'=>'nullable|exists:conversion_categories,id',
+            'grader_count'=>'nullable|integer|min:1|max:10',
+            'graders'=>'nullable|array',
+            'graders.*.instructor_id'=>'nullable|distinct|exists:instructors,id',
+            'graders.*.conversion_category_id'=>'nullable|exists:conversion_categories,id',
+            'graders.*.planned_papers'=>'required|integer|min:0',
         ]);
         $permission = ['ASSIGNMENT'=>'exam-organization.assignment','EXECUTION'=>'exam-organization.execution','GRADING'=>'exam-organization.grading'][$d['action_type']];
         abort_unless($r->user()->can($permission), 403, 'Bạn không có quyền thực hiện bước tổ chức thi này.');
@@ -148,6 +154,34 @@ class ExamOrganizationController extends Controller
             }
             return back()->with('success','Đã lưu phân công cán bộ coi thi.');
         }
+        if ($d['action_type'] === 'ASSIGNMENT' && ($d['role'] ?? null) === 'GRADER' && isset($d['graders'])) {
+            $graderCount = (int) ($d['grader_count'] ?? count($d['graders']));
+            $graders = array_slice($d['graders'], 0, $graderCount, true);
+            abort_unless(count($graders) === $graderCount, 422, 'Số giáo viên chấm thi chưa khớp phân công.');
+            foreach ($graders as $grader) {
+                abort_unless(filled($grader['instructor_id'] ?? null), 422, 'Hãy chọn đủ giáo viên chấm thi.');
+                $category = ConversionCategory::active()->find($grader['conversion_category_id'] ?? null);
+                abort_unless($category && $category->unit === 'Bài' && $category->conversion_method === ConversionCategory::METHOD_COEFFICIENT && str_contains(mb_strtolower($category->name), 'chấm'), 422, 'Hãy chọn danh mục chấm bài hợp lệ.');
+            }
+            DB::transaction(function () use ($d, $graders): void {
+                ExamOrganizationAction::where('plan_id', $d['plan_id'])->where('action_type', 'ASSIGNMENT')->where('role', 'GRADER')->delete();
+                foreach ($graders as $index => $grader) {
+                    ExamOrganizationAction::create([
+                        'plan_id' => $d['plan_id'],
+                        'action_type' => 'ASSIGNMENT',
+                        'name' => 'Chấm thi '.((int) $index + 1),
+                        'instructor_id' => $grader['instructor_id'],
+                        'conversion_category_id' => $grader['conversion_category_id'],
+                        'planned_papers' => (int) $grader['planned_papers'],
+                        'role' => 'GRADER',
+                        'note' => $d['note'] ?? null,
+                        'status' => 'CREATED',
+                    ]);
+                }
+            });
+            return back()->with('success','Đã lưu số bài và giờ chuẩn dự kiến cho giáo viên chấm thi.');
+        }
+        abort_unless(($d['role'] ?? null) !== 'GRADER', 422, 'Hãy chọn giáo viên, hệ số và số bài dự kiến để phân công.');
         $name = $d['name'] ?? 'Phân công giáo viên';
         foreach (($d['instructor_ids'] ?? [null]) as $id) {
             ExamOrganizationAction::create(['plan_id'=>$d['plan_id'],'action_type'=>$d['action_type'],'name'=>$name,'instructor_id'=>$id,'role'=>$d['role'] ?? null,'note'=>$d['note'] ?? null,'status'=>'CREATED']);

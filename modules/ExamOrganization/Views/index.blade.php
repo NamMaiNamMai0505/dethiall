@@ -146,6 +146,47 @@
     <textarea name="note" class="exam-input" placeholder="Ghi chú phân công">{{ old('note') }}</textarea>
     <button class="px-5 py-2 rounded-lg bg-blue-600 text-white font-bold">Lưu cán bộ coi thi</button>
 </form>
+@php($existingGraders = ($selectedPlan?->graders ?? collect())->values())
+@php($graderCount = (int) old('grader_count', max(1, $existingGraders->count() ?: 1)))
+<form method="POST" action="{{ route('exam-organization.actions.store') }}" class="exam-card mb-5 space-y-4" id="grader-assignment">
+    @csrf
+    <input type="hidden" name="plan_id" value="{{ $selectedPlanId }}">
+    <input type="hidden" name="action_type" value="ASSIGNMENT">
+    <input type="hidden" name="role" value="GRADER">
+    <h2 class="font-bold text-lg">Phân công giáo viên chấm thi</h2>
+    <p class="exam-help">Nhập số bài dự kiến cho từng giáo viên để xem giờ chuẩn ngay khi phân công. Giờ chuẩn dự kiến = số bài × hệ số chấm bài.</p>
+    <div class="max-w-xs"><label class="exam-label">Số lượng giáo viên chấm thi</label><input type="number" name="grader_count" min="1" max="10" value="{{ $graderCount }}" class="exam-input" data-assignment-count></div>
+    <div class="space-y-3" data-assignment-list>
+        @for($i = 0; $i < 10; $i++)
+            @php($existingGrader = $existingGraders->get($i))
+            @php($plannedPapers = old("graders.$i.planned_papers", $existingGrader?->planned_papers))
+            @php($selectedGradingCategory = $gradingCategories->firstWhere('id', old("graders.$i.conversion_category_id", $existingGrader?->conversion_category_id)))
+            @php($estimatedGradingHours = $plannedPapers !== null && $plannedPapers !== '' && $selectedGradingCategory ? $selectedGradingCategory->calculateHours((int) $plannedPapers) : null)
+            <div class="rounded-xl border border-slate-200 bg-slate-50 p-4" data-assignment-row="{{ $i + 1 }}">
+                <p class="mb-3 text-sm font-extrabold text-blue-800">Giáo viên chấm thi {{ $i + 1 }}</p>
+                <div class="grid items-end gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    <div><label class="exam-label">Giáo viên chấm thi</label><select name="graders[{{ $i }}][instructor_id]" class="exam-input" required>
+                        <option value="">Chọn giáo viên</option>
+                        @foreach($instructors as $instructor)
+                            <option value="{{ $instructor->id }}" @selected((int) old("graders.$i.instructor_id", $existingGrader?->instructor_id) === (int) $instructor->id)>{{ $instructor->code }} — {{ $instructor->name }}</option>
+                        @endforeach
+                    </select></div>
+                    <div><label class="exam-label">Hệ số chấm bài</label><select name="graders[{{ $i }}][conversion_category_id]" class="exam-input" data-grading-category required>
+                        <option value="">Chọn danh mục chấm bài</option>
+                        @foreach($gradingCategories as $category)
+                            <option value="{{ $category->id }}" data-coefficient="{{ $category->coefficient }}" @selected((int) old("graders.$i.conversion_category_id", $existingGrader?->conversion_category_id) === (int) $category->id)>{{ $category->code }} — {{ $category->name }} ({{ $category->conversion_value_text }}/bài)</option>
+                        @endforeach
+                    </select></div>
+                    <div><label class="exam-label">Số bài chấm dự kiến</label><input name="graders[{{ $i }}][planned_papers]" value="{{ $plannedPapers }}" type="number" min="0" step="1" class="exam-input" data-planned-papers required></div>
+                    <div class="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3" aria-live="polite"><div class="text-xs font-extrabold uppercase text-blue-700">Giờ chuẩn dự kiến</div><div class="mt-1 text-xl font-extrabold text-blue-700" data-grader-estimate>{{ $estimatedGradingHours === null ? '—' : number_format($estimatedGradingHours, 2, ',', '.').' giờ' }}</div></div>
+                </div>
+                <p class="mt-2 text-xs text-slate-500" data-grader-estimate-detail>{{ $estimatedGradingHours === null ? 'Nhập số bài và chọn hệ số để xem giờ chuẩn dự kiến.' : $plannedPapers.' bài × '.$selectedGradingCategory->conversion_value_text.' giờ/bài' }}</p>
+            </div>
+        @endfor
+    </div>
+    <textarea name="note" class="exam-input" placeholder="Ghi chú phân công">{{ old('note') }}</textarea>
+    <button class="px-5 py-2 rounded-lg bg-blue-600 text-white font-bold">Lưu giáo viên chấm thi</button>
+</form>
 @elseif($section === 'post_exam')
 <div class="exam-guide"><span class="text-xl">ℹ️</span><div><strong>Trình tự xử lý sau thi</strong><div class="mt-1 text-sm text-blue-900">Bạn cần <b>nhập SBD vắng/PQ</b>, sau đó <b>dồn túi</b> và cuối cùng <b>đánh phách</b>.</div></div></div>
 @endif
@@ -278,6 +319,47 @@ function bootExamProctorCount() {
     syncRows();
 }
 bootExamProctorCount();
+document.querySelectorAll('[data-assignment-count]').forEach(countInput => {
+    const form = countInput.closest('form');
+    const rows = Array.from(form.querySelectorAll('[data-assignment-row]'));
+    const numberFormat = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 2 });
+    const updateEstimates = () => {
+        rows.forEach(row => {
+            const papersValue = row.querySelector('[data-planned-papers]').value;
+            const coefficientValue = row.querySelector('[data-grading-category]').selectedOptions[0]?.dataset.coefficient;
+            const estimate = row.querySelector('[data-grader-estimate]');
+            const detail = row.querySelector('[data-grader-estimate-detail]');
+            if (papersValue === '' || coefficientValue === undefined || !Number.isInteger(Number(papersValue)) || Number(papersValue) < 0) {
+                estimate.textContent = '—';
+                detail.textContent = 'Nhập số bài và chọn hệ số để xem giờ chuẩn dự kiến.';
+                return;
+            }
+            const papers = Number(papersValue);
+            const coefficient = Number(coefficientValue);
+            estimate.textContent = `${numberFormat.format(Math.round(papers * coefficient * 100) / 100)} giờ`;
+            detail.textContent = `${papers} bài × ${numberFormat.format(coefficient)} giờ/bài`;
+        });
+    };
+    const syncRows = () => {
+        const count = Math.max(1, Math.min(rows.length, Number(countInput.value || 1)));
+        countInput.value = count;
+        rows.forEach((row, index) => {
+            const visible = index < count;
+            row.classList.toggle('hidden', !visible);
+            row.querySelectorAll('select, input').forEach(field => {
+                field.disabled = !visible;
+                if (field.tomselect) visible ? field.tomselect.enable() : field.tomselect.disable();
+            });
+        });
+        if (typeof window.initTomSelects === 'function') window.initTomSelects(form);
+        updateEstimates();
+    };
+    countInput.addEventListener('input', syncRows);
+    countInput.addEventListener('change', syncRows);
+    form.addEventListener('input', updateEstimates);
+    form.addEventListener('change', updateEstimates);
+    syncRows();
+});
 const category=document.getElementById('exam-category'), custom=document.getElementById('custom-exam-wrap'), customInput=document.querySelector('[name="custom_exam_name"]');
 document.querySelectorAll('.exam-plan-picker .exam-label').forEach(label => { label.textContent = 'Chọn kế hoạch thi'; });
 if(category){ const sync=()=>{custom?.classList.toggle('hidden',category.value!=='OTHER'); if(customInput)customInput.required=category.value==='OTHER';}; category.addEventListener('change',sync); sync(); }
